@@ -19,7 +19,8 @@
     "movie_1101383",
     "movie_49051",
     "movie_57158",
-    "test_db_migration_check"
+    "test_db_migration_check",
+    "movie_1786888796026"
   ],
   "titles": [
     "ذا لاست أوف أس",
@@ -58,6 +59,10 @@
     "الهوبيت : خراب التنين سموج",
     "the hobbit: the desolation of smaug",
     "???? ?????? ???????",
-    "db migration test movie"
+    "db migration test movie",
+    "الهوبيت : رحلة غير متوقعة",
+    "the hobbit: an unexpected journey",
+    "فيلم اختبار التكرار الفريد جدا",
+    "very unique duplicate test film xyz123"
   ]
 }

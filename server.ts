@@ -15,6 +15,7 @@ import {
   loadDeletedIdsFromDb,
   replaceDeletedIdsInDb,
 } from "./db.ts";
+import * as tmdb from "./tmdb.ts";
 
 dotenv.config();
 
@@ -132,11 +133,14 @@ interface Movie {
   originalSubtitlesUrlEn?: string;
   trailerUrl?: string;
   language?: string;
+  country?: string;
+  metadataCheckedAt?: string;
   isPublished?: boolean;
   collectionId?: string;
   collectionNameAr?: string;
   collectionNameEn?: string;
   partNumber?: string | number;
+  collectionCheckedAt?: string;
   director?: string;
   writer?: string;
   directorPhotoUrl?: string;
@@ -2050,88 +2054,31 @@ function getValidSubtitleUrl(url: string | undefined | null, movieId: string, la
 }
 
 async function fetchOfficialTMDBImages(title: string): Promise<{ poster: string | null; backdrop: string | null } | null> {
+  // Was an HTML-scraper (search page -> detail page -> regex image hashes); now a thin
+  // wrapper over the official API via tmdb.ts. Same name/signature/return shape so its
+  // one call site (verifyAndCorrectImageUrl below) needs no changes.
   try {
-    // Clean title for searching: remove years (e.g. 2008), parentheses, and special symbols
-    let cleanTitle = title.replace(/\((?:19|20)\d{2}\)/g, "").replace(/[()]/g, "").replace(/[-:_]/g, " ").trim();
-    
-    console.log(`[TMDB Scraper] Searching TMDB for title: "${cleanTitle}" (originally "${title}")`);
-    const searchUrl = `https://www.themoviedb.org/search?query=${encodeURIComponent(cleanTitle)}`;
-    const searchRes = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
-      },
-      signal: AbortSignal.timeout(4000)
-    });
-    if (!searchRes.ok) {
-      console.warn(`[TMDB Scraper] Search failed with status: ${searchRes.status}`);
+    const cleanTitle = title.replace(/\((?:19|20)\d{2}\)/g, "").replace(/[()]/g, "").replace(/[-:_]/g, " ").trim();
+    console.log(`[TMDB] Searching for title: "${cleanTitle}" (originally "${title}")`);
+
+    const hit = await tmdb.searchMulti(cleanTitle);
+    if (!hit) {
+      console.log(`[TMDB] No search match for: "${cleanTitle}"`);
       return null;
     }
-    const searchHtml = await searchRes.text();
-    
-    // Extract first movie or series result path (e.g. /movie/155-the-dark-knight or /tv/1399-game-of-thrones)
-    const linkMatch = searchHtml.match(/href="(\/(movie|tv)\/\d+[^"]*)"/);
-    if (!linkMatch) {
-      console.log(`[TMDB Scraper] No detail page found in search results for: "${cleanTitle}"`);
+
+    const details = hit.mediaType === "movie" ? await tmdb.getMovieDetails(hit.id) : await tmdb.getTvDetails(hit.id);
+    if (!details) return null;
+
+    const poster = tmdb.posterUrl(details.poster_path);
+    const backdrop = tmdb.backdropUrl(details.backdrop_path);
+    if (!poster && !backdrop) {
+      console.log(`[TMDB] No poster/backdrop available for: "${cleanTitle}"`);
       return null;
     }
-    
-    const detailUrl = `https://www.themoviedb.org${linkMatch[1]}`;
-    console.log(`[TMDB Scraper] Scraping detail page: ${detailUrl}`);
-    
-    const detailRes = await fetch(detailUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
-      },
-      signal: AbortSignal.timeout(4000)
-    });
-    if (!detailRes.ok) {
-      console.warn(`[TMDB Scraper] Detail page fetch failed with status: ${detailRes.status}`);
-      return null;
-    }
-    const detailHtml = await detailRes.text();
-    
-    // Parse all image paths using robust pattern matching
-    const pathRegex = /\/t\/p\/([a-zA-Z0-9_()%-]+)\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/gi;
-    let match;
-    const posters: string[] = [];
-    const backdrops: string[] = [];
-    
-    while ((match = pathRegex.exec(detailHtml)) !== null) {
-      const folder = match[1].toLowerCase();
-      const filename = match[2];
-      
-      // Categorize into backdrops (landscape) and posters (portrait)
-      if (folder.includes("1920_and_h800") || folder.includes("1000_and_h563") || folder.includes("1280") || folder.includes("1920") || folder.includes("original")) {
-        backdrops.push(filename);
-      } else if (folder.includes("w500") || folder.includes("300_and_h450") || folder.includes("600_and_h900") || folder.includes("188_and_h282")) {
-        posters.push(filename);
-      }
-    }
-    
-    // Fallback: collect any image hashes regardless of category
-    const allHashes: string[] = [];
-    const allHashesRegex = /\/t\/p\/[a-zA-Z0-9_()%-]+\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/gi;
-    let anyMatch;
-    while ((anyMatch = allHashesRegex.exec(detailHtml)) !== null) {
-      allHashes.push(anyMatch[1]);
-    }
-    
-    const posterHash = posters[0] || allHashes[0] || null;
-    const backdropHash = backdrops[0] || allHashes[2] || allHashes[1] || posterHash;
-    
-    if (!posterHash && !backdropHash) {
-      console.log(`[TMDB Scraper] No valid image hashes extracted from: ${detailUrl}`);
-      return null;
-    }
-    
-    return {
-      poster: posterHash ? `https://image.tmdb.org/t/p/w780/${posterHash}` : null,
-      backdrop: backdropHash ? `https://image.tmdb.org/t/p/original/${backdropHash}` : null
-    };
+    return { poster, backdrop };
   } catch (err) {
-    console.error("[TMDB Scraper] Scraping pipeline failed:", err);
+    console.error("[TMDB] Image lookup failed:", err);
     return null;
   }
 }
@@ -2166,62 +2113,20 @@ The response must be exclusively the raw URL string of the image, with no markdo
 }
 
 async function fetchOfficialTMDBPersonPhoto(name: string): Promise<string | null> {
+  // Was an HTML-scraper (person search page -> detail page -> regex profile-image hash);
+  // now a thin wrapper over the official API. Same name/signature/fallback-to-Gemini tail
+  // so its one call site (verifyAndCorrectPersonPhotoUrl below) needs no changes.
   try {
     const cleanName = name.replace(/[()]/g, "").trim();
-    console.log(`[TMDB Person Scraper] Searching TMDB for person: "${cleanName}"`);
-    const searchUrl = `https://www.themoviedb.org/search/person?query=${encodeURIComponent(cleanName)}`;
-    
-    const searchRes = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
-      },
-      signal: AbortSignal.timeout(4000)
-    });
-    
-    if (searchRes.ok) {
-      const searchHtml = await searchRes.text();
-      const personLinkMatch = searchHtml.match(/href="(\/person\/\d+[^"]*)"/);
-      if (personLinkMatch) {
-        const detailUrl = `https://www.themoviedb.org${personLinkMatch[1]}`;
-        console.log(`[TMDB Person Scraper] Scraping detail page: ${detailUrl}`);
-        const detailRes = await fetch(detailUrl, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-          },
-          signal: AbortSignal.timeout(4000)
-        });
-        
-        if (detailRes.ok) {
-          const detailHtml = await detailRes.text();
-          const profileRegex = /\/t\/p\/([a-zA-Z0-9_()%-]+)\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/gi;
-          let match;
-          const profiles: string[] = [];
-          while ((match = profileRegex.exec(detailHtml)) !== null) {
-            const folder = match[1].toLowerCase();
-            const filename = match[2];
-            if (folder.includes("bestv2") || folder.includes("h632") || folder.includes("w300") || folder.includes("w185")) {
-              profiles.push(filename);
-            }
-          }
-          
-          if (profiles.length > 0) {
-            return `https://image.tmdb.org/t/p/w300/${profiles[0]}`;
-          }
-          
-          const fallbackRegex = /\/t\/p\/[a-zA-Z0-9_()%-]+\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/i;
-          const fallbackMatch = detailHtml.match(fallbackRegex);
-          if (fallbackMatch) {
-            return `https://image.tmdb.org/t/p/w300/${fallbackMatch[1]}`;
-          }
-        }
-      } else {
-        console.log(`[TMDB Person Scraper] No person page found in search results for: "${cleanName}"`);
-      }
+    const hit = await tmdb.searchPerson(cleanName);
+    const photoUrl = hit?.profilePath ? tmdb.profileUrl(hit.profilePath) : null;
+    if (photoUrl) {
+      console.log(`[TMDB] Found official photo for "${cleanName}": ${photoUrl}`);
+      return photoUrl;
     }
+    console.log(`[TMDB] No person photo found via API for: "${cleanName}"`);
   } catch (err) {
-    console.error(`[TMDB Person Scraper] Failed to fetch photo for "${name}":`, err);
+    console.error(`[TMDB] Failed to fetch photo for "${name}":`, err);
   }
 
   // Fallback to Search Grounded Gemini lookup
@@ -2276,97 +2181,54 @@ async function verifyAndCorrectPersonPhotoUrl(name: string, url: string | undefi
 }
 
 
+// Real per-episode runtime (minutes) from TMDB -> the same "1h 20m"/"45m" string shape
+// already used for movie durations elsewhere in this file, understood by the frontend's
+// formatMovieDuration. Falls back to the historical "45m" placeholder only when TMDB
+// genuinely has no runtime yet (common for very recently aired episodes) -- now the
+// exception instead of every single episode.
+function formatTmdbRuntime(minutes: number | null | undefined): string {
+  if (!minutes || minutes <= 0) return "45m";
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h}h ${String(m).padStart(2, "0")}m`;
+}
+
 async function fetchTMDBSeriesSeasons(tmdbId: string, seriesTitleEn: string, seriesTitleAr: string, backdrop: string, defaultRating: number): Promise<any[]> {
+  // Was an HTML-scraper (season page regex, both en-US and ar) with episode duration
+  // always hardcoded "45m"; now backed by the official /tv/{id}/season/{n} endpoint, which
+  // also gives real per-episode runtime. Same name/signature/return shape as before, so
+  // callers need no changes.
   try {
     const seasons: any[] = [];
-    console.log(`[TMDB Season Scraper] Fetching season listings for TV ID: ${tmdbId}`);
-    
+    console.log(`[TMDB] Fetching season listings for TV ID: ${tmdbId}`);
+
     for (let sNum = 1; sNum <= 5; sNum++) {
-      const seasonPath = `/tv/${tmdbId}/season/${sNum}`;
-      const enSeasonUrl = `https://www.themoviedb.org${seasonPath}?language=en-US`;
-      const arSeasonUrl = `https://www.themoviedb.org${seasonPath}?language=ar`;
-      
-      const enRes = await fetch(enSeasonUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9"
-        },
-        signal: AbortSignal.timeout(5000)
-      }).catch(() => null);
+      const enSeason = await tmdb.getTvSeasonDetails(tmdbId, sNum, "en-US");
+      if (!enSeason) break; // 404 = no more seasons, same "stop on first miss" behavior as before
 
-      if (!enRes || !enRes.ok) {
-        if (sNum === 1) break;
-        break;
-      }
-
-      const enHtml = await enRes.text();
-
-      let arHtml = "";
-      const arRes = await fetch(arSeasonUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-          "Accept-Language": "ar,en-US;q=0.9"
-        },
-        signal: AbortSignal.timeout(5000)
-      }).catch(() => null);
-      if (arRes && arRes.ok) {
-        arHtml = await arRes.text();
-      }
+      const arSeason = await tmdb.getTvSeasonDetails(tmdbId, sNum, "ar");
 
       const seasonId = `s${sNum}`;
-      const episodes: any[] = [];
+      const episodes = (enSeason.episodes ?? []).map((ep: any) => {
+        const epNum = ep.episode_number;
+        const arEp = arSeason?.episodes?.find((e: any) => e.episode_number === epNum);
 
-      const epCardRegex = /<div class="card episode_card">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
-      let epMatch;
-      let epIndex = 0;
-      
-      while ((epMatch = epCardRegex.exec(enHtml)) !== null) {
-        epIndex++;
-        const block = epMatch[1];
-        
-        const epNumMatch = block.match(/episode_number">(\d+)<\/span>/i) || block.match(/href="\/tv\/\d+\/season\/\d+\/episode\/(\d+)"/i);
-        const epNum = epNumMatch ? parseInt(epNumMatch[1], 10) : epIndex;
+        const epTitleEn = ep.name?.trim() || `Episode ${epNum}`;
+        const epTitleAr = (arEp?.name?.trim() && /[\u0600-\u06FF]/.test(arEp.name)) ? arEp.name.trim() : `الحلقة ${epNum}`;
 
-        const epTitleMatch = block.match(/href="\/tv\/\d+\/season\/\d+\/episode\/\d+"[^>]*>([^<]+)<\/a>/i);
-        const epTitleEn = epTitleMatch ? epTitleMatch[1].trim() : `Episode ${epNum}`;
+        const epStoryEn = ep.overview?.trim() || `Details and plot of Episode ${epNum} of Season ${sNum} of ${seriesTitleEn}.`;
+        const epStoryAr = (arEp?.overview?.trim() && /[\u0600-\u06FF]/.test(arEp.overview)) ? arEp.overview.trim() : `تفاصيل وأحداث الحلقة ${epNum} من مسلسل ${seriesTitleAr}.`;
 
-        let epTitleAr = `الحلقة ${epNum}`;
-        if (arHtml) {
-          const arTitleRegex = new RegExp(`href="\\/tv\\/\\d+\\/season\\/${sNum}\\/episode\\/${epNum}"[^>]*>([^<]+)<\\/a>`, "i");
-          const arTitleMatch = arHtml.match(arTitleRegex);
-          if (arTitleMatch && arTitleMatch[1].trim() && /[\u0600-\u06FF]/.test(arTitleMatch[1])) {
-            epTitleAr = arTitleMatch[1].trim();
-          }
-        }
-
-        const thumbMatch = block.match(/src="([^"]*\/t\/p\/[^"]+)"/i) || block.match(/data-src="([^"]*\/t\/p\/[^"]+)"/i);
-        let thumbnail = thumbMatch ? thumbMatch[1] : backdrop;
-        if (thumbnail && thumbnail.startsWith("/")) {
-          thumbnail = `https://image.tmdb.org${thumbnail}`;
-        }
-
-        const storyEnMatch = block.match(/<div class="overview"[^>]*>([\s\S]*?)<\/div>/i) || block.match(/<p>([\s\S]*?)<\/p>/i);
-        const epStoryEn = storyEnMatch ? storyEnMatch[1].replace(/<[^>]*>/g, "").trim() : `Details and plot of Episode ${epNum} of Season ${sNum} of ${seriesTitleEn}.`;
-        
-        let epStoryAr = `تفاصيل وأحداث الحلقة ${epNum} من مسلسل ${seriesTitleAr}.`;
-        if (arHtml) {
-          const arOverviewRegex = new RegExp(`episode_${epNum}[\\s\\S]*?<div class="overview"[^>]*>([\\s\\S]*?)<\\/div>`, "i");
-          const arOverviewMatch = arHtml.match(arOverviewRegex);
-          if (arOverviewMatch) {
-            const parsedArStory = arOverviewMatch[1].replace(/<[^>]*>/g, "").trim();
-            if (parsedArStory && /[\u0600-\u06FF]/.test(parsedArStory)) {
-              epStoryAr = parsedArStory;
-            }
-          }
-        }
-
+        const thumbnail = tmdb.tmdbImageUrl(ep.still_path, "w300") || backdrop;
         const epId = `s${sNum}_e${epNum}_${tmdbId}`;
-        episodes.push({
+
+        return {
           id: epId,
           number: epNum,
           titleAr: epTitleAr,
           titleEn: epTitleEn,
-          duration: "45m",
+          duration: formatTmdbRuntime(ep.runtime),
           storyAr: epStoryAr,
           storyEn: epStoryEn,
           thumbnail,
@@ -2376,51 +2238,21 @@ async function fetchTMDBSeriesSeasons(tmdbId: string, seriesTitleEn: string, ser
           subtitlesUrlAr: `/api/subtitles?movieId=series_${tmdbId}&seasonId=${seasonId}&episodeId=${epId}&lang=ar`,
           subtitlesUrlEn: `/api/subtitles?movieId=series_${tmdbId}&seasonId=${seasonId}&episodeId=${epId}&lang=en`,
           rating: defaultRating
-        });
-      }
-
-      // Extract Season specific Poster, Year, and Overview
-      let seasonPoster = "";
-      const posterMatch = enHtml.match(/<img[^>]+class="poster"[^>]+src="([^"]*\/t\/p\/[^"]+)"/i) ||
-                          enHtml.match(/<img[^>]+src="([^"]*\/t\/p\/w500\/[^"]+)"/i) ||
-                          enHtml.match(/src="([^"]*\/t\/p\/[a-zA-Z0-9_%-]+\/[^"]+)"/i);
-      if (posterMatch) {
-        seasonPoster = posterMatch[1].startsWith("/") ? `https://image.tmdb.org${posterMatch[1]}` : posterMatch[1];
-      }
-
-      let seasonYear = new Date().getFullYear();
-      const sznYearMatch = enHtml.match(/\((19\d{2}|20\d{2})\)/) || enHtml.match(/class="release_date">.*?(19\d{2}|20\d{2})/s);
-      if (sznYearMatch) {
-        seasonYear = parseInt(sznYearMatch[1], 10);
-      }
-
-      let seasonStoryEn = `Season ${sNum} of ${seriesTitleEn}`;
-      const sznOverviewEnMatch = enHtml.match(/<div class="overview"[^>]*>([\s\S]*?)<\/div>/i);
-      if (sznOverviewEnMatch) {
-        const parsed = sznOverviewEnMatch[1].replace(/<[^>]*>/g, "").trim();
-        if (parsed) seasonStoryEn = parsed;
-      }
-
-      let seasonStoryAr = `تفاصيل وأحداث الموسم ${sNum} من مسلسل ${seriesTitleAr}.`;
-      if (arHtml) {
-        const sznOverviewArMatch = arHtml.match(/<div class="overview"[^>]*>([\s\S]*?)<\/div>/i);
-        if (sznOverviewArMatch) {
-          const parsed = sznOverviewArMatch[1].replace(/<[^>]*>/g, "").trim();
-          if (parsed && /[\u0600-\u06FF]/.test(parsed)) seasonStoryAr = parsed;
-        }
-      }
+        };
+      });
 
       if (episodes.length > 0) {
+        const seasonYear = enSeason.air_date ? parseInt(String(enSeason.air_date).slice(0, 4), 10) : new Date().getFullYear();
         seasons.push({
           id: seasonId,
           number: sNum,
-          titleAr: `الموسم ${sNum}`,
-          titleEn: `Season ${sNum}`,
-          poster: seasonPoster || backdrop,
+          titleAr: (arSeason?.name?.trim() && /[\u0600-\u06FF]/.test(arSeason.name)) ? arSeason.name.trim() : `الموسم ${sNum}`,
+          titleEn: enSeason.name?.trim() || `Season ${sNum}`,
+          poster: tmdb.posterUrl(enSeason.poster_path) || backdrop,
           backdrop: backdrop,
           year: seasonYear,
-          storyAr: seasonStoryAr,
-          storyEn: seasonStoryEn,
+          storyAr: (arSeason?.overview?.trim() && /[\u0600-\u06FF]/.test(arSeason.overview)) ? arSeason.overview.trim() : `تفاصيل وأحداث الموسم ${sNum} من مسلسل ${seriesTitleAr}.`,
+          storyEn: enSeason.overview?.trim() || `Season ${sNum} of ${seriesTitleEn}`,
           episodes
         });
       }
@@ -2428,211 +2260,99 @@ async function fetchTMDBSeriesSeasons(tmdbId: string, seriesTitleEn: string, ser
 
     return seasons;
   } catch (err: any) {
-    console.warn(`[TMDB Season Scraper] Failed to fetch seasons for TV ${tmdbId}:`, err.message);
+    console.warn(`[TMDB] Failed to fetch seasons for TV ${tmdbId}:`, err.message);
     return [];
   }
 }
 
+// ISO 3166-1 alpha-2 -> Arabic country name, for production country display (matches how
+// genres are stored: an already-Arabic value, with the frontend translating it for English
+// UI mode). Shared between scrapeTMDBMetadata (fresh imports) and backfillLanguageAndCountry
+// (existing catalog entries imported before this field existed).
+const TMDB_COUNTRY_MAP: { [key: string]: string } = {
+  "US": "الولايات المتحدة", "GB": "المملكة المتحدة", "FR": "فرنسا", "DE": "ألمانيا",
+  "IT": "إيطاليا", "ES": "إسبانيا", "KR": "كوريا الجنوبية", "JP": "اليابان", "CN": "الصين",
+  "HK": "هونغ كونغ", "TW": "تايوان", "IN": "الهند", "TR": "تركيا", "EG": "مصر",
+  "SA": "السعودية", "AE": "الإمارات", "LB": "لبنان", "IQ": "العراق", "SY": "سوريا",
+  "JO": "الأردن", "KW": "الكويت", "QA": "قطر", "BH": "البحرين", "OM": "عمان",
+  "MA": "المغرب", "TN": "تونس", "DZ": "الجزائر", "LY": "ليبيا", "SD": "السودان",
+  "PS": "فلسطين", "YE": "اليمن", "CA": "كندا", "AU": "أستراليا", "NZ": "نيوزيلندا",
+  "RU": "روسيا", "BR": "البرازيل", "MX": "المكسيك", "AR": "الأرجنتين", "SE": "السويد",
+  "NO": "النرويج", "DK": "الدنمارك", "FI": "فنلندا", "NL": "هولندا", "BE": "بلجيكا",
+  "CH": "سويسرا", "AT": "النمسا", "IE": "أيرلندا", "PT": "البرتغال", "GR": "اليونان",
+  "PL": "بولندا", "TH": "تايلاند", "ID": "إندونيسيا", "PH": "الفلبين", "MY": "ماليزيا",
+  "SG": "سنغافورة", "IL": "إسرائيل", "IR": "إيران", "PK": "باكستان", "NG": "نيجيريا",
+  "ZA": "جنوب أفريقيا"
+};
+
 async function scrapeTMDBMetadata(searchQueryOrUrl: string, lang: string = "ar"): Promise<any> {
+  // Was an HTML-scraper (search page -> detail page regex for title/overview/images/cast/
+  // crew/runtime/certification); now backed by the official /movie or /tv details endpoint
+  // (one call, append_to_response pulls in credits+images+videos+translations+ratings).
+  // Same name/signature/return shape as before, so its ~6 call sites need no changes.
   try {
     let query = searchQueryOrUrl.trim();
-    let isUrl = query.startsWith("http://") || query.startsWith("https://");
-    let tmdbPath = "";
+    const isUrl = query.startsWith("http://") || query.startsWith("https://");
+
+    let tmdbId: number | string | null = null;
+    let mediaType: "movie" | "tv" | null = null;
 
     const directPathMatch = query.match(/\/?(movie|tv)\/(\d+)/i);
     if (directPathMatch) {
-      tmdbPath = `/${directPathMatch[1].toLowerCase()}/${directPathMatch[2]}`;
-    } else if (isUrl) {
-      if (query.includes("imdb.com")) {
-        const match = query.match(/title\/(tt\d+)/);
-        if (match) {
-          query = match[1];
-        }
-      } else if (query.includes("cinemana")) {
-        const match = query.match(/(?:movie|show|video)\/(\d+)/);
-        if (match) {
-          query = `Cinemana ${match[1]}`;
+      mediaType = directPathMatch[1].toLowerCase() as "movie" | "tv";
+      tmdbId = directPathMatch[2];
+    } else if (isUrl && query.includes("imdb.com")) {
+      const imdbMatch = query.match(/title\/(tt\d+)/);
+      if (imdbMatch) {
+        const hit = await tmdb.findByImdbId(imdbMatch[1]);
+        if (hit) {
+          tmdbId = hit.id;
+          mediaType = hit.mediaType;
         }
       }
     }
 
-    if (!tmdbPath) {
-      let cleanTitle = query
+    if (!tmdbId) {
+      const cleanTitle = query
         .replace(/\((?:19|20)\d{2}\)/g, "")
         .replace(/[()]/g, "")
         .replace(/[-:_]/g, " ")
         .trim();
 
-      console.log(`[TMDB Scraper Fallback] Searching TMDB for: "${cleanTitle}"`);
-      const searchUrl = `https://www.themoviedb.org/search?query=${encodeURIComponent(cleanTitle)}`;
-      const searchRes = await fetch(searchUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9"
-        },
-        signal: AbortSignal.timeout(6000)
-      });
-      if (!searchRes.ok) {
-        throw new Error(`Search failed with status: ${searchRes.status}`);
-      }
-      const searchHtml = await searchRes.text();
-      const linkMatch = searchHtml.match(/href="(?:\/en|\/ar)?\/(movie|tv)\/(\d+)[^"]*"/i) || searchHtml.match(/\/(movie|tv)\/(\d+)/i);
-      if (!linkMatch) {
+      console.log(`[TMDB] Searching for: "${cleanTitle}"`);
+      const hit = await tmdb.searchMulti(cleanTitle);
+      if (!hit) {
         throw new Error(`No movie or show found on TMDB for: "${cleanTitle}"`);
       }
-      tmdbPath = `/${linkMatch[1]}/${linkMatch[2]}`;
+      tmdbId = hit.id;
+      mediaType = hit.mediaType;
     }
 
-    const type = tmdbPath.includes("/tv/") ? "series" : "movie";
-    const tmdbId = tmdbPath.split("/")[2];
+    const type = mediaType === "tv" ? "series" : "movie";
+    console.log(`[TMDB] Fetching details for ${mediaType} ${tmdbId} (Type: ${type})`);
 
-    console.log(`[TMDB Scraper Fallback] Scraping details for TMDB Path: ${tmdbPath} (Type: ${type}, ID: ${tmdbId})`);
-
-    const enUrl = `https://www.themoviedb.org${tmdbPath}?language=en-US`;
-    const enRes = await fetch(enUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
-      },
-      signal: AbortSignal.timeout(6000)
-    });
-    if (!enRes.ok) {
-      throw new Error(`Failed to fetch English TMDB details. Status: ${enRes.status}`);
+    const details = mediaType === "tv" ? await tmdb.getTvDetails(tmdbId) : await tmdb.getMovieDetails(tmdbId);
+    if (!details) {
+      throw new Error(`Failed to fetch TMDB details for ${mediaType} ${tmdbId}`);
     }
-    const enHtml = await enRes.text();
+    const arDetails: any = mediaType === "tv" ? await tmdb.getTvArabic(tmdbId) : await tmdb.getMovieArabic(tmdbId);
 
-    const arUrl = `https://www.themoviedb.org${tmdbPath}?language=ar`;
-    const arRes = await fetch(arUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        "Accept-Language": "ar,en-US;q=0.9"
-      },
-      signal: AbortSignal.timeout(6000)
-    });
-    let arHtml = "";
-    if (arRes.ok) {
-      arHtml = await arRes.text();
-    }
+    const titleEn = (mediaType === "tv" ? details.name : details.title)?.trim() || "Untitled Movie";
+    const storyEn = details.overview?.trim() || "";
 
-    let titleEn = "";
-    const ogTitleMatch = enHtml.match(/<meta property="og:title" content="([^"]+)">/i);
-    if (ogTitleMatch) {
-      titleEn = ogTitleMatch[1].replace(/\((?:19|20)\d{2}\)/g, "").replace(/TV Series.*/gi, "").trim();
-    } else {
-      const titleTagMatch = enHtml.match(/<title>([^<]+)<\/title>/i);
-      if (titleTagMatch) {
-        titleEn = titleTagMatch[1].split("—")[0].trim();
-      }
-    }
-    if (!titleEn) titleEn = "Untitled Movie";
+    const arTitleRaw = (mediaType === "tv" ? arDetails?.name : arDetails?.title)?.trim();
+    const titleAr = (arTitleRaw && /[؀-ۿ]/.test(arTitleRaw)) ? arTitleRaw : titleEn;
 
-    let storyEn = "";
-    const ogDescMatch = enHtml.match(/<meta property="og:description" content="([^"]+)">/i);
-    if (ogDescMatch) {
-      storyEn = ogDescMatch[1].trim();
-    } else {
-      const descTagMatch = enHtml.match(/<meta name="description" content="([^"]+)">/i);
-      if (descTagMatch) {
-        storyEn = descTagMatch[1].trim();
-      }
-    }
+    const arOverviewRaw = arDetails?.overview?.trim();
+    const storyAr = (arOverviewRaw && /[؀-ۿ]/.test(arOverviewRaw))
+      ? arOverviewRaw
+      : `تدور أحداث فيلم ${titleAr || titleEn} حول قصة مثيرة مليئة بالأحداث والتشويق والمغامرة.`;
 
-    let year = new Date().getFullYear();
-    const yearMatch = enHtml.match(/\((19\d{2}|20\d{2})\)/);
-    if (yearMatch) {
-      year = parseInt(yearMatch[1], 10);
-    }
+    const releaseDate = mediaType === "tv" ? details.first_air_date : details.release_date;
+    const year = releaseDate ? parseInt(String(releaseDate).slice(0, 4), 10) : new Date().getFullYear();
 
-    let rating = 8.0;
-    const scoreMatch = enHtml.match(/user_score_chart[^>]*data-percent="([0-9.]+)"/i);
-    if (scoreMatch) {
-      rating = parseFloat((parseFloat(scoreMatch[1]) / 10).toFixed(1));
-    } else {
-      const ratingMatch = enHtml.match(/"vote_average":\s*([0-9.]+)/);
-      if (ratingMatch) {
-        rating = parseFloat(parseFloat(ratingMatch[1]).toFixed(1));
-      }
-    }
+    const rating = details.vote_average ? parseFloat(details.vote_average.toFixed(1)) : 8.0;
 
-    let titleAr = titleEn;
-    if (arHtml) {
-      const ogTitleArMatch = arHtml.match(/<meta property="og:title" content="([^"]+)">/i);
-      if (ogTitleArMatch) {
-        const potentialAr = ogTitleArMatch[1].replace(/\((?:19|20)\d{2}\)/g, "").replace(/TV Series.*/gi, "").trim();
-        if (potentialAr && /[\u0600-\u06FF]/.test(potentialAr)) {
-          titleAr = potentialAr;
-        }
-      }
-    }
-
-    let storyAr = "";
-    if (arHtml) {
-      const ogDescArMatch = arHtml.match(/<meta property="og:description" content="([^"]+)">/i);
-      if (ogDescArMatch) {
-        const potentialStoryAr = ogDescArMatch[1].trim();
-        if (potentialStoryAr && /[\u0600-\u06FF]/.test(potentialStoryAr)) {
-          storyAr = potentialStoryAr;
-        }
-      }
-    }
-    if (!storyAr) storyAr = `تدور أحداث فيلم ${titleAr || titleEn} حول قصة مثيرة مليئة بالأحداث والتشويق والمغامرة.`;
-
-    const pathRegex = /\/t\/p\/([a-zA-Z0-9_()%-]+)\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/gi;
-    let imgMatch;
-    const posters: string[] = [];
-    const backdrops: string[] = [];
-    
-    while ((imgMatch = pathRegex.exec(enHtml)) !== null) {
-      const folder = imgMatch[1].toLowerCase();
-      const filename = imgMatch[2];
-      
-      if (folder.includes("1920_and_h800") || folder.includes("1000_and_h563") || folder.includes("1280") || folder.includes("1920") || folder.includes("original")) {
-        backdrops.push(filename);
-      } else if (folder.includes("w500") || folder.includes("300_and_h450") || folder.includes("600_and_h900") || folder.includes("188_and_h282")) {
-        posters.push(filename);
-      }
-    }
-
-    const allHashes: string[] = [];
-    const allHashesRegex = /\/t\/p\/[a-zA-Z0-9_()%-]+\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/gi;
-    let anyMatch;
-    while ((anyMatch = allHashesRegex.exec(enHtml)) !== null) {
-      allHashes.push(anyMatch[1]);
-    }
-
-    const posterHash = posters[0] || allHashes[0] || null;
-    const backdropHash = backdrops[0] || allHashes[2] || allHashes[1] || posterHash;
-
-    let logoUrl = "";
-    const logoPngMatches = Array.from(enHtml.matchAll(/\/t\/p\/[a-zA-Z0-9_()%-]+\/([a-zA-Z0-9_\-]+\.png)/gi));
-    if (logoPngMatches.length > 0) {
-      logoUrl = `https://image.tmdb.org/t/p/w500/${logoPngMatches[0][1]}`;
-    } else {
-      try {
-        const logosRes = await fetch(`https://www.themoviedb.org${tmdbPath}/images/logos`, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-          },
-          signal: AbortSignal.timeout(4000)
-        });
-        if (logosRes.ok) {
-          const logosHtml = await logosRes.text();
-          const logoMatch = logosHtml.match(/\/t\/p\/[a-zA-Z0-9_()%-]+\/([a-zA-Z0-9_\-]+\.png)/i);
-          if (logoMatch) {
-            logoUrl = `https://image.tmdb.org/t/p/w500/${logoMatch[1]}`;
-          }
-        }
-      } catch (lErr) {
-        // ignore logo fetch fallback
-      }
-    }
-
-    const rawPoster = posterHash ? `https://image.tmdb.org/t/p/w780/${posterHash}` : "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1920&q=95&auto=format&fit=crop";
-    const rawBackdrop = backdropHash ? `https://image.tmdb.org/t/p/original/${backdropHash}` : "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=3840&q=95&auto=format&fit=crop";
-
-    const genres: string[] = [];
-    const genreMatches = enHtml.matchAll(/href="\/genre\/[^"]*">([^<]+)</gi);
     const genreMap: { [key: string]: string } = {
       "Action": "أكشن",
       "Adventure": "مغامرة",
@@ -2650,107 +2370,77 @@ async function scrapeTMDBMetadata(searchQueryOrUrl: string, lang: string = "ar")
       "Romance": "دراما",
       "Animation": "عائلي"
     };
-
-    for (const gMatch of genreMatches) {
-      const gName = gMatch[1].trim();
-      if (genreMap[gName] && !genres.includes(genreMap[gName])) {
-        genres.push(genreMap[gName]);
-      }
+    const genres: string[] = [];
+    for (const g of details.genres ?? []) {
+      const mapped = genreMap[g.name];
+      if (mapped && !genres.includes(mapped)) genres.push(mapped);
     }
     if (genres.length === 0) genres.push("دراما", "تشويق");
 
-    const actors: string[] = [];
-    const castMatches = enHtml.matchAll(/href="\/person\/\d+[^"]*">([^<]+)</gi);
-    for (const cMatch of castMatches) {
-      const actName = cMatch[1].trim();
-      if (actName && !actors.includes(actName) && !actName.includes("TMDB") && actors.length < 5) {
-        actors.push(actName);
-      }
-    }
-    if (actors.length === 0) actors.push("Leo Woodall", "Dustin Hoffman", "Jean Smart", "Lior Raz");
+    // Real original language from TMDB - replaces the old title-text-guessing heuristic
+    // (hardcoded exact-title checks, "كوري"/"anime" substring matching) that the healing
+    // cycle previously relied on for movies with no authoritative source.
+    const language = details.original_language === "ar" ? "ar" : details.original_language === "en" ? "en" : "other";
 
-    // EXTRACT DETAILED CREW (Director / Writer / Creator) FROM TMDB
+    // Production country - stored as Arabic (matching how genres are stored) via the shared
+    // ISO 3166-1 lookup, since TMDB's country name is only ever returned in English/the
+    // requested language. Falls back to the raw English name for countries outside that list.
+    const prodCountries: any[] = details.production_countries ?? [];
+    const country = prodCountries.length > 0 ? (TMDB_COUNTRY_MAP[prodCountries[0].iso_3166_1] || prodCountries[0].name) : "";
+
+    const rawPoster = tmdb.posterUrl(details.poster_path) || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1920&q=95&auto=format&fit=crop";
+    const rawBackdrop = tmdb.backdropUrl(details.backdrop_path) || "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=3840&q=95&auto=format&fit=crop";
+
+    const logoPath = details.images?.logos?.[0]?.file_path;
+    const logoUrl = tmdb.logoUrl(logoPath) || "";
+
+    const crew: any[] = details.credits?.crew ?? [];
+    const cast: any[] = details.credits?.cast ?? [];
+
     let director = "";
-    let writer = "";
     let directorPhotoUrl = "";
+    if (mediaType === "tv" && details.created_by && details.created_by.length > 0) {
+      director = details.created_by[0].name;
+      directorPhotoUrl = tmdb.profileUrl(details.created_by[0].profile_path) || "";
+    } else {
+      const dirCrew = crew.find((c) => {
+        const job = (c.job || "").toLowerCase();
+        return job === "director" || job === "creator";
+      });
+      if (dirCrew) {
+        director = dirCrew.name;
+        directorPhotoUrl = tmdb.profileUrl(dirCrew.profile_path) || "";
+      }
+    }
+
+    let writer = "";
     let writerPhotoUrl = "";
-
-    const crewCardRegex = /<li class="profile">([\s\S]*?)<\/li>/gi;
-    let crewBlockMatch;
-    while ((crewBlockMatch = crewCardRegex.exec(enHtml)) !== null) {
-      const block = crewBlockMatch[1];
-      const nameMatch = block.match(/href="\/person\/\d+[^"]*">([^<]+)</i);
-      const roleMatch = block.match(/<p class="character">([^<]+)<\/p>/i) || block.match(/<p class="character"[^>]*>([\s\S]*?)<\/p>/i);
-      if (nameMatch && roleMatch) {
-        const name = nameMatch[1].trim();
-        const role = roleMatch[1].replace(/<[^>]*>/g, "").trim().toLowerCase();
-        
-        const srcMatch = block.match(/src="([^"]*\/t\/p\/[^"]+)"/i) || block.match(/data-src="([^"]*\/t\/p\/[^"]+)"/i);
-        let photoUrl = srcMatch ? srcMatch[1] : "";
-        if (photoUrl && photoUrl.startsWith("/")) {
-          photoUrl = `https://image.tmdb.org${photoUrl}`;
-        }
-
-        if ((role.includes("director") || role.includes("creator")) && !director) {
-          director = name;
-          directorPhotoUrl = photoUrl;
-        }
-        if ((role.includes("writer") || role.includes("screenplay") || role.includes("story") || role.includes("author")) && !writer) {
-          writer = name;
-          writerPhotoUrl = photoUrl;
-        }
-      }
+    const writerCrew = crew.find((c) => {
+      const job = (c.job || "").toLowerCase();
+      return job.includes("writer") || job.includes("screenplay") || job.includes("story") || job.includes("author");
+    });
+    if (writerCrew) {
+      writer = writerCrew.name;
+      writerPhotoUrl = tmdb.profileUrl(writerCrew.profile_path) || "";
     }
 
-    if (!director) {
-      const dirMatch = enHtml.match(/Director<\/p>[^<]*<p>[^<]*<a href="\/person\/\d+[^"]*">([^<]+)/i) || 
-                       enHtml.match(/<a href="\/person\/\d+[^"]*">([^<]+)<\/a>[^<]*<\/p>[^<]*<p class="character">Director/i) ||
-                       enHtml.match(/Director:.*?<a href="\/person\/\d+[^"]*">([^<]+)/i) ||
-                       enHtml.match(/Created by.*?<a href="\/person\/\d+[^"]*">([^<]+)/i);
-      if (dirMatch) {
-        director = dirMatch[1].trim();
-      }
-    }
-    if (!writer) {
-      const wrMatch = enHtml.match(/Writer<\/p>[^<]*<p>[^<]*<a href="\/person\/\d+[^"]*">([^<]+)/i) ||
-                      enHtml.match(/<a href="\/person\/\d+[^"]*">([^<]+)<\/a>[^<]*<\/p>[^<]*<p class="character">Writer/i) ||
-                      enHtml.match(/Writer:.*?<a href="\/person\/\d+[^"]*">([^<]+)/i);
-      if (wrMatch) {
-        writer = wrMatch[1].trim();
-      }
-    }
-
-    // If the director/writer genuinely couldn't be found on the page, leave the fields empty
-    // rather than attributing the film to a random cast member or a hardcoded placeholder name -
-    // an unknown director is honest; a wrong one is actively misleading.
+    // If the director/writer genuinely couldn't be found, leave the fields empty rather than
+    // attributing the work to a random cast member - an unknown director is honest; a wrong
+    // one is actively misleading.
     directorPhotoUrl = director ? await verifyAndCorrectPersonPhotoUrl(director, directorPhotoUrl) : "";
     writerPhotoUrl = writer ? await verifyAndCorrectPersonPhotoUrl(writer, writerPhotoUrl) : "";
 
-    // EXTRACT DETAILED CAST MEMBERS FROM TMDB WITH PHOTO HEADSHOTS
     const castMembers: any[] = [];
-    const castCardRegex = /<li class="card">([\s\S]*?)<\/li>/gi;
-    let cardMatch;
-    while ((cardMatch = castCardRegex.exec(enHtml)) !== null && castMembers.length < 12) {
-      const block = cardMatch[1];
-      const nameMatch = block.match(/href="\/person\/\d+[^"]*">([^<]+)</i);
-      if (nameMatch) {
-        const name = nameMatch[1].trim();
-        if (name && !name.includes("TMDB")) {
-          const characterMatch = block.match(/<p class="character"[^>]*>([\s\S]*?)<\/p>/i) || block.match(/<p class="character">([^<]+)/i);
-          let role = characterMatch ? characterMatch[1].replace(/<[^>]*>/g, "").trim() : (lang === "ar" ? "ممثل" : "Actor");
-          
-          const srcMatch = block.match(/src="([^"]*\/t\/p\/[^"]+)"/i) || block.match(/data-src="([^"]*\/t\/p\/[^"]+)"/i);
-          let photoUrl = srcMatch ? srcMatch[1] : "";
-          if (photoUrl && photoUrl.startsWith("/")) {
-            photoUrl = `https://image.tmdb.org${photoUrl}`;
-          }
-          
-          photoUrl = await verifyAndCorrectPersonPhotoUrl(name, photoUrl);
-          castMembers.push({ name, role, photoUrl });
-        }
-      }
+    for (const c of cast.slice(0, 12)) {
+      const name = c.name?.trim();
+      if (!name || name.includes("TMDB")) continue;
+      const role = c.character?.trim() || (lang === "ar" ? "ممثل" : "Actor");
+      const photoUrl = await verifyAndCorrectPersonPhotoUrl(name, tmdb.profileUrl(c.profile_path) || "");
+      castMembers.push({ name, role, photoUrl });
     }
 
+    const actors: string[] = castMembers.slice(0, 5).map((c) => c.name);
+    if (actors.length === 0) actors.push("Leo Woodall", "Dustin Hoffman", "Jean Smart", "Lior Raz");
     if (castMembers.length === 0) {
       for (const actorName of actors) {
         const photoUrl = await verifyAndCorrectPersonPhotoUrl(actorName, "");
@@ -2762,25 +2452,25 @@ async function scrapeTMDBMetadata(searchQueryOrUrl: string, lang: string = "ar")
       }
     }
 
-    let duration = type === "series" ? "45m" : "1h 50m";
-    const runtimeMatch = enHtml.match(/<span class="runtime">([^<]+)<\/span>/i) || 
-                         enHtml.match(/class="runtime"[^>]*>([\s\S]*?)<\/span>/i) ||
-                         enHtml.match(/runtime.*?(\d+h\s*\d+m|\d+h|\d+m)/i);
-    if (runtimeMatch) {
-      const val = runtimeMatch[1].replace(/[\n\r]/g, "").trim();
-      if (val) duration = val;
-    }
+    const duration = mediaType === "tv"
+      ? "45m"
+      : (details.runtime ? formatTmdbRuntime(details.runtime) : "1h 50m");
 
     let ageRating = "";
-    const certMatch = enHtml.match(/<span class="certification">([^<]+)<\/span>/i) || 
-                      enHtml.match(/class="certification"[^>]*>([\s\S]*?)<\/span>/i) ||
-                      enHtml.match(/class="certification">([^<]+)/i);
-    if (certMatch) {
-      ageRating = certMatch[1].replace(/[\n\r]/g, "").trim();
+    if (mediaType === "tv") {
+      const usRating = details.content_ratings?.results?.find((r: any) => r.iso_3166_1 === "US");
+      if (usRating?.rating) ageRating = usRating.rating;
+    } else {
+      const usRelease = details.release_dates?.results?.find((r: any) => r.iso_3166_1 === "US");
+      const cert = usRelease?.release_dates?.find((rd: any) => rd.certification)?.certification;
+      if (cert) ageRating = cert;
     }
-    if (!ageRating) {
-      ageRating = rating >= 8.5 ? "TV-MA" : "PG-13";
-    }
+    if (!ageRating) ageRating = rating >= 8.5 ? "TV-MA" : "PG-13";
+
+    const trailer = (details.videos?.results ?? []).find((v: any) => v.site === "YouTube" && v.type === "Trailer");
+    const trailerUrl = trailer
+      ? `https://www.youtube.com/watch?v=${trailer.key}`
+      : `https://www.youtube.com/results?search_query=${encodeURIComponent(titleEn + " trailer")}`;
 
     const poster = await verifyAndCorrectImageUrl(rawPoster, titleEn, false, genres);
     const backdrop = await verifyAndCorrectImageUrl(rawBackdrop, titleEn, true, genres);
@@ -2797,6 +2487,8 @@ async function scrapeTMDBMetadata(searchQueryOrUrl: string, lang: string = "ar")
       duration,
       ageRating,
       genres,
+      language,
+      country,
       poster,
       backdrop,
       logoUrl,
@@ -2809,7 +2501,7 @@ async function scrapeTMDBMetadata(searchQueryOrUrl: string, lang: string = "ar")
       writerPhotoUrl,
       castMembers,
       quality: "Full HD",
-      trailerUrl: `https://www.youtube.com/results?search_query=${encodeURIComponent(titleEn + " trailer")}`,
+      trailerUrl,
       servers: [
         { name: "سيرفر البث الرئيسي", url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" }
       ],
@@ -2819,7 +2511,7 @@ async function scrapeTMDBMetadata(searchQueryOrUrl: string, lang: string = "ar")
 
     // Auto-locate real subtitles for the imported work
     try {
-      console.log(`[TMDB Scraper] Searching live subtitles for: "${titleEn}" (${year})...`);
+      console.log(`[TMDB] Searching live subtitles for: "${titleEn}" (${year})...`);
       const subs = await findSubtitlesForWork(titleEn, year, type);
       if (subs && (subs.ar || subs.en)) {
         if (subs.ar) {
@@ -2828,14 +2520,14 @@ async function scrapeTMDBMetadata(searchQueryOrUrl: string, lang: string = "ar")
         if (subs.en) {
           result.originalSubtitlesUrlEn = subs.en;
         }
-        console.log(`[TMDB Scraper] Found & attached subtitles: AR=${subs.ar || "none"}, EN=${subs.en || "none"}`);
+        console.log(`[TMDB] Found & attached subtitles: AR=${subs.ar || "none"}, EN=${subs.en || "none"}`);
       }
     } catch (subErr: any) {
-      console.warn("[TMDB Scraper] Subtitle auto-lookup failed during TMDB import:", subErr.message || subErr);
+      console.warn("[TMDB] Subtitle auto-lookup failed during import:", subErr.message || subErr);
     }
 
     if (type === "series") {
-      const scrapedSeasons = await fetchTMDBSeriesSeasons(tmdbId, titleEn, titleAr, backdrop, rating);
+      const scrapedSeasons = await fetchTMDBSeriesSeasons(String(tmdbId), titleEn, titleAr, backdrop, rating);
       if (scrapedSeasons && scrapedSeasons.length > 0) {
         result.seasons = scrapedSeasons;
       } else {
@@ -2879,9 +2571,9 @@ async function scrapeTMDBMetadata(searchQueryOrUrl: string, lang: string = "ar")
     return result;
   } catch (err: any) {
     if (err.message && err.message.includes("429")) {
-      console.warn("[TMDB Comprehensive Scraper] Scraper rate-limited by target (429). Falling back gracefully.");
+      console.warn("[TMDB] Rate-limited (429). Falling back gracefully.");
     } else {
-      console.error("[TMDB Comprehensive Scraper] Comprehensive scraping failed:", err.message);
+      console.error("[TMDB] Comprehensive metadata fetch failed:", err.message);
     }
     return null;
   }
@@ -3149,33 +2841,8 @@ async function healAndSyncDatabase() {
       movieHealed = true;
     }
 
-    // D. Validate and correct language
-    if (!movie.language) {
-      const titleAr = movie.titleAr || "";
-      const titleEn = (movie.titleEn || "").toLowerCase();
-      
-      const isAr = 
-        titleAr === "آسف على الإزعاج" || 
-        titleAr === "مرجان أحمد مرجان" || 
-        titleAr === "الحشاشين" || 
-        (movie.actors && movie.actors.some(a => /[\u0600-\u06FF]/.test(a) && !/^[a-zA-Z\s]+$/.test(a))) ||
-        movie.id === "series_2";
-        
-      if (isAr) {
-        movie.language = "ar";
-      } else if (
-        titleAr.includes("كوري") || 
-        titleEn.includes("squid game") || 
-        titleEn.includes("demon slayer") || 
-        titleAr.includes("أنمي") || 
-        (movie.genres && movie.genres.includes("رسوم متحركة") && !titleAr.includes("سبايدرمان"))
-      ) {
-        movie.language = "other";
-      } else {
-        movie.language = "en";
-      }
-      movieHealed = true;
-    }
+    // D. Language is now backfilled from real TMDB data by backfillLanguageAndCountry
+    // (below, in the same healing cycle) rather than guessed from hardcoded title-text checks.
 
     // E. Verify and correct filmmaker & cast photos
     if (movie.director) {
@@ -3213,7 +2880,19 @@ async function healAndSyncDatabase() {
 
   await Promise.all(healPromises);
 
-  // Auto-assign franchises & collections
+  // Backfill real language + production country for entries missing them (pre-TMDB-migration
+  // imports, or the old title-text-guessing heuristic below never having a country to set).
+  const metadataBackfilled = await backfillLanguageAndCountry(moviesDatabase);
+  if (metadataBackfilled) {
+    changed = true;
+  }
+
+  // Auto-assign franchises & collections: real TMDB collection data first, then the
+  // regex-based fallback table for movies TMDB has no official collection for.
+  const tmdbCollectionsAssigned = await assignTmdbMovieCollections(moviesDatabase);
+  if (tmdbCollectionsAssigned) {
+    changed = true;
+  }
   const collectionsAssigned = autoAssignMovieCollections(moviesDatabase);
   if (collectionsAssigned) {
     changed = true;
@@ -3523,7 +3202,7 @@ async function deduplicateDatabase(): Promise<boolean> {
 
     if (db) {
       for (const id of removedIds) {
-        await db.collection("movies").doc(id).delete().catch(err => console.error(`[Firestore Delete Duplicate Error] ${id}:`, err));
+        await deleteMovieFromFirestore(id);
       }
     }
     saveMoviesDatabase();
@@ -3554,6 +3233,93 @@ function extractExactPartNumber(titleAr: string, titleEn: string, defaultPart = 
   if (/\b(part\s*1|chapter\s*1|\b1\b|i|الجزء\s*الأول|الجزء\s*الاول)\b/i.test(text)) return 1;
 
   return defaultPart;
+}
+
+// Backfills real language + production country for catalog entries imported before these
+// fields existed (or via a non-TMDB path, where the old code guessed language from hardcoded
+// title-text checks and never set a country at all). Reuses a single details call for both
+// fields since neither needs a separate request. Capped per healing cycle like
+// assignTmdbMovieCollections to avoid bursting the rate limiter; metadataCheckedAt marks a
+// title as looked-at either way so it isn't re-queried every cycle.
+async function backfillLanguageAndCountry(movies: Movie[]): Promise<boolean> {
+  let changed = false;
+  const candidates = movies.filter(m => !m.metadataCheckedAt && (!m.language || !m.country)).slice(0, 15);
+
+  for (const movie of candidates) {
+    const numericId = movie.id.replace(/\D/g, "");
+    movie.metadataCheckedAt = new Date().toISOString();
+    if (!numericId) { changed = true; continue; }
+
+    try {
+      const details = movie.type === "series" ? await tmdb.getTvDetails(numericId) : await tmdb.getMovieDetails(numericId);
+      if (!details) { changed = true; continue; }
+
+      if (!movie.language) {
+        movie.language = details.original_language === "ar" ? "ar" : details.original_language === "en" ? "en" : "other";
+      }
+      if (!movie.country) {
+        const prodCountries: any[] = details.production_countries ?? [];
+        if (prodCountries.length > 0) {
+          movie.country = TMDB_COUNTRY_MAP[prodCountries[0].iso_3166_1] || prodCountries[0].name;
+        }
+      }
+      changed = true;
+    } catch (err: any) {
+      console.warn(`[TMDB] Language/country backfill failed for movie ${movie.id}:`, err.message || err);
+    }
+  }
+
+  return changed;
+}
+
+// Real TMDB collection data (belongs_to_collection), as the primary source of franchise
+// grouping — the regex-based autoAssignMovieCollections below stays as a fallback for movies
+// TMDB has no official collection for (common for independent/regional films). Capped at 15
+// movies per healing cycle to avoid bursting the TMDB rate limiter across the whole catalog
+// at once; collectionCheckedAt marks a movie as looked-at (member or not) so standalone
+// films aren't re-queried on every subsequent cycle.
+async function assignTmdbMovieCollections(movies: Movie[]): Promise<boolean> {
+  let changed = false;
+  const candidates = movies.filter(m => m.type === "movie" && !m.collectionId?.startsWith("tmdb_") && !m.collectionCheckedAt).slice(0, 15);
+
+  for (const movie of candidates) {
+    const numericId = movie.id.replace(/\D/g, "");
+    movie.collectionCheckedAt = new Date().toISOString();
+    if (!numericId) { changed = true; continue; }
+
+    try {
+      const details = await tmdb.getMovieDetails(numericId);
+      const belongsTo = details?.belongs_to_collection;
+      if (belongsTo) {
+        const [enCollection, arCollection] = await Promise.all([
+          tmdb.getCollectionDetails(belongsTo.id, "en-US"),
+          tmdb.getCollectionDetails(belongsTo.id, "ar")
+        ]);
+        const nameEn = enCollection?.name || belongsTo.name;
+        const nameAr = (arCollection?.name && /[؀-ۿ]/.test(arCollection.name)) ? arCollection.name : `سلسلة ${nameEn}`;
+
+        let partNumber: number | undefined;
+        const parts = enCollection?.parts as any[] | undefined;
+        if (parts && parts.length > 0) {
+          const sorted = [...parts].sort((a, b) => String(a.release_date || "9999").localeCompare(String(b.release_date || "9999")));
+          const idx = sorted.findIndex(p => String(p.id) === String(numericId));
+          if (idx !== -1) partNumber = idx + 1;
+        }
+
+        movie.collectionId = `tmdb_${belongsTo.id}`;
+        movie.collectionNameEn = nameEn;
+        movie.collectionNameAr = nameAr;
+        movie.partNumber = partNumber ?? movie.partNumber ?? 1;
+        changed = true;
+      } else {
+        changed = true;
+      }
+    } catch (err: any) {
+      console.warn(`[TMDB] Collection lookup failed for movie ${movie.id}:`, err.message || err);
+    }
+  }
+
+  return changed;
 }
 
 function autoAssignMovieCollections(movies: Movie[]): boolean {
@@ -4013,6 +3779,7 @@ function autoAssignMovieCollections(movies: Movie[]): boolean {
 
   // Assign predefined franchises
   movies.forEach(movie => {
+    if (movie.collectionId?.startsWith("tmdb_")) return; // real TMDB collection data wins over this regex-based fallback table
     for (const f of franchises) {
       if (f.match(movie)) {
         const targetPart = f.getPart(movie);
@@ -4259,7 +4026,7 @@ async function unifySeriesAndSeasons(): Promise<boolean> {
 
     if (db) {
       for (const id of removedIds) {
-        await db.collection("movies").doc(id).delete().catch(err => console.error(`[Firestore Delete Merged Season] ${id}:`, err));
+        await deleteMovieFromFirestore(id);
       }
     }
     saveMoviesDatabase();
@@ -4349,47 +4116,6 @@ async function purgeFakeMovies() {
   }
 }
 
-async function fetchRealTMDBTrendingPaths(): Promise<string[]> {
-  const tmdbPaths: string[] = [];
-  const urls = [
-    "https://www.themoviedb.org/movie",
-    "https://www.themoviedb.org/movie/top-rated",
-    "https://www.themoviedb.org/movie/now-playing",
-    "https://www.themoviedb.org/movie/upcoming",
-    "https://www.themoviedb.org/tv",
-    "https://www.themoviedb.org/tv/top-rated",
-    "https://www.themoviedb.org/tv/on-the-air",
-    "https://www.themoviedb.org/trending"
-  ];
-
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9"
-        },
-        signal: AbortSignal.timeout(6000)
-      });
-      if (res.ok) {
-        const html = await res.text();
-        const matches = html.matchAll(/href="(\/(movie|tv)\/(\d+)[^"]*)"/gi);
-        for (const m of matches) {
-          const path = `/${m[2]}/${m[3]}`;
-          if (!tmdbPaths.includes(path)) {
-            tmdbPaths.push(path);
-          }
-        }
-      }
-    } catch (err: any) {
-      console.warn(`[TMDB Live Scraper] Failed to fetch ${url}:`, err.message || err);
-    }
-  }
-
-  console.log(`[TMDB Live Scraper] Discovered ${tmdbPaths.length} real TMDB movie/TV show paths from live TMDB directory.`);
-  return tmdbPaths;
-}
-
 // 3. Core Importer Function
 async function importBatchFromCinemanaAndTMDB(options: { limit?: number; forceQuery?: string }) {
   const limit = options.limit || 15;
@@ -4417,8 +4143,8 @@ async function importBatchFromCinemanaAndTMDB(options: { limit?: number; forceQu
       candidates.push(options.forceQuery);
     }
 
-    // Fetch 100+ real live TMDB paths from TMDB directory pages
-    const realTMDBPaths = await fetchRealTMDBTrendingPaths().catch(() => []);
+    // Fetch real trending/top-rated/now-playing/upcoming paths straight from the TMDB API
+    const realTMDBPaths = await tmdb.getTrendingPaths().catch(() => []);
     candidates.push(...realTMDBPaths);
 
     // Combine with extensive trending blockbusters, TV shows, and classic franchises
@@ -5076,6 +4802,20 @@ app.post("/api/admin/movies", async (req, res) => {
     }
     
     if (!movie.type) movie.type = "movie";
+
+    // Reject importing/adding a movie that already exists (matched by TMDB id or by
+    // normalized Arabic/English title) - series are handled separately below since a
+    // second season submission for the same series is a legitimate merge, not a duplicate.
+    if (movie.type === "movie") {
+      const existingMovie = findDuplicateMovieOrSeries(movie.titleAr, movie.titleEn, movie.id, "movie");
+      if (existingMovie) {
+        console.log(`[Admin Movie Add] Rejected duplicate import: "${movie.titleAr || movie.titleEn}" already exists as ${existingMovie.id}`);
+        return res.status(409).json({
+          error: `هذا الفلم موجود بالفعل في قاعدة البيانات ("${existingMovie.titleAr}")، لا يمكن استيراده أو إضافته مرة أخرى.`,
+          existingMovieId: existingMovie.id
+        });
+      }
+    }
 
     // Generate unique ID if not provided
     if (!movie.id) {

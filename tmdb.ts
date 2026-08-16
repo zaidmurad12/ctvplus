@@ -123,6 +123,15 @@ export async function searchPerson(name: string): Promise<{ id: number; profileP
   return { id: hit.id, profilePath: hit.profile_path ?? null };
 }
 
+export async function findByImdbId(imdbId: string): Promise<TmdbSearchHit | null> {
+  const data = await tmdbGet<{ movie_results: any[]; tv_results: any[] }>(`/find/${imdbId}`, { external_source: "imdb_id" });
+  const movieHit = data?.movie_results?.[0];
+  if (movieHit) return { id: movieHit.id, mediaType: "movie" };
+  const tvHit = data?.tv_results?.[0];
+  if (tvHit) return { id: tvHit.id, mediaType: "tv" };
+  return null;
+}
+
 // --- Movie / TV details ---------------------------------------------------------------
 // One call each, with append_to_response pulling in credits/images/translations/release
 // info that the old scraper needed 2-3 separate page fetches to assemble.

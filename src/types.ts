@@ -53,6 +53,7 @@ export interface Movie {
   ageRating?: string;
   trailerUrl?: string;
   language?: string;
+  country?: string;
   isPublished?: boolean;
   collectionId?: string;
   collectionNameAr?: string;

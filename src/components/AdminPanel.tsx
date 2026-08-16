@@ -402,6 +402,7 @@ export default function AdminPanel({ lang, onClose, onRefreshData, onLogout, adm
     trailerUrl: "",
     seasons: [] as Season[],
     language: "en",
+    country: "",
     collectionId: "",
     collectionNameAr: "",
     collectionNameEn: "",
@@ -1480,6 +1481,7 @@ export default function AdminPanel({ lang, onClose, onRefreshData, onLogout, adm
           trailerUrl: item.trailerUrl || "",
           seasons: item.seasons || [],
           language: item.language || "en",
+          country: item.country || "",
           collectionId: item.collectionId || "",
           collectionNameAr: item.collectionNameAr || "",
           collectionNameEn: item.collectionNameEn || "",
@@ -1781,6 +1783,7 @@ export default function AdminPanel({ lang, onClose, onRefreshData, onLogout, adm
       trailerUrl: movie.trailerUrl || "",
       seasons: movie.seasons || [],
       language: movie.language || "en",
+      country: movie.country || "",
       collectionId: movie.collectionId || "",
       collectionNameAr: movie.collectionNameAr || "",
       collectionNameEn: movie.collectionNameEn || "",
@@ -1823,6 +1826,7 @@ export default function AdminPanel({ lang, onClose, onRefreshData, onLogout, adm
       trailerUrl: "",
       seasons: [] as Season[],
       language: "en",
+      country: "",
       collectionId: "",
       collectionNameAr: "",
       collectionNameEn: "",
@@ -3020,6 +3024,20 @@ export default function AdminPanel({ lang, onClose, onRefreshData, onLogout, adm
                       <option value="en" className="bg-black text-white font-bold">{lang === "ar" ? "اللغة الإنجليزية" : "English"}</option>
                       <option value="other" className="bg-black text-white font-bold">{lang === "ar" ? "لغة أخرى (كوري، ياباني...)" : "Other Language"}</option>
                     </select>
+                  </div>
+
+                  {/* Production Country */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-400 block">
+                      {lang === "ar" ? "بلد الإنتاج" : "Production Country"}
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.country}
+                      onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+                      placeholder={lang === "ar" ? "مثال: الولايات المتحدة" : "e.g. United States"}
+                      className="w-full bg-black border border-white/20 rounded-lg px-3 py-2 text-xs text-white font-bold focus:outline-none focus:border-white focus:ring-1 focus:ring-white transition-all"
+                    />
                   </div>
 
                   {/* Collection / Franchise Info */}

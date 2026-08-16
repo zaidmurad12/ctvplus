@@ -165,6 +165,26 @@ const genreMap: Record<string, { ar: string; en: string }> = {
   "عام": { ar: "عام", en: "General" },
 };
 
+// Mirrors genreMap's pattern: movie.country is stored already-Arabic (server-side ISO
+// 3166-1 lookup), this only supplies the English label for the EN UI.
+const countryMap: Record<string, string> = {
+  "الولايات المتحدة": "United States", "المملكة المتحدة": "United Kingdom", "فرنسا": "France",
+  "ألمانيا": "Germany", "إيطاليا": "Italy", "إسبانيا": "Spain", "كوريا الجنوبية": "South Korea",
+  "اليابان": "Japan", "الصين": "China", "هونغ كونغ": "Hong Kong", "تايوان": "Taiwan",
+  "الهند": "India", "تركيا": "Turkey", "مصر": "Egypt", "السعودية": "Saudi Arabia",
+  "الإمارات": "UAE", "لبنان": "Lebanon", "العراق": "Iraq", "سوريا": "Syria", "الأردن": "Jordan",
+  "الكويت": "Kuwait", "قطر": "Qatar", "البحرين": "Bahrain", "عمان": "Oman", "المغرب": "Morocco",
+  "تونس": "Tunisia", "الجزائر": "Algeria", "ليبيا": "Libya", "السودان": "Sudan",
+  "فلسطين": "Palestine", "اليمن": "Yemen", "كندا": "Canada", "أستراليا": "Australia",
+  "نيوزيلندا": "New Zealand", "روسيا": "Russia", "البرازيل": "Brazil", "المكسيك": "Mexico",
+  "الأرجنتين": "Argentina", "السويد": "Sweden", "النرويج": "Norway", "الدنمارك": "Denmark",
+  "فنلندا": "Finland", "هولندا": "Netherlands", "بلجيكا": "Belgium", "سويسرا": "Switzerland",
+  "النمسا": "Austria", "أيرلندا": "Ireland", "البرتغال": "Portugal", "اليونان": "Greece",
+  "بولندا": "Poland", "تايلاند": "Thailand", "إندونيسيا": "Indonesia", "الفلبين": "Philippines",
+  "ماليزيا": "Malaysia", "سنغافورة": "Singapore", "إسرائيل": "Israel", "إيران": "Iran",
+  "باكستان": "Pakistan", "نيجيريا": "Nigeria", "جنوب أفريقيا": "South Africa",
+};
+
 const ALL_GENRES = [
   "الكل",
   "أكشن",
@@ -5719,6 +5739,14 @@ export default function App() {
                       <span className="font-extrabold text-zinc-200">
                         {(selectedMovie.genres || []).map(g => lang === "ar" ? g : (genreMap[g]?.en || g)).join(" • ")}
                       </span>
+                      {selectedMovie.country && (
+                        <>
+                          <span className="text-zinc-700">•</span>
+                          <span className="font-extrabold text-zinc-200">
+                            {lang === "ar" ? selectedMovie.country : (countryMap[selectedMovie.country] || selectedMovie.country)}
+                          </span>
+                        </>
+                      )}
                       <span className="text-zinc-700">•</span>
                       <span className="border border-zinc-700 bg-zinc-950/60 px-1.5 py-0.5 rounded text-[9px] font-black font-disp text-white">
                         {selectedMovie.ageRating || (selectedMovie.rating >= 8.5 ? "TV-MA" : "PG-13")}

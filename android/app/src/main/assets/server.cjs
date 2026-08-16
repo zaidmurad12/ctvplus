@@ -151,6 +151,145 @@ function replaceDeletedIdsInDb(ids, titles) {
   tx();
 }
 
+// tmdb.ts
+var TMDB_BASE = "https://api.themoviedb.org/3";
+var TMDB_IMG_BASE = "https://image.tmdb.org/t/p";
+function apiKey() {
+  const key = process.env.TMDB_API_KEY;
+  if (!key) throw new Error("TMDB_API_KEY is not configured in .env");
+  return key;
+}
+var tmdbQuotaExceededUntil = 0;
+var requestChain = Promise.resolve();
+var lastRequestAt = 0;
+var MIN_GAP_MS = 120;
+async function throttledFetch(url) {
+  if (Date.now() < tmdbQuotaExceededUntil) {
+    throw new Error("TMDB rate limit cooldown active");
+  }
+  const gate = requestChain.then(async () => {
+    const wait = Math.max(0, lastRequestAt + MIN_GAP_MS - Date.now());
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    lastRequestAt = Date.now();
+  });
+  requestChain = gate.catch(() => {
+  });
+  await gate;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(2e4) });
+      if (res.status === 429) {
+        const retryAfter = Number(res.headers.get("Retry-After")) || 10;
+        tmdbQuotaExceededUntil = Date.now() + retryAfter * 1e3;
+        console.warn(`[TMDB] 429 rate limited \u2014 cooling down for ${retryAfter}s.`);
+      }
+      return res;
+    } catch (err) {
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("unreachable");
+}
+function tmdbUrl(path3, params = {}) {
+  const qs = new URLSearchParams({ api_key: apiKey(), ...params }).toString();
+  return `${TMDB_BASE}${path3}?${qs}`;
+}
+async function tmdbGet(path3, params) {
+  try {
+    const res = await throttledFetch(tmdbUrl(path3, params));
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      console.error(`[TMDB] ${path3} responded ${res.status}`);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.error(`[TMDB] Request failed for ${path3}:`, err);
+    return null;
+  }
+}
+function tmdbImageUrl(path3, size) {
+  if (!path3) return null;
+  return `${TMDB_IMG_BASE}/${size}${path3.startsWith("/") ? path3 : "/" + path3}`;
+}
+var posterUrl = (path3) => tmdbImageUrl(path3, "w780");
+var backdropUrl = (path3) => tmdbImageUrl(path3, "original");
+var profileUrl = (path3) => tmdbImageUrl(path3, "w185");
+var logoUrl = (path3) => tmdbImageUrl(path3, "w500");
+async function searchMulti(query) {
+  const data = await tmdbGet("/search/multi", { query, include_adult: "false" });
+  const hit = data?.results?.find((r) => r.media_type === "movie" || r.media_type === "tv");
+  if (!hit) return null;
+  return { id: hit.id, mediaType: hit.media_type };
+}
+async function searchPerson(name) {
+  const data = await tmdbGet("/search/person", { query: name });
+  const hit = data?.results?.[0];
+  if (!hit) return null;
+  return { id: hit.id, profilePath: hit.profile_path ?? null };
+}
+async function findByImdbId(imdbId) {
+  const data = await tmdbGet(`/find/${imdbId}`, { external_source: "imdb_id" });
+  const movieHit = data?.movie_results?.[0];
+  if (movieHit) return { id: movieHit.id, mediaType: "movie" };
+  const tvHit = data?.tv_results?.[0];
+  if (tvHit) return { id: tvHit.id, mediaType: "tv" };
+  return null;
+}
+var MOVIE_APPEND = "credits,images,videos,translations,release_dates";
+var TV_APPEND = "credits,images,videos,translations,content_ratings,external_ids";
+var IMAGE_LANGS = "en,ar,null";
+async function getMovieDetails(id) {
+  return tmdbGet(`/movie/${id}`, {
+    language: "en-US",
+    append_to_response: MOVIE_APPEND,
+    include_image_language: IMAGE_LANGS
+  });
+}
+async function getMovieArabic(id) {
+  return tmdbGet(`/movie/${id}`, { language: "ar" });
+}
+async function getTvDetails(id) {
+  return tmdbGet(`/tv/${id}`, {
+    language: "en-US",
+    append_to_response: TV_APPEND,
+    include_image_language: IMAGE_LANGS
+  });
+}
+async function getTvArabic(id) {
+  return tmdbGet(`/tv/${id}`, { language: "ar" });
+}
+async function getTvSeasonDetails(tvId, seasonNumber, language = "en-US") {
+  return tmdbGet(`/tv/${tvId}/season/${seasonNumber}`, { language });
+}
+async function getCollectionDetails(collectionId, language = "en-US") {
+  return tmdbGet(`/collection/${collectionId}`, { language });
+}
+var TRENDING_ENDPOINTS = [
+  { path: "/trending/movie/week", mediaType: "movie" },
+  { path: "/trending/tv/week", mediaType: "tv" },
+  { path: "/movie/top_rated", mediaType: "movie" },
+  { path: "/movie/now_playing", mediaType: "movie" },
+  { path: "/movie/upcoming", mediaType: "movie" },
+  { path: "/tv/top_rated", mediaType: "tv" },
+  { path: "/tv/on_the_air", mediaType: "tv" },
+  { path: "/tv/popular", mediaType: "tv" }
+];
+async function getTrendingPaths() {
+  const paths = /* @__PURE__ */ new Set();
+  for (const endpoint of TRENDING_ENDPOINTS) {
+    const data = await tmdbGet(endpoint.path);
+    for (const item of data?.results ?? []) {
+      if (item?.id) paths.add(`/${endpoint.mediaType}/${item.id}`);
+    }
+  }
+  return Array.from(paths);
+}
+
 // server.ts
 import_dotenv.default.config();
 var app = (0, import_express.default)();
@@ -947,15 +1086,15 @@ async function downloadAndExtractSubsourceSubtitle(url, langHint = "ar") {
   }
 }
 async function searchOpenSubtitles(title, year, lang, imdbId) {
-  const apiKey = process.env.OPENSUBTITLES_API_KEY;
-  if (!apiKey || !title) return null;
+  const apiKey2 = process.env.OPENSUBTITLES_API_KEY;
+  if (!apiKey2 || !title) return null;
   try {
     const params = new URLSearchParams({ query: title, languages: lang, order_by: "download_count", order_direction: "desc" });
     if (year) params.set("year", String(year));
     if (imdbId) params.set("imdb_id", imdbId.replace(/^tt/i, ""));
     const searchRes = await fetch(`https://api.opensubtitles.com/api/v1/subtitles?${params.toString()}`, {
       headers: {
-        "Api-Key": apiKey,
+        "Api-Key": apiKey2,
         "User-Agent": "CinemanaTV v1.0",
         "Accept": "application/json"
       },
@@ -974,7 +1113,7 @@ async function searchOpenSubtitles(title, year, lang, imdbId) {
       const dlRes = await fetch("https://api.opensubtitles.com/api/v1/download", {
         method: "POST",
         headers: {
-          "Api-Key": apiKey,
+          "Api-Key": apiKey2,
           "Content-Type": "application/json",
           "User-Agent": "CinemanaTV v1.0",
           "Accept": "application/json"
@@ -1868,71 +2007,24 @@ function getValidSubtitleUrl(url, movieId, lang, seasonId, episodeId, movieOrEp,
 }
 async function fetchOfficialTMDBImages(title) {
   try {
-    let cleanTitle = title.replace(/\((?:19|20)\d{2}\)/g, "").replace(/[()]/g, "").replace(/[-:_]/g, " ").trim();
-    console.log(`[TMDB Scraper] Searching TMDB for title: "${cleanTitle}" (originally "${title}")`);
-    const searchUrl = `https://www.themoviedb.org/search?query=${encodeURIComponent(cleanTitle)}`;
-    const searchRes = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
-      },
-      signal: AbortSignal.timeout(4e3)
-    });
-    if (!searchRes.ok) {
-      console.warn(`[TMDB Scraper] Search failed with status: ${searchRes.status}`);
+    const cleanTitle = title.replace(/\((?:19|20)\d{2}\)/g, "").replace(/[()]/g, "").replace(/[-:_]/g, " ").trim();
+    console.log(`[TMDB] Searching for title: "${cleanTitle}" (originally "${title}")`);
+    const hit = await searchMulti(cleanTitle);
+    if (!hit) {
+      console.log(`[TMDB] No search match for: "${cleanTitle}"`);
       return null;
     }
-    const searchHtml = await searchRes.text();
-    const linkMatch = searchHtml.match(/href="(\/(movie|tv)\/\d+[^"]*)"/);
-    if (!linkMatch) {
-      console.log(`[TMDB Scraper] No detail page found in search results for: "${cleanTitle}"`);
+    const details = hit.mediaType === "movie" ? await getMovieDetails(hit.id) : await getTvDetails(hit.id);
+    if (!details) return null;
+    const poster = posterUrl(details.poster_path);
+    const backdrop = backdropUrl(details.backdrop_path);
+    if (!poster && !backdrop) {
+      console.log(`[TMDB] No poster/backdrop available for: "${cleanTitle}"`);
       return null;
     }
-    const detailUrl = `https://www.themoviedb.org${linkMatch[1]}`;
-    console.log(`[TMDB Scraper] Scraping detail page: ${detailUrl}`);
-    const detailRes = await fetch(detailUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
-      },
-      signal: AbortSignal.timeout(4e3)
-    });
-    if (!detailRes.ok) {
-      console.warn(`[TMDB Scraper] Detail page fetch failed with status: ${detailRes.status}`);
-      return null;
-    }
-    const detailHtml = await detailRes.text();
-    const pathRegex = /\/t\/p\/([a-zA-Z0-9_()%-]+)\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/gi;
-    let match;
-    const posters = [];
-    const backdrops = [];
-    while ((match = pathRegex.exec(detailHtml)) !== null) {
-      const folder = match[1].toLowerCase();
-      const filename = match[2];
-      if (folder.includes("1920_and_h800") || folder.includes("1000_and_h563") || folder.includes("1280") || folder.includes("1920") || folder.includes("original")) {
-        backdrops.push(filename);
-      } else if (folder.includes("w500") || folder.includes("300_and_h450") || folder.includes("600_and_h900") || folder.includes("188_and_h282")) {
-        posters.push(filename);
-      }
-    }
-    const allHashes = [];
-    const allHashesRegex = /\/t\/p\/[a-zA-Z0-9_()%-]+\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/gi;
-    let anyMatch;
-    while ((anyMatch = allHashesRegex.exec(detailHtml)) !== null) {
-      allHashes.push(anyMatch[1]);
-    }
-    const posterHash = posters[0] || allHashes[0] || null;
-    const backdropHash = backdrops[0] || allHashes[2] || allHashes[1] || posterHash;
-    if (!posterHash && !backdropHash) {
-      console.log(`[TMDB Scraper] No valid image hashes extracted from: ${detailUrl}`);
-      return null;
-    }
-    return {
-      poster: posterHash ? `https://image.tmdb.org/t/p/w780/${posterHash}` : null,
-      backdrop: backdropHash ? `https://image.tmdb.org/t/p/original/${backdropHash}` : null
-    };
+    return { poster, backdrop };
   } catch (err) {
-    console.error("[TMDB Scraper] Scraping pipeline failed:", err);
+    console.error("[TMDB] Image lookup failed:", err);
     return null;
   }
 }
@@ -1965,55 +2057,15 @@ The response must be exclusively the raw URL string of the image, with no markdo
 async function fetchOfficialTMDBPersonPhoto(name) {
   try {
     const cleanName = name.replace(/[()]/g, "").trim();
-    console.log(`[TMDB Person Scraper] Searching TMDB for person: "${cleanName}"`);
-    const searchUrl = `https://www.themoviedb.org/search/person?query=${encodeURIComponent(cleanName)}`;
-    const searchRes = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
-      },
-      signal: AbortSignal.timeout(4e3)
-    });
-    if (searchRes.ok) {
-      const searchHtml = await searchRes.text();
-      const personLinkMatch = searchHtml.match(/href="(\/person\/\d+[^"]*)"/);
-      if (personLinkMatch) {
-        const detailUrl = `https://www.themoviedb.org${personLinkMatch[1]}`;
-        console.log(`[TMDB Person Scraper] Scraping detail page: ${detailUrl}`);
-        const detailRes = await fetch(detailUrl, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-          },
-          signal: AbortSignal.timeout(4e3)
-        });
-        if (detailRes.ok) {
-          const detailHtml = await detailRes.text();
-          const profileRegex = /\/t\/p\/([a-zA-Z0-9_()%-]+)\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/gi;
-          let match;
-          const profiles = [];
-          while ((match = profileRegex.exec(detailHtml)) !== null) {
-            const folder = match[1].toLowerCase();
-            const filename = match[2];
-            if (folder.includes("bestv2") || folder.includes("h632") || folder.includes("w300") || folder.includes("w185")) {
-              profiles.push(filename);
-            }
-          }
-          if (profiles.length > 0) {
-            return `https://image.tmdb.org/t/p/w300/${profiles[0]}`;
-          }
-          const fallbackRegex = /\/t\/p\/[a-zA-Z0-9_()%-]+\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/i;
-          const fallbackMatch = detailHtml.match(fallbackRegex);
-          if (fallbackMatch) {
-            return `https://image.tmdb.org/t/p/w300/${fallbackMatch[1]}`;
-          }
-        }
-      } else {
-        console.log(`[TMDB Person Scraper] No person page found in search results for: "${cleanName}"`);
-      }
+    const hit = await searchPerson(cleanName);
+    const photoUrl = hit?.profilePath ? profileUrl(hit.profilePath) : null;
+    if (photoUrl) {
+      console.log(`[TMDB] Found official photo for "${cleanName}": ${photoUrl}`);
+      return photoUrl;
     }
+    console.log(`[TMDB] No person photo found via API for: "${cleanName}"`);
   } catch (err) {
-    console.error(`[TMDB Person Scraper] Failed to fetch photo for "${name}":`, err);
+    console.error(`[TMDB] Failed to fetch photo for "${name}":`, err);
   }
   return await fetchPersonPhotoWithGemini(name);
 }
@@ -2050,82 +2102,37 @@ async function verifyAndCorrectPersonPhotoUrl(name, url) {
   }
   return url;
 }
+function formatTmdbRuntime(minutes) {
+  if (!minutes || minutes <= 0) return "45m";
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h}h ${String(m).padStart(2, "0")}m`;
+}
 async function fetchTMDBSeriesSeasons(tmdbId, seriesTitleEn, seriesTitleAr, backdrop, defaultRating) {
   try {
     const seasons = [];
-    console.log(`[TMDB Season Scraper] Fetching season listings for TV ID: ${tmdbId}`);
+    console.log(`[TMDB] Fetching season listings for TV ID: ${tmdbId}`);
     for (let sNum = 1; sNum <= 5; sNum++) {
-      const seasonPath = `/tv/${tmdbId}/season/${sNum}`;
-      const enSeasonUrl = `https://www.themoviedb.org${seasonPath}?language=en-US`;
-      const arSeasonUrl = `https://www.themoviedb.org${seasonPath}?language=ar`;
-      const enRes = await fetch(enSeasonUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9"
-        },
-        signal: AbortSignal.timeout(5e3)
-      }).catch(() => null);
-      if (!enRes || !enRes.ok) {
-        if (sNum === 1) break;
-        break;
-      }
-      const enHtml = await enRes.text();
-      let arHtml = "";
-      const arRes = await fetch(arSeasonUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-          "Accept-Language": "ar,en-US;q=0.9"
-        },
-        signal: AbortSignal.timeout(5e3)
-      }).catch(() => null);
-      if (arRes && arRes.ok) {
-        arHtml = await arRes.text();
-      }
+      const enSeason = await getTvSeasonDetails(tmdbId, sNum, "en-US");
+      if (!enSeason) break;
+      const arSeason = await getTvSeasonDetails(tmdbId, sNum, "ar");
       const seasonId = `s${sNum}`;
-      const episodes = [];
-      const epCardRegex = /<div class="card episode_card">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
-      let epMatch;
-      let epIndex = 0;
-      while ((epMatch = epCardRegex.exec(enHtml)) !== null) {
-        epIndex++;
-        const block = epMatch[1];
-        const epNumMatch = block.match(/episode_number">(\d+)<\/span>/i) || block.match(/href="\/tv\/\d+\/season\/\d+\/episode\/(\d+)"/i);
-        const epNum = epNumMatch ? parseInt(epNumMatch[1], 10) : epIndex;
-        const epTitleMatch = block.match(/href="\/tv\/\d+\/season\/\d+\/episode\/\d+"[^>]*>([^<]+)<\/a>/i);
-        const epTitleEn = epTitleMatch ? epTitleMatch[1].trim() : `Episode ${epNum}`;
-        let epTitleAr = `\u0627\u0644\u062D\u0644\u0642\u0629 ${epNum}`;
-        if (arHtml) {
-          const arTitleRegex = new RegExp(`href="\\/tv\\/\\d+\\/season\\/${sNum}\\/episode\\/${epNum}"[^>]*>([^<]+)<\\/a>`, "i");
-          const arTitleMatch = arHtml.match(arTitleRegex);
-          if (arTitleMatch && arTitleMatch[1].trim() && /[\u0600-\u06FF]/.test(arTitleMatch[1])) {
-            epTitleAr = arTitleMatch[1].trim();
-          }
-        }
-        const thumbMatch = block.match(/src="([^"]*\/t\/p\/[^"]+)"/i) || block.match(/data-src="([^"]*\/t\/p\/[^"]+)"/i);
-        let thumbnail = thumbMatch ? thumbMatch[1] : backdrop;
-        if (thumbnail && thumbnail.startsWith("/")) {
-          thumbnail = `https://image.tmdb.org${thumbnail}`;
-        }
-        const storyEnMatch = block.match(/<div class="overview"[^>]*>([\s\S]*?)<\/div>/i) || block.match(/<p>([\s\S]*?)<\/p>/i);
-        const epStoryEn = storyEnMatch ? storyEnMatch[1].replace(/<[^>]*>/g, "").trim() : `Details and plot of Episode ${epNum} of Season ${sNum} of ${seriesTitleEn}.`;
-        let epStoryAr = `\u062A\u0641\u0627\u0635\u064A\u0644 \u0648\u0623\u062D\u062F\u0627\u062B \u0627\u0644\u062D\u0644\u0642\u0629 ${epNum} \u0645\u0646 \u0645\u0633\u0644\u0633\u0644 ${seriesTitleAr}.`;
-        if (arHtml) {
-          const arOverviewRegex = new RegExp(`episode_${epNum}[\\s\\S]*?<div class="overview"[^>]*>([\\s\\S]*?)<\\/div>`, "i");
-          const arOverviewMatch = arHtml.match(arOverviewRegex);
-          if (arOverviewMatch) {
-            const parsedArStory = arOverviewMatch[1].replace(/<[^>]*>/g, "").trim();
-            if (parsedArStory && /[\u0600-\u06FF]/.test(parsedArStory)) {
-              epStoryAr = parsedArStory;
-            }
-          }
-        }
+      const episodes = (enSeason.episodes ?? []).map((ep) => {
+        const epNum = ep.episode_number;
+        const arEp = arSeason?.episodes?.find((e) => e.episode_number === epNum);
+        const epTitleEn = ep.name?.trim() || `Episode ${epNum}`;
+        const epTitleAr = arEp?.name?.trim() && /[\u0600-\u06FF]/.test(arEp.name) ? arEp.name.trim() : `\u0627\u0644\u062D\u0644\u0642\u0629 ${epNum}`;
+        const epStoryEn = ep.overview?.trim() || `Details and plot of Episode ${epNum} of Season ${sNum} of ${seriesTitleEn}.`;
+        const epStoryAr = arEp?.overview?.trim() && /[\u0600-\u06FF]/.test(arEp.overview) ? arEp.overview.trim() : `\u062A\u0641\u0627\u0635\u064A\u0644 \u0648\u0623\u062D\u062F\u0627\u062B \u0627\u0644\u062D\u0644\u0642\u0629 ${epNum} \u0645\u0646 \u0645\u0633\u0644\u0633\u0644 ${seriesTitleAr}.`;
+        const thumbnail = tmdbImageUrl(ep.still_path, "w300") || backdrop;
         const epId = `s${sNum}_e${epNum}_${tmdbId}`;
-        episodes.push({
+        return {
           id: epId,
           number: epNum,
           titleAr: epTitleAr,
           titleEn: epTitleEn,
-          duration: "45m",
+          duration: formatTmdbRuntime(ep.runtime),
           storyAr: epStoryAr,
           storyEn: epStoryEn,
           thumbnail,
@@ -2135,227 +2142,76 @@ async function fetchTMDBSeriesSeasons(tmdbId, seriesTitleEn, seriesTitleAr, back
           subtitlesUrlAr: `/api/subtitles?movieId=series_${tmdbId}&seasonId=${seasonId}&episodeId=${epId}&lang=ar`,
           subtitlesUrlEn: `/api/subtitles?movieId=series_${tmdbId}&seasonId=${seasonId}&episodeId=${epId}&lang=en`,
           rating: defaultRating
-        });
-      }
-      let seasonPoster = "";
-      const posterMatch = enHtml.match(/<img[^>]+class="poster"[^>]+src="([^"]*\/t\/p\/[^"]+)"/i) || enHtml.match(/<img[^>]+src="([^"]*\/t\/p\/w500\/[^"]+)"/i) || enHtml.match(/src="([^"]*\/t\/p\/[a-zA-Z0-9_%-]+\/[^"]+)"/i);
-      if (posterMatch) {
-        seasonPoster = posterMatch[1].startsWith("/") ? `https://image.tmdb.org${posterMatch[1]}` : posterMatch[1];
-      }
-      let seasonYear = (/* @__PURE__ */ new Date()).getFullYear();
-      const sznYearMatch = enHtml.match(/\((19\d{2}|20\d{2})\)/) || enHtml.match(/class="release_date">.*?(19\d{2}|20\d{2})/s);
-      if (sznYearMatch) {
-        seasonYear = parseInt(sznYearMatch[1], 10);
-      }
-      let seasonStoryEn = `Season ${sNum} of ${seriesTitleEn}`;
-      const sznOverviewEnMatch = enHtml.match(/<div class="overview"[^>]*>([\s\S]*?)<\/div>/i);
-      if (sznOverviewEnMatch) {
-        const parsed = sznOverviewEnMatch[1].replace(/<[^>]*>/g, "").trim();
-        if (parsed) seasonStoryEn = parsed;
-      }
-      let seasonStoryAr = `\u062A\u0641\u0627\u0635\u064A\u0644 \u0648\u0623\u062D\u062F\u0627\u062B \u0627\u0644\u0645\u0648\u0633\u0645 ${sNum} \u0645\u0646 \u0645\u0633\u0644\u0633\u0644 ${seriesTitleAr}.`;
-      if (arHtml) {
-        const sznOverviewArMatch = arHtml.match(/<div class="overview"[^>]*>([\s\S]*?)<\/div>/i);
-        if (sznOverviewArMatch) {
-          const parsed = sznOverviewArMatch[1].replace(/<[^>]*>/g, "").trim();
-          if (parsed && /[\u0600-\u06FF]/.test(parsed)) seasonStoryAr = parsed;
-        }
-      }
+        };
+      });
       if (episodes.length > 0) {
+        const seasonYear = enSeason.air_date ? parseInt(String(enSeason.air_date).slice(0, 4), 10) : (/* @__PURE__ */ new Date()).getFullYear();
         seasons.push({
           id: seasonId,
           number: sNum,
-          titleAr: `\u0627\u0644\u0645\u0648\u0633\u0645 ${sNum}`,
-          titleEn: `Season ${sNum}`,
-          poster: seasonPoster || backdrop,
+          titleAr: arSeason?.name?.trim() && /[\u0600-\u06FF]/.test(arSeason.name) ? arSeason.name.trim() : `\u0627\u0644\u0645\u0648\u0633\u0645 ${sNum}`,
+          titleEn: enSeason.name?.trim() || `Season ${sNum}`,
+          poster: posterUrl(enSeason.poster_path) || backdrop,
           backdrop,
           year: seasonYear,
-          storyAr: seasonStoryAr,
-          storyEn: seasonStoryEn,
+          storyAr: arSeason?.overview?.trim() && /[\u0600-\u06FF]/.test(arSeason.overview) ? arSeason.overview.trim() : `\u062A\u0641\u0627\u0635\u064A\u0644 \u0648\u0623\u062D\u062F\u0627\u062B \u0627\u0644\u0645\u0648\u0633\u0645 ${sNum} \u0645\u0646 \u0645\u0633\u0644\u0633\u0644 ${seriesTitleAr}.`,
+          storyEn: enSeason.overview?.trim() || `Season ${sNum} of ${seriesTitleEn}`,
           episodes
         });
       }
     }
     return seasons;
   } catch (err) {
-    console.warn(`[TMDB Season Scraper] Failed to fetch seasons for TV ${tmdbId}:`, err.message);
+    console.warn(`[TMDB] Failed to fetch seasons for TV ${tmdbId}:`, err.message);
     return [];
   }
 }
 async function scrapeTMDBMetadata(searchQueryOrUrl, lang = "ar") {
   try {
     let query = searchQueryOrUrl.trim();
-    let isUrl = query.startsWith("http://") || query.startsWith("https://");
-    let tmdbPath = "";
+    const isUrl = query.startsWith("http://") || query.startsWith("https://");
+    let tmdbId = null;
+    let mediaType = null;
     const directPathMatch = query.match(/\/?(movie|tv)\/(\d+)/i);
     if (directPathMatch) {
-      tmdbPath = `/${directPathMatch[1].toLowerCase()}/${directPathMatch[2]}`;
-    } else if (isUrl) {
-      if (query.includes("imdb.com")) {
-        const match = query.match(/title\/(tt\d+)/);
-        if (match) {
-          query = match[1];
-        }
-      } else if (query.includes("cinemana")) {
-        const match = query.match(/(?:movie|show|video)\/(\d+)/);
-        if (match) {
-          query = `Cinemana ${match[1]}`;
+      mediaType = directPathMatch[1].toLowerCase();
+      tmdbId = directPathMatch[2];
+    } else if (isUrl && query.includes("imdb.com")) {
+      const imdbMatch = query.match(/title\/(tt\d+)/);
+      if (imdbMatch) {
+        const hit = await findByImdbId(imdbMatch[1]);
+        if (hit) {
+          tmdbId = hit.id;
+          mediaType = hit.mediaType;
         }
       }
     }
-    if (!tmdbPath) {
-      let cleanTitle = query.replace(/\((?:19|20)\d{2}\)/g, "").replace(/[()]/g, "").replace(/[-:_]/g, " ").trim();
-      console.log(`[TMDB Scraper Fallback] Searching TMDB for: "${cleanTitle}"`);
-      const searchUrl = `https://www.themoviedb.org/search?query=${encodeURIComponent(cleanTitle)}`;
-      const searchRes = await fetch(searchUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9"
-        },
-        signal: AbortSignal.timeout(6e3)
-      });
-      if (!searchRes.ok) {
-        throw new Error(`Search failed with status: ${searchRes.status}`);
-      }
-      const searchHtml = await searchRes.text();
-      const linkMatch = searchHtml.match(/href="(?:\/en|\/ar)?\/(movie|tv)\/(\d+)[^"]*"/i) || searchHtml.match(/\/(movie|tv)\/(\d+)/i);
-      if (!linkMatch) {
+    if (!tmdbId) {
+      const cleanTitle = query.replace(/\((?:19|20)\d{2}\)/g, "").replace(/[()]/g, "").replace(/[-:_]/g, " ").trim();
+      console.log(`[TMDB] Searching for: "${cleanTitle}"`);
+      const hit = await searchMulti(cleanTitle);
+      if (!hit) {
         throw new Error(`No movie or show found on TMDB for: "${cleanTitle}"`);
       }
-      tmdbPath = `/${linkMatch[1]}/${linkMatch[2]}`;
+      tmdbId = hit.id;
+      mediaType = hit.mediaType;
     }
-    const type = tmdbPath.includes("/tv/") ? "series" : "movie";
-    const tmdbId = tmdbPath.split("/")[2];
-    console.log(`[TMDB Scraper Fallback] Scraping details for TMDB Path: ${tmdbPath} (Type: ${type}, ID: ${tmdbId})`);
-    const enUrl = `https://www.themoviedb.org${tmdbPath}?language=en-US`;
-    const enRes = await fetch(enUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
-      },
-      signal: AbortSignal.timeout(6e3)
-    });
-    if (!enRes.ok) {
-      throw new Error(`Failed to fetch English TMDB details. Status: ${enRes.status}`);
+    const type = mediaType === "tv" ? "series" : "movie";
+    console.log(`[TMDB] Fetching details for ${mediaType} ${tmdbId} (Type: ${type})`);
+    const details = mediaType === "tv" ? await getTvDetails(tmdbId) : await getMovieDetails(tmdbId);
+    if (!details) {
+      throw new Error(`Failed to fetch TMDB details for ${mediaType} ${tmdbId}`);
     }
-    const enHtml = await enRes.text();
-    const arUrl = `https://www.themoviedb.org${tmdbPath}?language=ar`;
-    const arRes = await fetch(arUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        "Accept-Language": "ar,en-US;q=0.9"
-      },
-      signal: AbortSignal.timeout(6e3)
-    });
-    let arHtml = "";
-    if (arRes.ok) {
-      arHtml = await arRes.text();
-    }
-    let titleEn = "";
-    const ogTitleMatch = enHtml.match(/<meta property="og:title" content="([^"]+)">/i);
-    if (ogTitleMatch) {
-      titleEn = ogTitleMatch[1].replace(/\((?:19|20)\d{2}\)/g, "").replace(/TV Series.*/gi, "").trim();
-    } else {
-      const titleTagMatch = enHtml.match(/<title>([^<]+)<\/title>/i);
-      if (titleTagMatch) {
-        titleEn = titleTagMatch[1].split("\u2014")[0].trim();
-      }
-    }
-    if (!titleEn) titleEn = "Untitled Movie";
-    let storyEn = "";
-    const ogDescMatch = enHtml.match(/<meta property="og:description" content="([^"]+)">/i);
-    if (ogDescMatch) {
-      storyEn = ogDescMatch[1].trim();
-    } else {
-      const descTagMatch = enHtml.match(/<meta name="description" content="([^"]+)">/i);
-      if (descTagMatch) {
-        storyEn = descTagMatch[1].trim();
-      }
-    }
-    let year = (/* @__PURE__ */ new Date()).getFullYear();
-    const yearMatch = enHtml.match(/\((19\d{2}|20\d{2})\)/);
-    if (yearMatch) {
-      year = parseInt(yearMatch[1], 10);
-    }
-    let rating = 8;
-    const scoreMatch = enHtml.match(/user_score_chart[^>]*data-percent="([0-9.]+)"/i);
-    if (scoreMatch) {
-      rating = parseFloat((parseFloat(scoreMatch[1]) / 10).toFixed(1));
-    } else {
-      const ratingMatch = enHtml.match(/"vote_average":\s*([0-9.]+)/);
-      if (ratingMatch) {
-        rating = parseFloat(parseFloat(ratingMatch[1]).toFixed(1));
-      }
-    }
-    let titleAr = titleEn;
-    if (arHtml) {
-      const ogTitleArMatch = arHtml.match(/<meta property="og:title" content="([^"]+)">/i);
-      if (ogTitleArMatch) {
-        const potentialAr = ogTitleArMatch[1].replace(/\((?:19|20)\d{2}\)/g, "").replace(/TV Series.*/gi, "").trim();
-        if (potentialAr && /[\u0600-\u06FF]/.test(potentialAr)) {
-          titleAr = potentialAr;
-        }
-      }
-    }
-    let storyAr = "";
-    if (arHtml) {
-      const ogDescArMatch = arHtml.match(/<meta property="og:description" content="([^"]+)">/i);
-      if (ogDescArMatch) {
-        const potentialStoryAr = ogDescArMatch[1].trim();
-        if (potentialStoryAr && /[\u0600-\u06FF]/.test(potentialStoryAr)) {
-          storyAr = potentialStoryAr;
-        }
-      }
-    }
-    if (!storyAr) storyAr = `\u062A\u062F\u0648\u0631 \u0623\u062D\u062F\u0627\u062B \u0641\u064A\u0644\u0645 ${titleAr || titleEn} \u062D\u0648\u0644 \u0642\u0635\u0629 \u0645\u062B\u064A\u0631\u0629 \u0645\u0644\u064A\u0626\u0629 \u0628\u0627\u0644\u0623\u062D\u062F\u0627\u062B \u0648\u0627\u0644\u062A\u0634\u0648\u064A\u0642 \u0648\u0627\u0644\u0645\u063A\u0627\u0645\u0631\u0629.`;
-    const pathRegex = /\/t\/p\/([a-zA-Z0-9_()%-]+)\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/gi;
-    let imgMatch;
-    const posters = [];
-    const backdrops = [];
-    while ((imgMatch = pathRegex.exec(enHtml)) !== null) {
-      const folder = imgMatch[1].toLowerCase();
-      const filename = imgMatch[2];
-      if (folder.includes("1920_and_h800") || folder.includes("1000_and_h563") || folder.includes("1280") || folder.includes("1920") || folder.includes("original")) {
-        backdrops.push(filename);
-      } else if (folder.includes("w500") || folder.includes("300_and_h450") || folder.includes("600_and_h900") || folder.includes("188_and_h282")) {
-        posters.push(filename);
-      }
-    }
-    const allHashes = [];
-    const allHashesRegex = /\/t\/p\/[a-zA-Z0-9_()%-]+\/([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|webp))/gi;
-    let anyMatch;
-    while ((anyMatch = allHashesRegex.exec(enHtml)) !== null) {
-      allHashes.push(anyMatch[1]);
-    }
-    const posterHash = posters[0] || allHashes[0] || null;
-    const backdropHash = backdrops[0] || allHashes[2] || allHashes[1] || posterHash;
-    let logoUrl = "";
-    const logoPngMatches = Array.from(enHtml.matchAll(/\/t\/p\/[a-zA-Z0-9_()%-]+\/([a-zA-Z0-9_\-]+\.png)/gi));
-    if (logoPngMatches.length > 0) {
-      logoUrl = `https://image.tmdb.org/t/p/w500/${logoPngMatches[0][1]}`;
-    } else {
-      try {
-        const logosRes = await fetch(`https://www.themoviedb.org${tmdbPath}/images/logos`, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-          },
-          signal: AbortSignal.timeout(4e3)
-        });
-        if (logosRes.ok) {
-          const logosHtml = await logosRes.text();
-          const logoMatch = logosHtml.match(/\/t\/p\/[a-zA-Z0-9_()%-]+\/([a-zA-Z0-9_\-]+\.png)/i);
-          if (logoMatch) {
-            logoUrl = `https://image.tmdb.org/t/p/w500/${logoMatch[1]}`;
-          }
-        }
-      } catch (lErr) {
-      }
-    }
-    const rawPoster = posterHash ? `https://image.tmdb.org/t/p/w780/${posterHash}` : "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1920&q=95&auto=format&fit=crop";
-    const rawBackdrop = backdropHash ? `https://image.tmdb.org/t/p/original/${backdropHash}` : "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=3840&q=95&auto=format&fit=crop";
-    const genres = [];
-    const genreMatches = enHtml.matchAll(/href="\/genre\/[^"]*">([^<]+)</gi);
+    const arDetails = mediaType === "tv" ? await getTvArabic(tmdbId) : await getMovieArabic(tmdbId);
+    const titleEn = (mediaType === "tv" ? details.name : details.title)?.trim() || "Untitled Movie";
+    const storyEn = details.overview?.trim() || "";
+    const arTitleRaw = (mediaType === "tv" ? arDetails?.name : arDetails?.title)?.trim();
+    const titleAr = arTitleRaw && /[؀-ۿ]/.test(arTitleRaw) ? arTitleRaw : titleEn;
+    const arOverviewRaw = arDetails?.overview?.trim();
+    const storyAr = arOverviewRaw && /[؀-ۿ]/.test(arOverviewRaw) ? arOverviewRaw : `\u062A\u062F\u0648\u0631 \u0623\u062D\u062F\u0627\u062B \u0641\u064A\u0644\u0645 ${titleAr || titleEn} \u062D\u0648\u0644 \u0642\u0635\u0629 \u0645\u062B\u064A\u0631\u0629 \u0645\u0644\u064A\u0626\u0629 \u0628\u0627\u0644\u0623\u062D\u062F\u0627\u062B \u0648\u0627\u0644\u062A\u0634\u0648\u064A\u0642 \u0648\u0627\u0644\u0645\u063A\u0627\u0645\u0631\u0629.`;
+    const releaseDate = mediaType === "tv" ? details.first_air_date : details.release_date;
+    const year = releaseDate ? parseInt(String(releaseDate).slice(0, 4), 10) : (/* @__PURE__ */ new Date()).getFullYear();
+    const rating = details.vote_average ? parseFloat(details.vote_average.toFixed(1)) : 8;
     const genreMap = {
       "Action": "\u0623\u0643\u0634\u0646",
       "Adventure": "\u0645\u063A\u0627\u0645\u0631\u0629",
@@ -2373,85 +2229,55 @@ async function scrapeTMDBMetadata(searchQueryOrUrl, lang = "ar") {
       "Romance": "\u062F\u0631\u0627\u0645\u0627",
       "Animation": "\u0639\u0627\u0626\u0644\u064A"
     };
-    for (const gMatch of genreMatches) {
-      const gName = gMatch[1].trim();
-      if (genreMap[gName] && !genres.includes(genreMap[gName])) {
-        genres.push(genreMap[gName]);
-      }
+    const genres = [];
+    for (const g of details.genres ?? []) {
+      const mapped = genreMap[g.name];
+      if (mapped && !genres.includes(mapped)) genres.push(mapped);
     }
     if (genres.length === 0) genres.push("\u062F\u0631\u0627\u0645\u0627", "\u062A\u0634\u0648\u064A\u0642");
-    const actors = [];
-    const castMatches = enHtml.matchAll(/href="\/person\/\d+[^"]*">([^<]+)</gi);
-    for (const cMatch of castMatches) {
-      const actName = cMatch[1].trim();
-      if (actName && !actors.includes(actName) && !actName.includes("TMDB") && actors.length < 5) {
-        actors.push(actName);
-      }
-    }
-    if (actors.length === 0) actors.push("Leo Woodall", "Dustin Hoffman", "Jean Smart", "Lior Raz");
+    const rawPoster = posterUrl(details.poster_path) || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1920&q=95&auto=format&fit=crop";
+    const rawBackdrop = backdropUrl(details.backdrop_path) || "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=3840&q=95&auto=format&fit=crop";
+    const logoPath = details.images?.logos?.[0]?.file_path;
+    const logoUrl2 = logoUrl(logoPath) || "";
+    const crew = details.credits?.crew ?? [];
+    const cast = details.credits?.cast ?? [];
     let director = "";
-    let writer = "";
     let directorPhotoUrl = "";
+    if (mediaType === "tv" && details.created_by && details.created_by.length > 0) {
+      director = details.created_by[0].name;
+      directorPhotoUrl = profileUrl(details.created_by[0].profile_path) || "";
+    } else {
+      const dirCrew = crew.find((c) => {
+        const job = (c.job || "").toLowerCase();
+        return job === "director" || job === "creator";
+      });
+      if (dirCrew) {
+        director = dirCrew.name;
+        directorPhotoUrl = profileUrl(dirCrew.profile_path) || "";
+      }
+    }
+    let writer = "";
     let writerPhotoUrl = "";
-    const crewCardRegex = /<li class="profile">([\s\S]*?)<\/li>/gi;
-    let crewBlockMatch;
-    while ((crewBlockMatch = crewCardRegex.exec(enHtml)) !== null) {
-      const block = crewBlockMatch[1];
-      const nameMatch = block.match(/href="\/person\/\d+[^"]*">([^<]+)</i);
-      const roleMatch = block.match(/<p class="character">([^<]+)<\/p>/i) || block.match(/<p class="character"[^>]*>([\s\S]*?)<\/p>/i);
-      if (nameMatch && roleMatch) {
-        const name = nameMatch[1].trim();
-        const role = roleMatch[1].replace(/<[^>]*>/g, "").trim().toLowerCase();
-        const srcMatch = block.match(/src="([^"]*\/t\/p\/[^"]+)"/i) || block.match(/data-src="([^"]*\/t\/p\/[^"]+)"/i);
-        let photoUrl = srcMatch ? srcMatch[1] : "";
-        if (photoUrl && photoUrl.startsWith("/")) {
-          photoUrl = `https://image.tmdb.org${photoUrl}`;
-        }
-        if ((role.includes("director") || role.includes("creator")) && !director) {
-          director = name;
-          directorPhotoUrl = photoUrl;
-        }
-        if ((role.includes("writer") || role.includes("screenplay") || role.includes("story") || role.includes("author")) && !writer) {
-          writer = name;
-          writerPhotoUrl = photoUrl;
-        }
-      }
-    }
-    if (!director) {
-      const dirMatch = enHtml.match(/Director<\/p>[^<]*<p>[^<]*<a href="\/person\/\d+[^"]*">([^<]+)/i) || enHtml.match(/<a href="\/person\/\d+[^"]*">([^<]+)<\/a>[^<]*<\/p>[^<]*<p class="character">Director/i) || enHtml.match(/Director:.*?<a href="\/person\/\d+[^"]*">([^<]+)/i) || enHtml.match(/Created by.*?<a href="\/person\/\d+[^"]*">([^<]+)/i);
-      if (dirMatch) {
-        director = dirMatch[1].trim();
-      }
-    }
-    if (!writer) {
-      const wrMatch = enHtml.match(/Writer<\/p>[^<]*<p>[^<]*<a href="\/person\/\d+[^"]*">([^<]+)/i) || enHtml.match(/<a href="\/person\/\d+[^"]*">([^<]+)<\/a>[^<]*<\/p>[^<]*<p class="character">Writer/i) || enHtml.match(/Writer:.*?<a href="\/person\/\d+[^"]*">([^<]+)/i);
-      if (wrMatch) {
-        writer = wrMatch[1].trim();
-      }
+    const writerCrew = crew.find((c) => {
+      const job = (c.job || "").toLowerCase();
+      return job.includes("writer") || job.includes("screenplay") || job.includes("story") || job.includes("author");
+    });
+    if (writerCrew) {
+      writer = writerCrew.name;
+      writerPhotoUrl = profileUrl(writerCrew.profile_path) || "";
     }
     directorPhotoUrl = director ? await verifyAndCorrectPersonPhotoUrl(director, directorPhotoUrl) : "";
     writerPhotoUrl = writer ? await verifyAndCorrectPersonPhotoUrl(writer, writerPhotoUrl) : "";
     const castMembers = [];
-    const castCardRegex = /<li class="card">([\s\S]*?)<\/li>/gi;
-    let cardMatch;
-    while ((cardMatch = castCardRegex.exec(enHtml)) !== null && castMembers.length < 12) {
-      const block = cardMatch[1];
-      const nameMatch = block.match(/href="\/person\/\d+[^"]*">([^<]+)</i);
-      if (nameMatch) {
-        const name = nameMatch[1].trim();
-        if (name && !name.includes("TMDB")) {
-          const characterMatch = block.match(/<p class="character"[^>]*>([\s\S]*?)<\/p>/i) || block.match(/<p class="character">([^<]+)/i);
-          let role = characterMatch ? characterMatch[1].replace(/<[^>]*>/g, "").trim() : lang === "ar" ? "\u0645\u0645\u062B\u0644" : "Actor";
-          const srcMatch = block.match(/src="([^"]*\/t\/p\/[^"]+)"/i) || block.match(/data-src="([^"]*\/t\/p\/[^"]+)"/i);
-          let photoUrl = srcMatch ? srcMatch[1] : "";
-          if (photoUrl && photoUrl.startsWith("/")) {
-            photoUrl = `https://image.tmdb.org${photoUrl}`;
-          }
-          photoUrl = await verifyAndCorrectPersonPhotoUrl(name, photoUrl);
-          castMembers.push({ name, role, photoUrl });
-        }
-      }
+    for (const c of cast.slice(0, 12)) {
+      const name = c.name?.trim();
+      if (!name || name.includes("TMDB")) continue;
+      const role = c.character?.trim() || (lang === "ar" ? "\u0645\u0645\u062B\u0644" : "Actor");
+      const photoUrl = await verifyAndCorrectPersonPhotoUrl(name, profileUrl(c.profile_path) || "");
+      castMembers.push({ name, role, photoUrl });
     }
+    const actors = castMembers.slice(0, 5).map((c) => c.name);
+    if (actors.length === 0) actors.push("Leo Woodall", "Dustin Hoffman", "Jean Smart", "Lior Raz");
     if (castMembers.length === 0) {
       for (const actorName of actors) {
         const photoUrl = await verifyAndCorrectPersonPhotoUrl(actorName, "");
@@ -2462,20 +2288,19 @@ async function scrapeTMDBMetadata(searchQueryOrUrl, lang = "ar") {
         });
       }
     }
-    let duration = type === "series" ? "45m" : "1h 50m";
-    const runtimeMatch = enHtml.match(/<span class="runtime">([^<]+)<\/span>/i) || enHtml.match(/class="runtime"[^>]*>([\s\S]*?)<\/span>/i) || enHtml.match(/runtime.*?(\d+h\s*\d+m|\d+h|\d+m)/i);
-    if (runtimeMatch) {
-      const val = runtimeMatch[1].replace(/[\n\r]/g, "").trim();
-      if (val) duration = val;
-    }
+    const duration = mediaType === "tv" ? "45m" : details.runtime ? formatTmdbRuntime(details.runtime) : "1h 50m";
     let ageRating = "";
-    const certMatch = enHtml.match(/<span class="certification">([^<]+)<\/span>/i) || enHtml.match(/class="certification"[^>]*>([\s\S]*?)<\/span>/i) || enHtml.match(/class="certification">([^<]+)/i);
-    if (certMatch) {
-      ageRating = certMatch[1].replace(/[\n\r]/g, "").trim();
+    if (mediaType === "tv") {
+      const usRating = details.content_ratings?.results?.find((r) => r.iso_3166_1 === "US");
+      if (usRating?.rating) ageRating = usRating.rating;
+    } else {
+      const usRelease = details.release_dates?.results?.find((r) => r.iso_3166_1 === "US");
+      const cert = usRelease?.release_dates?.find((rd) => rd.certification)?.certification;
+      if (cert) ageRating = cert;
     }
-    if (!ageRating) {
-      ageRating = rating >= 8.5 ? "TV-MA" : "PG-13";
-    }
+    if (!ageRating) ageRating = rating >= 8.5 ? "TV-MA" : "PG-13";
+    const trailer = (details.videos?.results ?? []).find((v) => v.site === "YouTube" && v.type === "Trailer");
+    const trailerUrl = trailer ? `https://www.youtube.com/watch?v=${trailer.key}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(titleEn + " trailer")}`;
     const poster = await verifyAndCorrectImageUrl(rawPoster, titleEn, false, genres);
     const backdrop = await verifyAndCorrectImageUrl(rawBackdrop, titleEn, true, genres);
     const tempMovieId = type === "series" ? `series_${tmdbId}` : `movie_${tmdbId}`;
@@ -2491,7 +2316,7 @@ async function scrapeTMDBMetadata(searchQueryOrUrl, lang = "ar") {
       genres,
       poster,
       backdrop,
-      logoUrl,
+      logoUrl: logoUrl2,
       storyAr,
       storyEn,
       actors,
@@ -2501,7 +2326,7 @@ async function scrapeTMDBMetadata(searchQueryOrUrl, lang = "ar") {
       writerPhotoUrl,
       castMembers,
       quality: "Full HD",
-      trailerUrl: `https://www.youtube.com/results?search_query=${encodeURIComponent(titleEn + " trailer")}`,
+      trailerUrl,
       servers: [
         { name: "\u0633\u064A\u0631\u0641\u0631 \u0627\u0644\u0628\u062B \u0627\u0644\u0631\u0626\u064A\u0633\u064A", url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" }
       ],
@@ -2509,7 +2334,7 @@ async function scrapeTMDBMetadata(searchQueryOrUrl, lang = "ar") {
       subtitlesUrlEn: `/api/subtitles?movieId=${tempMovieId}&lang=en`
     };
     try {
-      console.log(`[TMDB Scraper] Searching live subtitles for: "${titleEn}" (${year})...`);
+      console.log(`[TMDB] Searching live subtitles for: "${titleEn}" (${year})...`);
       const subs = await findSubtitlesForWork(titleEn, year, type);
       if (subs && (subs.ar || subs.en)) {
         if (subs.ar) {
@@ -2518,13 +2343,13 @@ async function scrapeTMDBMetadata(searchQueryOrUrl, lang = "ar") {
         if (subs.en) {
           result.originalSubtitlesUrlEn = subs.en;
         }
-        console.log(`[TMDB Scraper] Found & attached subtitles: AR=${subs.ar || "none"}, EN=${subs.en || "none"}`);
+        console.log(`[TMDB] Found & attached subtitles: AR=${subs.ar || "none"}, EN=${subs.en || "none"}`);
       }
     } catch (subErr) {
-      console.warn("[TMDB Scraper] Subtitle auto-lookup failed during TMDB import:", subErr.message || subErr);
+      console.warn("[TMDB] Subtitle auto-lookup failed during import:", subErr.message || subErr);
     }
     if (type === "series") {
-      const scrapedSeasons = await fetchTMDBSeriesSeasons(tmdbId, titleEn, titleAr, backdrop, rating);
+      const scrapedSeasons = await fetchTMDBSeriesSeasons(String(tmdbId), titleEn, titleAr, backdrop, rating);
       if (scrapedSeasons && scrapedSeasons.length > 0) {
         result.seasons = scrapedSeasons;
       } else {
@@ -2567,9 +2392,9 @@ async function scrapeTMDBMetadata(searchQueryOrUrl, lang = "ar") {
     return result;
   } catch (err) {
     if (err.message && err.message.includes("429")) {
-      console.warn("[TMDB Comprehensive Scraper] Scraper rate-limited by target (429). Falling back gracefully.");
+      console.warn("[TMDB] Rate-limited (429). Falling back gracefully.");
     } else {
-      console.error("[TMDB Comprehensive Scraper] Comprehensive scraping failed:", err.message);
+      console.error("[TMDB] Comprehensive metadata fetch failed:", err.message);
     }
     return null;
   }
@@ -2822,6 +2647,10 @@ async function healAndSyncDatabase() {
     }
   });
   await Promise.all(healPromises);
+  const tmdbCollectionsAssigned = await assignTmdbMovieCollections(moviesDatabase);
+  if (tmdbCollectionsAssigned) {
+    changed = true;
+  }
   const collectionsAssigned = autoAssignMovieCollections(moviesDatabase);
   if (collectionsAssigned) {
     changed = true;
@@ -3020,7 +2849,7 @@ async function deduplicateDatabase() {
     moviesDatabase.push(...uniqueMovies);
     if (db) {
       for (const id of removedIds) {
-        await db.collection("movies").doc(id).delete().catch((err) => console.error(`[Firestore Delete Duplicate Error] ${id}:`, err));
+        await deleteMovieFromFirestore(id);
       }
     }
     saveMoviesDatabase();
@@ -3045,6 +2874,47 @@ function extractExactPartNumber(titleAr, titleEn, defaultPart = 1) {
   if (/\b(part\s*2|chapter\s*2|\b2\b|ii|الجزء\s*الثاني)\b/i.test(text)) return 2;
   if (/\b(part\s*1|chapter\s*1|\b1\b|i|الجزء\s*الأول|الجزء\s*الاول)\b/i.test(text)) return 1;
   return defaultPart;
+}
+async function assignTmdbMovieCollections(movies) {
+  let changed = false;
+  const candidates = movies.filter((m) => m.type === "movie" && !m.collectionId?.startsWith("tmdb_") && !m.collectionCheckedAt).slice(0, 15);
+  for (const movie of candidates) {
+    const numericId = movie.id.replace(/\D/g, "");
+    movie.collectionCheckedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (!numericId) {
+      changed = true;
+      continue;
+    }
+    try {
+      const details = await getMovieDetails(numericId);
+      const belongsTo = details?.belongs_to_collection;
+      if (belongsTo) {
+        const [enCollection, arCollection] = await Promise.all([
+          getCollectionDetails(belongsTo.id, "en-US"),
+          getCollectionDetails(belongsTo.id, "ar")
+        ]);
+        const nameEn = enCollection?.name || belongsTo.name;
+        const nameAr = arCollection?.name && /[؀-ۿ]/.test(arCollection.name) ? arCollection.name : `\u0633\u0644\u0633\u0644\u0629 ${nameEn}`;
+        let partNumber;
+        const parts = enCollection?.parts;
+        if (parts && parts.length > 0) {
+          const sorted = [...parts].sort((a, b) => String(a.release_date || "9999").localeCompare(String(b.release_date || "9999")));
+          const idx = sorted.findIndex((p) => String(p.id) === String(numericId));
+          if (idx !== -1) partNumber = idx + 1;
+        }
+        movie.collectionId = `tmdb_${belongsTo.id}`;
+        movie.collectionNameEn = nameEn;
+        movie.collectionNameAr = nameAr;
+        movie.partNumber = partNumber ?? movie.partNumber ?? 1;
+        changed = true;
+      } else {
+        changed = true;
+      }
+    } catch (err) {
+      console.warn(`[TMDB] Collection lookup failed for movie ${movie.id}:`, err.message || err);
+    }
+  }
+  return changed;
 }
 function autoAssignMovieCollections(movies) {
   let changed = false;
@@ -3492,6 +3362,7 @@ function autoAssignMovieCollections(movies) {
     }
   ];
   movies.forEach((movie) => {
+    if (movie.collectionId?.startsWith("tmdb_")) return;
     for (const f of franchises) {
       if (f.match(movie)) {
         const targetPart = f.getPart(movie);
@@ -3702,7 +3573,7 @@ async function unifySeriesAndSeasons() {
     moviesDatabase.push(...unifiedList);
     if (db) {
       for (const id of removedIds) {
-        await db.collection("movies").doc(id).delete().catch((err) => console.error(`[Firestore Delete Merged Season] ${id}:`, err));
+        await deleteMovieFromFirestore(id);
       }
     }
     saveMoviesDatabase();
@@ -3774,44 +3645,6 @@ async function purgeFakeMovies() {
     cachedHomeData = null;
   }
 }
-async function fetchRealTMDBTrendingPaths() {
-  const tmdbPaths = [];
-  const urls = [
-    "https://www.themoviedb.org/movie",
-    "https://www.themoviedb.org/movie/top-rated",
-    "https://www.themoviedb.org/movie/now-playing",
-    "https://www.themoviedb.org/movie/upcoming",
-    "https://www.themoviedb.org/tv",
-    "https://www.themoviedb.org/tv/top-rated",
-    "https://www.themoviedb.org/tv/on-the-air",
-    "https://www.themoviedb.org/trending"
-  ];
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-          "Accept-Language": "en-US,en;q=0.9"
-        },
-        signal: AbortSignal.timeout(6e3)
-      });
-      if (res.ok) {
-        const html = await res.text();
-        const matches = html.matchAll(/href="(\/(movie|tv)\/(\d+)[^"]*)"/gi);
-        for (const m of matches) {
-          const path3 = `/${m[2]}/${m[3]}`;
-          if (!tmdbPaths.includes(path3)) {
-            tmdbPaths.push(path3);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn(`[TMDB Live Scraper] Failed to fetch ${url}:`, err.message || err);
-    }
-  }
-  console.log(`[TMDB Live Scraper] Discovered ${tmdbPaths.length} real TMDB movie/TV show paths from live TMDB directory.`);
-  return tmdbPaths;
-}
 async function importBatchFromCinemanaAndTMDB(options) {
   const limit = options.limit || 15;
   if (cinemanaImportStats.isCurrentlyRunning) {
@@ -3831,7 +3664,7 @@ async function importBatchFromCinemanaAndTMDB(options) {
     if (options.forceQuery) {
       candidates.push(options.forceQuery);
     }
-    const realTMDBPaths = await fetchRealTMDBTrendingPaths().catch(() => []);
+    const realTMDBPaths = await getTrendingPaths().catch(() => []);
     candidates.push(...realTMDBPaths);
     const liveDiscovered = await fetchFutureAndTrendingTitlesFromGemini().catch(() => []);
     candidates.push(...liveDiscovered);
@@ -4452,6 +4285,16 @@ app.post("/api/admin/movies", async (req, res) => {
       return res.status(400).json({ error: "\u0627\u0644\u0631\u062C\u0627\u0621 \u0625\u062F\u062E\u0627\u0644 \u0627\u0633\u0645 \u0627\u0644\u0639\u0645\u0644 (\u0628\u0627\u0644\u0639\u0631\u0628\u064A\u0629 \u0623\u0648 \u0627\u0644\u0625\u0646\u062C\u0644\u064A\u0632\u064A\u0629)" });
     }
     if (!movie.type) movie.type = "movie";
+    if (movie.type === "movie") {
+      const existingMovie = findDuplicateMovieOrSeries(movie.titleAr, movie.titleEn, movie.id, "movie");
+      if (existingMovie) {
+        console.log(`[Admin Movie Add] Rejected duplicate import: "${movie.titleAr || movie.titleEn}" already exists as ${existingMovie.id}`);
+        return res.status(409).json({
+          error: `\u0647\u0630\u0627 \u0627\u0644\u0641\u0644\u0645 \u0645\u0648\u062C\u0648\u062F \u0628\u0627\u0644\u0641\u0639\u0644 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A ("${existingMovie.titleAr}")\u060C \u0644\u0627 \u064A\u0645\u0643\u0646 \u0627\u0633\u062A\u064A\u0631\u0627\u062F\u0647 \u0623\u0648 \u0625\u0636\u0627\u0641\u062A\u0647 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.`,
+          existingMovieId: existingMovie.id
+        });
+      }
+    }
     if (!movie.id) {
       const prefix = movie.type === "series" ? "series_" : "movie_";
       movie.id = prefix + Date.now();

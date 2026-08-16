@@ -3,78 +3,73 @@
   "customTrendingIds": [],
   "customPromos": [],
   "adsSettings": {
+    "allowSkip": true,
     "globalSkipAfterSeconds": 5,
     "enabled": false,
-    "allowSkip": true,
     "ads": [
       {
-        "titleEn": "Cinemana Golden Premiere 4K Ad",
-        "id": "ad_demo_1",
+        "sponsorUrl": "https://cinemana.tv",
         "sponsorLogo": "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=200&q=80",
+        "titleAr": "إعلان سينمانا العرض الذهبي 4K",
+        "createdAt": "2026-07-25T08:31:33.897Z",
+        "titleEn": "Cinemana Golden Premiere 4K Ad",
         "durationSeconds": 15,
         "sponsorNameAr": "سينمانا تي في برو",
-        "titleAr": "إعلان سينمانا العرض الذهبي 4K",
-        "sponsorUrl": "https://cinemana.tv",
-        "skipAfterSeconds": 5,
-        "targetType": "all",
-        "createdAt": "2026-07-25T08:31:33.897Z",
-        "sponsorNameEn": "Cinemana TV Pro",
         "isActive": true,
         "servers": [
           {
-            "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-            "name": "سيرفر الإعلان الرئيسي (MP4 Direct 1080p)",
             "id": "ad_srv_1",
-            "type": "video"
+            "name": "سيرفر الإعلان الرئيسي (MP4 Direct 1080p)",
+            "type": "video",
+            "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
           },
           {
             "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-            "name": "سيرفر الإعلان السريع (MP4 4K)",
             "id": "ad_srv_2",
-            "type": "video"
+            "type": "video",
+            "name": "سيرفر الإعلان السريع (MP4 4K)"
           },
           {
-            "type": "hls",
-            "name": "سيرفر البث الإحتياطي (HLS Stream)",
+            "id": "ad_srv_3",
             "url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-            "id": "ad_srv_3"
-          }
-        ]
-      },
-      {
-        "createdAt": "2026-07-25T08:31:33.897Z",
-        "sponsorUrl": "https://google.com",
-        "servers": [
-          {
-            "id": "ad_srv_2_1",
-            "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoypasses.mp4",
-            "name": "سيرفر البث الرئيسي للإعلان الثاني",
-            "type": "video"
-          },
-          {
-            "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
-            "id": "ad_srv_2_2",
-            "name": "سيرفر البث البديل",
-            "type": "video"
+            "name": "سيرفر البث الإحتياطي (HLS Stream)",
+            "type": "hls"
           }
         ],
-        "isActive": true,
         "skipAfterSeconds": 5,
         "targetType": "all",
-        "sponsorNameEn": "Official Sponsor",
-        "durationSeconds": 12,
-        "sponsorNameAr": "الراعي الرسمي للفيلم",
-        "id": "ad_demo_2",
-        "sponsorLogo": "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=200&q=80",
-        "titleEn": "Exclusive Broadcast Sponsor Ad",
-        "titleAr": "إعلان راعي البث والتغطية الحصرية"
+        "sponsorNameEn": "Cinemana TV Pro",
+        "id": "ad_demo_1"
       },
       {
+        "titleAr": "إعلان راعي البث والتغطية الحصرية",
+        "id": "ad_demo_2",
         "targetType": "all",
-        "durationSeconds": 15,
-        "sponsorNameAr": "",
+        "titleEn": "Exclusive Broadcast Sponsor Ad",
+        "sponsorLogo": "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=200&q=80",
+        "sponsorNameAr": "الراعي الرسمي للفيلم",
         "isActive": true,
-        "sponsorUrl": "",
+        "durationSeconds": 12,
+        "sponsorNameEn": "Official Sponsor",
+        "createdAt": "2026-07-25T08:31:33.897Z",
+        "servers": [
+          {
+            "type": "video",
+            "id": "ad_srv_2_1",
+            "name": "سيرفر البث الرئيسي للإعلان الثاني",
+            "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoypasses.mp4"
+          },
+          {
+            "id": "ad_srv_2_2",
+            "name": "سيرفر البث البديل",
+            "type": "video",
+            "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4"
+          }
+        ],
+        "sponsorUrl": "https://google.com",
+        "skipAfterSeconds": 5
+      },
+      {
         "servers": [
           {
             "id": "srv_1",
@@ -83,13 +78,18 @@
             "name": "سيرفر الإعلان الرئيسي (MP4)"
           }
         ],
-        "sponsorLogo": "/uploads/ad_1784968366004_ctv_logo.png",
-        "createdAt": "2026-07-25T08:33:10.282Z",
-        "titleEn": "ctv",
-        "titleAr": "ctv",
+        "durationSeconds": 15,
+        "targetType": "all",
+        "skipAfterSeconds": 5,
         "id": "ad_1784968390282",
+        "titleEn": "ctv",
+        "createdAt": "2026-07-25T08:33:10.282Z",
+        "sponsorLogo": "/uploads/ad_1784968366004_ctv_logo.png",
         "sponsorNameEn": "",
-        "skipAfterSeconds": 5
+        "sponsorUrl": "",
+        "isActive": true,
+        "sponsorNameAr": "",
+        "titleAr": "ctv"
       }
     ]
   }
