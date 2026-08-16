@@ -6347,7 +6347,7 @@
         "name": "Rupert Grint"
       }
     ],
-    "subtitlesUrlEn": "/api/subtitles?movieId=movie_671&lang=en",
+    "subtitlesUrlEn": "/api/subtitles?movieId=movie_1784988183307&lang=en",
     "titleAr": "هاري بوتر وحجر الفيلسوف",
     "actors": [
       "Chris Columbus",
@@ -6357,7 +6357,7 @@
       "Rupert Grint"
     ],
     "titleEn": "Harry Potter and the Philosopher's Stone",
-    "subtitlesUrlAr": "/api/subtitles?movieId=movie_671&lang=ar",
+    "subtitlesUrlAr": "/api/subtitles?movieId=movie_1784988183307&lang=ar",
     "partNumber": 1,
     "writer": "Steve Kloves",
     "rating": 7.9,
@@ -6624,7 +6624,7 @@
     "quality": "Full HD",
     "titleAr": "الماتريكس الثورة",
     "writerPhotoUrl": "https://image.tmdb.org/t/p/w300/rCScAjSpeKA19BLNR07MqNNeeTT.jpg",
-    "subtitlesUrlAr": "/api/subtitles?movieId=movie_605&lang=ar",
+    "subtitlesUrlAr": "/api/subtitles?movieId=movie_1786632218212&lang=ar",
     "actors": [
       "Lilly Wachowski",
       "Lana Wachowski",
@@ -6635,7 +6635,7 @@
     "collectionNameEn": "The Matrix Collection",
     "writer": "Lilly Wachowski",
     "language": "en",
-    "subtitlesUrlEn": "/api/subtitles?movieId=movie_605&lang=en",
+    "subtitlesUrlEn": "/api/subtitles?movieId=movie_1786632218212&lang=en",
     "castMembers": [
       {
         "role": "ممثل رئيسي",
@@ -6700,10 +6700,10 @@
       "Carrie-Anne Moss"
     ],
     "titleAr": "الماتريكس  إعادة تحميل",
-    "subtitlesUrlEn": "/api/subtitles?movieId=movie_604&lang=en",
+    "subtitlesUrlEn": "/api/subtitles?movieId=movie_1786632318329&lang=en",
     "quality": "Full HD",
     "language": "en",
-    "subtitlesUrlAr": "/api/subtitles?movieId=movie_604&lang=ar",
+    "subtitlesUrlAr": "/api/subtitles?movieId=movie_1786632318329&lang=ar",
     "ageRating": "R",
     "titleEn": "The Matrix Reloaded",
     "collectionId": "The Matrix",
@@ -7433,7 +7433,7 @@
     "titleAr": "الهوبيت : معركة الجيوش الخمسة",
     "isPublished": true,
     "rating": 7.3,
-    "partNumber": 1,
+    "partNumber": 3,
     "id": "movie_1786813661123",
     "year": 2014,
     "writerPhotoUrl": "https://image.tmdb.org/t/p/w300/bNc908d59Ba8VDNr4eCcm4G1cR.jpg",
@@ -7480,10 +7480,10 @@
     "subtitlesUrlEn": "/api/subtitles?movieId=movie_1786813661123&lang=en",
     "poster": "https://image.tmdb.org/t/p/w780/xT98tLqatZPQApyRmlPL12LtiWp.jpg",
     "subtitlesUrlAr": "/api/subtitles?movieId=movie_1786813661123&lang=ar",
-    "collectionNameAr": "سلسلة سيد الخواتم والهوبيت",
+    "collectionNameAr": "",
     "originalSubtitlesUrlEn": "",
-    "collectionNameEn": "The Lord of the Rings & Hobbit Collection",
-    "collectionId": "Hobbit Collection",
+    "collectionNameEn": "",
+    "collectionId": "Hobbit",
     "genres": [
       "أكشن",
       "مغامرة",
@@ -35082,5 +35082,81 @@
         "titleAr": "الموسم الأول"
       }
     ]
+  },
+  {
+    "titleAr": "الهوبيت : رحلة غير متوقعة",
+    "titleEn": "The Hobbit: An Unexpected Journey",
+    "type": "movie",
+    "rating": 7.4,
+    "year": 2012,
+    "duration": "2h 49m",
+    "ageRating": "PG-13",
+    "genres": [
+      "مغامرة",
+      "خيال",
+      "أكشن"
+    ],
+    "poster": "https://image.tmdb.org/t/p/w780/yHA9Fc37VmpUA5UncTxxo3rTGVA.jpg",
+    "backdrop": "https://image.tmdb.org/t/p/original/2CQvYa4zWjyu6fFM1Z2oyPTEiaQ.jpg",
+    "storyAr": "في عالم اﻷرض الوسطى، يروي الفيلم قصة الهوبيت (بيلبو باجنز) الذي يجد نفسه دون حسابات جزء من مغامرة كبرى مع الساحر (جاندالف) وثلاثة عشر قزمًا يقودهم (ثورين أوكنشيلد)، وذلك بهدف استعادة مملكة اﻷقزام المفقودة التي يحرسها التنين (سموج)، والحصول على الكنز الدفين الكامن في قلبها.",
+    "storyEn": "Bilbo Baggins, a hobbit enjoying his quiet life, is swept into an epic quest by Gandalf the Grey and thirteen dwarves who seek to reclaim their mountain home from Smaug, the dragon.",
+    "actors": [
+      "Peter Jackson",
+      "J. R. R. Tolkien",
+      "Guillermo del Toro",
+      "Fran Walsh",
+      "Philippa Boyens"
+    ],
+    "director": "Peter Jackson",
+    "writer": "Peter Jackson",
+    "directorPhotoUrl": "https://image.tmdb.org/t/p/w300/bNc908d59Ba8VDNr4eCcm4G1cR.jpg",
+    "writerPhotoUrl": "https://image.tmdb.org/t/p/w300/bNc908d59Ba8VDNr4eCcm4G1cR.jpg",
+    "castMembers": [
+      {
+        "name": "Peter Jackson",
+        "role": "ممثل رئيسي",
+        "photoUrl": "https://image.tmdb.org/t/p/w300/bNc908d59Ba8VDNr4eCcm4G1cR.jpg"
+      },
+      {
+        "name": "J. R. R. Tolkien",
+        "role": "ممثل رئيسي",
+        "photoUrl": "https://image.tmdb.org/t/p/w300/U2bwiLRz8HfVXN4JJGpZBVDMRu.jpg"
+      },
+      {
+        "name": "Guillermo del Toro",
+        "role": "ممثل رئيسي",
+        "photoUrl": "https://image.tmdb.org/t/p/w300/gldeyCtKcaqnK1v4Vu9vqayhzUQ.jpg"
+      },
+      {
+        "name": "Fran Walsh",
+        "role": "ممثل رئيسي",
+        "photoUrl": "https://image.tmdb.org/t/p/w300/roXPta5fAmGzqdOIvUQbDavZy8Y.jpg"
+      },
+      {
+        "name": "Philippa Boyens",
+        "role": "ممثل رئيسي",
+        "photoUrl": "https://image.tmdb.org/t/p/w300/vfPQnrMZ87uPjyJYrSkQtqI6c0H.jpg"
+      }
+    ],
+    "quality": "Full HD",
+    "servers": [
+      {
+        "name": "سيرفر البث الرئيسي",
+        "url": "https://cdn.shabakaty.com/vascin24-mp4/984A9685-2419-BDE7-5F39-E2DA41FA5128_video.mp4?response-content-disposition=attachment%3B%20filename%3D%22video.mp4%22&AWSAccessKeyId=PSFBSAZRKNBJOAMKHHBIBOBEONKBBOPKEDDBFBOJCH&Expires=1787174075&Signature=3PGfHgPEegtWvRQ0On8DgKu9GgU%3D"
+      }
+    ],
+    "subtitlesUrlAr": "/api/subtitles?movieId=movie_1786882101114&lang=ar",
+    "subtitlesUrlEn": "/api/subtitles?movieId=movie_1786882101114&lang=en",
+    "originalSubtitlesUrlAr": "",
+    "originalSubtitlesUrlEn": "",
+    "trailerUrl": "https://www.youtube.com/results?search_query=The%20Hobbit%3A%20An%20Unexpected%20Journey%20trailer",
+    "language": "en",
+    "collectionId": "Hobbit",
+    "collectionNameAr": "",
+    "collectionNameEn": "",
+    "partNumber": 1,
+    "logoUrl": "https://image.tmdb.org/t/p/original/h5DwmLJAw9xr9Sx33G0ckg7yjTB.png",
+    "isPublished": true,
+    "id": "movie_1786882101114"
   }
 ]
