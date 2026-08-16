@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "Movie": {
+      "title": "Movie",
+      "description": "Represents a movie or series in the catalog",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the movie or series" },
+        "titleAr": { "type": "string", "description": "Arabic title of the film or series" },
+        "titleEn": { "type": "string", "description": "English title of the film or series" },
+        "type": { "type": "string", "description": "Type of media, either movie or series" },
+        "rating": { "type": "number", "description": "Rating of the film/series out of 10" },
+        "year": { "type": "number", "description": "Release year" },
+        "duration": { "type": "string", "description": "Duration or number of episodes" },
+        "genres": { "type": "array", "description": "List of genres" },
+        "poster": { "type": "string", "description": "Poster image URL" },
+        "backdrop": { "type": "string", "description": "Backdrop image URL" },
+        "storyAr": { "type": "string", "description": "Arabic story summary" },
+        "storyEn": { "type": "string", "description": "English story summary" },
+        "actors": { "type": "array", "description": "List of actor names" },
+        "quality": { "type": "string", "description": "Video quality (e.g. Full HD)" },
+        "servers": { "type": "array", "description": "Array of stream server maps containing name and url" },
+        "subtitlesUrlAr": { "type": "string", "description": "Arabic subtitles URL" },
+        "subtitlesUrlEn": { "type": "string", "description": "English subtitles URL" },
+        "trailerUrl": { "type": "string", "description": "Trailer video URL" }
+      },
+      "required": ["id", "titleAr", "titleEn", "type"]
+    },
+    "AppConfig": {
+      "title": "AppConfig",
+      "description": "Global application configuration for hero banner, trending, and promos",
+      "type": "object",
+      "properties": {
+        "customHeroId": { "type": "string", "description": "ID of the movie featured in the hero banner" },
+        "customTrendingIds": { "type": "array", "description": "IDs of the trending movies" },
+        "customPromos": { "type": "array", "description": "Custom promotional slides/items" }
+      },
+      "required": []
+    }
+  },
+  "firestore": {
+    "movies": {
+      "schema": "Movie",
+      "description": "Collection of movies and series"
+    },
+    "config": {
+      "schema": "AppConfig",
+      "description": "Global system configurations"
+    }
+  }
+}

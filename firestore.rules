@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validation for Movie
+    function isValidMovie(data) {
+      return data.keys().hasAll(['id', 'titleAr', 'titleEn', 'type'])
+        && data.id is string && data.id.size() <= 128
+        && data.titleAr is string && data.titleAr.size() <= 300
+        && data.titleEn is string && data.titleEn.size() <= 300
+        && data.type is string && (data.type == 'movie' || data.type == 'series')
+        && (!('rating' in data) || data.rating is number)
+        && (!('year' in data) || data.year is number)
+        && (!('duration' in data) || data.duration is string)
+        && (!('genres' in data) || data.genres is list)
+        && (!('poster' in data) || data.poster is string)
+        && (!('backdrop' in data) || data.backdrop is string)
+        && (!('storyAr' in data) || data.storyAr is string)
+        && (!('storyEn' in data) || data.storyEn is string)
+        && (!('actors' in data) || data.actors is list)
+        && (!('quality' in data) || data.quality is string)
+        && (!('servers' in data) || data.servers is list)
+        && (!('seasons' in data) || data.seasons is list)
+        && (!('subtitlesUrlAr' in data) || data.subtitlesUrlAr is string)
+        && (!('subtitlesUrlEn' in data) || data.subtitlesUrlEn is string)
+        && (!('trailerUrl' in data) || data.trailerUrl is string);
+    }
+
+    // Validation for AppConfig
+    function isValidAppConfig(data) {
+      return (!('customHeroId' in data) || data.customHeroId is string)
+        && (!('customTrendingIds' in data) || data.customTrendingIds is list)
+        && (!('customPromos' in data) || data.customPromos is list);
+    }
+
+    // Movies Collection
+    match /movies/{movieId} {
+      allow read: if true;
+      allow write: if isValidId(movieId) && (request.resource == null || isValidMovie(request.resource.data));
+    }
+
+    // Config Collection
+    match /config/{configId} {
+      allow read: if true;
+      allow write: if isValidId(configId) && (request.resource == null || isValidAppConfig(request.resource.data));
+    }
+  }
+}

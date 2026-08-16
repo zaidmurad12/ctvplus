@@ -1,0 +1,6 @@
+{
+  "name": "CTV App",
+  "description": "تطبيق أندرويد تي في بتصميم عصري لعرض الأفلام والمسلسلاتا",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

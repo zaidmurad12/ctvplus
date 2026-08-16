@@ -1,0 +1,23 @@
+/*
+Theme Name: Cinemana TV Theme
+Theme URI: https://cinemana.shabakaty.com/
+Author: AI Studio
+Author URI: https://ai.studio/build
+Description: قالب ووردبريس سينمانا الاحترافي المتوافق بالكامل مع شاشات Android TV وأجهزة التلفزيون الذكية، يدعم التحرير الكامل عبر Elementor مع الحفاظ على التصميم الأصلي ونظام التنقل بالريموت كونترول.
+Version: 1.0.0
+License: GNU General Public License v2 or later
+License URI: http://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: cinemana-tv-theme
+Tags: black, dark, responsive-layout, tv, elementor, translation-ready
+
+هذا الملف مطلوب كمعيار أساسي لتعريف قالب ووردبريس.
+*/
+
+/* يمكنك إضافة أي تنسيقات مخصصة إضافية هنا، ولكن التنسيق الأساسي يتم تحميله تلقائياً من تطبيق React */
+body {
+    background-color: #000000 !important;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    color: #ffffff;
+}

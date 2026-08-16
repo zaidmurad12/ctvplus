@@ -1,0 +1,162 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800&family=Tajawal:wght@300;400;500;700;900&family=Amiri:ital,wght@0,400;0,700;1,400;1,700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Cairo", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-disp: "Tajawal", "Cairo", "Outfit", sans-serif;
+  --font-display: "Tajawal", "Cairo", "Outfit", sans-serif;
+  --font-number: "Space Grotesk", sans-serif;
+}
+
+/* Custom CSS for custom Android TV styles */
+html, body {
+  width: 100vw !important;
+  height: 100vh !important;
+  min-height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background-color: #000000 !important;
+  color: #f8fafc !important;
+  overflow: hidden !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+}
+
+#root {
+  width: 100vw !important;
+  height: 100vh !important;
+  min-height: 100vh !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  background-color: #000000 !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+@layer base {
+  body {
+    color: #f8fafc;
+    font-family: var(--font-sans);
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* High quality 4K image rendering */
+  img {
+    image-rendering: high-quality;
+    image-rendering: -webkit-optimize-contrast;
+  }
+
+  /* 4K & Ultra-HD display scaling support */
+  @media (min-width: 2500px) {
+    html {
+      font-size: 18px;
+    }
+  }
+
+  @media (min-width: 3800px) {
+    html {
+      font-size: 22px;
+    }
+  }
+  
+  .font-num {
+    font-family: var(--font-number);
+  }
+  
+  .font-disp {
+    font-family: var(--font-display);
+  }
+
+  /* TV layout focus animations */
+  .tv-focus-glow {
+    transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  
+  .tv-focus-glow:focus, .tv-focus-glow.tv-focused {
+    transform: scale(1.04);
+    border-color: #ffffff;
+    outline: none;
+    box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #000000, 0 8px 20px -4px rgba(255, 255, 255, 0.2);
+    z-index: 10;
+  }
+}
+
+/* Hide scrollbar globally across all elements but keep scroll functionality */
+html, body, *, ::-webkit-scrollbar {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+*::-webkit-scrollbar {
+  display: none;
+  width: 0px;
+  height: 0px;
+  background: transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Custom continuous focus ring */
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 15px rgba(255, 255, 255, 0.4); }
+  50% { box-shadow: 0 0 25px rgba(255, 255, 255, 0.8); }
+}
+
+.tv-glow-active {
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+/* Hero Backdrop Zoom-Out Slow Motion. Starts at scale(1) — not zoomed in — so the
+   banner is always fully visible right away; HomeScreen (and this img's key={heroMovie.id})
+   remounts every time the user returns to the home screen, which used to restart the
+   old 1.20 -> 1.0 zoom from its cropped-in starting point each time. */
+@keyframes heroZoomOut {
+  0% {
+    transform: scale(1.0);
+  }
+  100% {
+    transform: scale(1.0);
+  }
+}
+
+.animate-hero-zoom-out {
+  animation: heroZoomOut 10s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Giant Outline / Hollow Stroke Numbers for Top 10 & Parts */
+.stroke-number {
+  color: transparent;
+  -webkit-text-stroke: 2.5px rgba(255, 255, 255, 0.45);
+  font-family: var(--font-number), sans-serif;
+  font-weight: 900;
+  line-height: 0.82;
+  letter-spacing: -0.06em;
+  text-shadow: 0 4px 25px rgba(0, 0, 0, 0.95);
+  transition: all 0.3s ease;
+}
+
+.group\/mcard:hover .stroke-number,
+[data-card-focused="true"] .stroke-number {
+  color: rgba(255, 255, 255, 0.1);
+  -webkit-text-stroke: 3px #ffffff;
+  filter: drop-shadow(0 0 16px rgba(255, 255, 255, 0.5));
+  transform: scale(1.04);
+}
+

@@ -1,0 +1,30 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path
+        android:fillColor="#090b11"
+        android:pathData="M0,0h320v180h-320z"/>
+    <!-- Central decorative glowing gradient circles -->
+    <path
+        android:fillColor="#ffaa00"
+        android:pathData="M160,90m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0"
+        android:fillAlpha="0.15"/>
+    <path
+        android:fillColor="#00aaff"
+        android:pathData="M160,90m-20,0a20,20 0,1 1,40 0a20,20 0,1 1,-40 0"
+        android:fillAlpha="0.1"/>
+    <!-- Stylized TV Logo / Cinemana Text -->
+    <path
+        android:fillColor="#ffaa00"
+        android:pathData="M110,75 l25,-15 l25,15 l0,30 l-50,0 z"/>
+    <path
+        android:fillColor="#ffffff"
+        android:pathData="M125,75 l15,10 l-15,10 z"/>
+    <!-- Elegant decorative frame lines -->
+    <path
+        android:strokeColor="#ffaa00"
+        android:strokeWidth="2"
+        android:pathData="M20,20 L50,20 M20,20 L20,50 M300,20 L270,20 M300,20 L300,50 M20,160 L50,160 M20,160 L20,130 M300,160 L270,160 M300,160 L300,130"/>
+</vector>
