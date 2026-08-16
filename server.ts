@@ -1197,7 +1197,7 @@ async function findSubtitlesForWork(title: string, year: number, type: string, i
     try {
       console.log(`[Subtitles] Attempting Search Grounded Subtitle lookup for: ${title} (${year})`);
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-flash-latest",
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }],
@@ -1308,7 +1308,7 @@ async function generateMovieWithGemini(query: string): Promise<Movie | null> {
 }`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -1491,7 +1491,7 @@ async function fetchHomeMoviesFromGemini(): Promise<any | null> {
 }`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -1692,7 +1692,7 @@ interface Season {
 Return ONLY a valid JSON array of Season objects.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -1768,7 +1768,7 @@ List the top 20 most recent blockbusters, trending TV shows, and newly added rel
 Return your response as a simple JSON array of strings containing ONLY the titles in English (e.g., ["Dune: Part Two", "Gladiator II", "Inside Out 2", "Wicked", "Moana 2", "Severance Season 2"]).`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -2128,7 +2128,7 @@ Prefer links from TMDB (e.g., starting with https://image.tmdb.org/t/p/) or IMDb
 The response must be exclusively the raw URL string of the image, with no markdown code blocks, quotes, or conversational text.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }]
@@ -2705,7 +2705,7 @@ Requirements:
 - Return ONLY the raw URL as plain text. If you are absolutely unable to find a working link, return "FALLBACK".`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-flash-latest",
           contents: prompt,
           config: {
             tools: [{ googleSearch: {} }]
@@ -3018,38 +3018,35 @@ async function loadDatabaseFromFirestore() {
     });
 
     if (firestoreMovies.length > 0) {
-      // Safely merge: keep all firestoreMovies, plus any local movies from movies.json not yet in Firestore
-      const firestoreIds = new Set(firestoreMovies.map(m => m.id));
-      const firestoreTitleArs = new Set(firestoreMovies.map(m => m.titleAr ? m.titleAr.toLowerCase().trim() : ""));
-      const firestoreTitleEns = new Set(firestoreMovies.map(m => m.titleEn ? m.titleEn.toLowerCase().trim() : ""));
+      // Firestore is a backup/sync target, not the source of truth - SQLite (already loaded
+      // into moviesDatabase by loadDatabase() before this function runs) is. This used to be
+      // inverted (Firestore's copy unconditionally replaced local data), which silently
+      // reverted real edits: a saveMovieToFirestore() call can fail (daily free-tier write
+      // quota, network) without the admin ever seeing an error, leaving Firestore holding a
+      // stale copy - the next server restart would then overwrite the fresher local edit with
+      // that stale copy. Local data now always wins for anything that exists both places;
+      // Firestore is only used to restore movies genuinely missing locally (e.g. after local
+      // data loss).
+      const localIds = new Set(moviesDatabase.map(m => m.id));
+      const localTitleArs = new Set(moviesDatabase.map(m => m.titleAr ? m.titleAr.toLowerCase().trim() : ""));
+      const localTitleEns = new Set(moviesDatabase.map(m => m.titleEn ? m.titleEn.toLowerCase().trim() : ""));
 
-      // Merge local subtitle overrides or newly uploaded files into firestoreMovies
-      firestoreMovies.forEach(fsMov => {
-        const localMov = moviesDatabase.find(m => m.id === fsMov.id);
-        if (localMov) {
-          if (localMov.subtitlesUrlAr && localMov.subtitlesUrlAr.startsWith("/uploads/")) {
-            fsMov.subtitlesUrlAr = localMov.subtitlesUrlAr;
-          }
-          if (localMov.subtitlesUrlEn && localMov.subtitlesUrlEn.startsWith("/uploads/")) {
-            fsMov.subtitlesUrlEn = localMov.subtitlesUrlEn;
-          }
-          if (localMov.originalSubtitlesUrlAr) fsMov.originalSubtitlesUrlAr = localMov.originalSubtitlesUrlAr;
-          if (localMov.originalSubtitlesUrlEn) fsMov.originalSubtitlesUrlEn = localMov.originalSubtitlesUrlEn;
-        }
-      });
-
-      const missingFromFirestore = moviesDatabase.filter(m => 
-        !isMovieDeleted(m.id, m.titleAr, m.titleEn) &&
-        !firestoreIds.has(m.id) &&
-        (!m.titleAr || !firestoreTitleArs.has(m.titleAr.toLowerCase().trim())) &&
-        (!m.titleEn || !firestoreTitleEns.has(m.titleEn.toLowerCase().trim()))
+      const missingLocally = firestoreMovies.filter(fm =>
+        !isMovieDeleted(fm.id, fm.titleAr, fm.titleEn) &&
+        !localIds.has(fm.id) &&
+        (!fm.titleAr || !localTitleArs.has(fm.titleAr.toLowerCase().trim())) &&
+        (!fm.titleEn || !localTitleEns.has(fm.titleEn.toLowerCase().trim()))
       );
 
-      moviesDatabase.length = 0;
-      moviesDatabase.push(...firestoreMovies, ...missingFromFirestore);
-      console.log(`[Firestore] Loaded ${firestoreMovies.length} movies/series from Cloud Firestore, plus ${missingFromFirestore.length} locally uploaded works preserved.`);
+      if (missingLocally.length > 0) {
+        moviesDatabase.push(...missingLocally);
+        console.log(`[Firestore] Restored ${missingLocally.length} movie(s) missing locally from Cloud Firestore backup.`);
+      }
+      console.log(`[Firestore] Cloud has ${firestoreMovies.length} movies/series; local (authoritative) database has ${moviesDatabase.length}.`);
 
-      // Persist any locally uploaded works up to Cloud Firestore
+      // Push local movies not present in Firestore's copy up to Firestore, so the cloud
+      // backup stays in sync going forward.
+      const missingFromFirestore = moviesDatabase.filter(m => !firestoreMovies.some(fm => fm.id === m.id));
       for (const missingMovie of missingFromFirestore) {
         console.log(`[Firestore Sync] Uploading locally saved movie to Cloud Firestore: "${missingMovie.titleAr}" (${missingMovie.id})`);
         await saveMovieToFirestore(missingMovie).catch(err => console.error(`[Firestore Sync Error]`, err));
@@ -3125,6 +3122,17 @@ function loadDatabase() {
   setTimeout(() => {
     loadDatabaseFromFirestore().catch(console.error);
   }, 1000);
+
+  // 3. Keep healing running periodically for the lifetime of the process, not just once at
+  // startup - this app is meant to stay up permanently (PM2, restarted only on deploys), and
+  // several backfill passes inside healAndSyncDatabase (subtitles, language/country,
+  // collections) are intentionally capped to a small batch per run specifically so they can
+  // be re-run repeatedly like this instead of overwhelming external APIs in one pass. Hourly
+  // matches the existing auto-backup cadence and keeps each pass' request volume modest.
+  const HEALING_INTERVAL_MS = 60 * 60 * 1000;
+  setInterval(() => {
+    healAndSyncDatabase().catch(err => console.error("[Server] Periodic database healing failed:", err));
+  }, HEALING_INTERVAL_MS);
 }
 
 // Call loadDatabase immediately to populate memory
@@ -5736,7 +5744,7 @@ Write a comprehensive, factual research report containing all these details.`;
     let researchReport = "";
     try {
       const researchResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-flash-latest",
         contents: researchPrompt,
         config: {
           tools: [{ googleSearch: {} }]
@@ -5749,7 +5757,7 @@ Write a comprehensive, factual research report containing all these details.`;
       try {
         const fallbackPrompt = `${researchPrompt}\n\n(Note: Google Search grounding is currently unavailable. Please use your internal pre-trained database of movies/series to construct this factual report based on the provided URL, title, or ID.)`;
         const fallbackResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-flash-latest",
           contents: fallbackPrompt
         });
         researchReport = fallbackResponse.text || "No details found.";
@@ -5827,7 +5835,7 @@ CRITICAL: Return ONLY valid, pure JSON without any surrounding markdown code blo
     let parsedData: any = {};
     try {
       const formatResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-flash-latest",
         contents: formattingPrompt,
         config: {
           responseMimeType: "application/json"
@@ -5847,7 +5855,7 @@ CRITICAL: Return ONLY valid, pure JSON without any surrounding markdown code blo
       console.warn("[Importer] Step 2 JSON formatting failed, trying loose parsing without mimeType...", formatError.message);
       try {
         const formatResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-flash-latest",
           contents: `${formattingPrompt}\n\nCRITICAL: Return ONLY the raw JSON object, starting with { and ending with }.`
         });
         let resultText = formatResponse.text?.trim() || "{}";

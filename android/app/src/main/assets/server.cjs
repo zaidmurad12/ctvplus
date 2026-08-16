@@ -1201,7 +1201,7 @@ async function findSubtitlesForWork(title, year, type, imdbId) {
     try {
       console.log(`[Subtitles] Attempting Search Grounded Subtitle lookup for: ${title} (${year})`);
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-flash-latest",
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }],
@@ -1304,7 +1304,7 @@ async function generateMovieWithGemini(query) {
   ]
 }`;
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -1491,7 +1491,7 @@ async function fetchHomeMoviesFromGemini() {
   ]
 }`;
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -1687,7 +1687,7 @@ interface Season {
 
 Return ONLY a valid JSON array of Season objects.`;
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -1760,7 +1760,7 @@ Search the web (using googleSearch) for the newest and recently released movies 
 List the top 20 most recent blockbusters, trending TV shows, and newly added releases of 2026.
 Return your response as a simple JSON array of strings containing ONLY the titles in English (e.g., ["Dune: Part Two", "Gladiator II", "Inside Out 2", "Wicked", "Moana 2", "Severance Season 2"]).`;
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -2056,7 +2056,7 @@ You must return a direct, publicly accessible, high-quality portrait/headshot im
 Prefer links from TMDB (e.g., starting with https://image.tmdb.org/t/p/) or IMDb (e.g., starting with https://m.media-amazon.com/images/M/).
 The response must be exclusively the raw URL string of the image, with no markdown code blocks, quotes, or conversational text.`;
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }]
@@ -2551,7 +2551,7 @@ Requirements:
 - Do NOT return a generic stock photo, search results page, or search engine proxy link. It MUST be a direct static image URL.
 - Return ONLY the raw URL as plain text. If you are absolutely unable to find a working link, return "FALLBACK".`;
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-flash-latest",
           contents: prompt,
           config: {
             tools: [{ googleSearch: {} }]
@@ -2802,28 +2802,18 @@ async function loadDatabaseFromFirestore() {
       }
     });
     if (firestoreMovies.length > 0) {
-      const firestoreIds = new Set(firestoreMovies.map((m) => m.id));
-      const firestoreTitleArs = new Set(firestoreMovies.map((m) => m.titleAr ? m.titleAr.toLowerCase().trim() : ""));
-      const firestoreTitleEns = new Set(firestoreMovies.map((m) => m.titleEn ? m.titleEn.toLowerCase().trim() : ""));
-      firestoreMovies.forEach((fsMov) => {
-        const localMov = moviesDatabase.find((m) => m.id === fsMov.id);
-        if (localMov) {
-          if (localMov.subtitlesUrlAr && localMov.subtitlesUrlAr.startsWith("/uploads/")) {
-            fsMov.subtitlesUrlAr = localMov.subtitlesUrlAr;
-          }
-          if (localMov.subtitlesUrlEn && localMov.subtitlesUrlEn.startsWith("/uploads/")) {
-            fsMov.subtitlesUrlEn = localMov.subtitlesUrlEn;
-          }
-          if (localMov.originalSubtitlesUrlAr) fsMov.originalSubtitlesUrlAr = localMov.originalSubtitlesUrlAr;
-          if (localMov.originalSubtitlesUrlEn) fsMov.originalSubtitlesUrlEn = localMov.originalSubtitlesUrlEn;
-        }
-      });
-      const missingFromFirestore = moviesDatabase.filter(
-        (m) => !isMovieDeleted(m.id, m.titleAr, m.titleEn) && !firestoreIds.has(m.id) && (!m.titleAr || !firestoreTitleArs.has(m.titleAr.toLowerCase().trim())) && (!m.titleEn || !firestoreTitleEns.has(m.titleEn.toLowerCase().trim()))
+      const localIds = new Set(moviesDatabase.map((m) => m.id));
+      const localTitleArs = new Set(moviesDatabase.map((m) => m.titleAr ? m.titleAr.toLowerCase().trim() : ""));
+      const localTitleEns = new Set(moviesDatabase.map((m) => m.titleEn ? m.titleEn.toLowerCase().trim() : ""));
+      const missingLocally = firestoreMovies.filter(
+        (fm) => !isMovieDeleted(fm.id, fm.titleAr, fm.titleEn) && !localIds.has(fm.id) && (!fm.titleAr || !localTitleArs.has(fm.titleAr.toLowerCase().trim())) && (!fm.titleEn || !localTitleEns.has(fm.titleEn.toLowerCase().trim()))
       );
-      moviesDatabase.length = 0;
-      moviesDatabase.push(...firestoreMovies, ...missingFromFirestore);
-      console.log(`[Firestore] Loaded ${firestoreMovies.length} movies/series from Cloud Firestore, plus ${missingFromFirestore.length} locally uploaded works preserved.`);
+      if (missingLocally.length > 0) {
+        moviesDatabase.push(...missingLocally);
+        console.log(`[Firestore] Restored ${missingLocally.length} movie(s) missing locally from Cloud Firestore backup.`);
+      }
+      console.log(`[Firestore] Cloud has ${firestoreMovies.length} movies/series; local (authoritative) database has ${moviesDatabase.length}.`);
+      const missingFromFirestore = moviesDatabase.filter((m) => !firestoreMovies.some((fm) => fm.id === m.id));
       for (const missingMovie of missingFromFirestore) {
         console.log(`[Firestore Sync] Uploading locally saved movie to Cloud Firestore: "${missingMovie.titleAr}" (${missingMovie.id})`);
         await saveMovieToFirestore(missingMovie).catch((err) => console.error(`[Firestore Sync Error]`, err));
@@ -2881,6 +2871,10 @@ function loadDatabase() {
   setTimeout(() => {
     loadDatabaseFromFirestore().catch(console.error);
   }, 1e3);
+  const HEALING_INTERVAL_MS = 60 * 60 * 1e3;
+  setInterval(() => {
+    healAndSyncDatabase().catch((err) => console.error("[Server] Periodic database healing failed:", err));
+  }, HEALING_INTERVAL_MS);
 }
 loadDatabase();
 var cinemanaImportStats = {
@@ -5087,7 +5081,7 @@ Write a comprehensive, factual research report containing all these details.`;
     let researchReport = "";
     try {
       const researchResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-flash-latest",
         contents: researchPrompt,
         config: {
           tools: [{ googleSearch: {} }]
@@ -5102,7 +5096,7 @@ Write a comprehensive, factual research report containing all these details.`;
 
 (Note: Google Search grounding is currently unavailable. Please use your internal pre-trained database of movies/series to construct this factual report based on the provided URL, title, or ID.)`;
         const fallbackResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-flash-latest",
           contents: fallbackPrompt
         });
         researchReport = fallbackResponse.text || "No details found.";
@@ -5177,7 +5171,7 @@ CRITICAL: Return ONLY valid, pure JSON without any surrounding markdown code blo
     let parsedData = {};
     try {
       const formatResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-flash-latest",
         contents: formattingPrompt,
         config: {
           responseMimeType: "application/json"
@@ -5196,7 +5190,7 @@ CRITICAL: Return ONLY valid, pure JSON without any surrounding markdown code blo
       console.warn("[Importer] Step 2 JSON formatting failed, trying loose parsing without mimeType...", formatError.message);
       try {
         const formatResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-flash-latest",
           contents: `${formattingPrompt}
 
 CRITICAL: Return ONLY the raw JSON object, starting with { and ending with }.`
