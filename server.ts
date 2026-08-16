@@ -92,6 +92,8 @@ interface Episode {
   subtitlesUrlEn?: string;
   originalSubtitlesUrlAr?: string;
   originalSubtitlesUrlEn?: string;
+  subtitleSearchFailedAtAr?: string;
+  subtitleSearchFailedAtEn?: string;
   rating?: number;
 }
 
@@ -131,6 +133,8 @@ interface Movie {
   ageRating?: string;
   originalSubtitlesUrlAr?: string;
   originalSubtitlesUrlEn?: string;
+  subtitleSearchFailedAtAr?: string;
+  subtitleSearchFailedAtEn?: string;
   trailerUrl?: string;
   language?: string;
   country?: string;
@@ -841,6 +845,25 @@ async function downloadAndSaveSubtitleFromUrl(url: string, langHint: "ar" | "en"
   }
 }
 
+// A transient connect-level failure (occasional individual CDN edge IP briefly unreachable
+// via Node's undici on this machine - the same class of issue diagnosed and fixed for
+// tmdb.ts's throttledFetch) gets one quick retry before giving up, instead of immediately
+// counting as "this source has nothing" the way a bare fetch() would.
+async function fetchWithRetry(url: string, options: RequestInit & { signal?: AbortSignal } = {}, timeoutMs: number = 6000): Promise<Response> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (err) {
+      if (attempt === 0) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("unreachable");
+}
+
 async function scrapeRealSubtitlesDirect(title: string, year: number, imdbId?: string): Promise<{ ar: string; en: string }> {
   const result = { ar: "", en: "" };
   if (!title) return result;
@@ -852,13 +875,13 @@ async function scrapeRealSubtitlesDirect(title: string, year: number, imdbId?: s
     const cleanTitle = title.replace(/[^\w\s]/gi, " ").trim();
     const query = `title:("${cleanTitle}") AND (format:"SubRip" OR extension:srt OR extension:vtt) AND mediatype:(texts OR movies)`;
     const archiveUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(query)}&fl[]=identifier,title&output=json`;
-    const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(6000) });
+    const res = await fetchWithRetry(archiveUrl, {}, 6000);
     if (res.ok) {
       const json = await res.json();
       const docs = json.response?.docs || [];
       for (const doc of docs.slice(0, 3)) {
         const filesUrl = `https://archive.org/metadata/${doc.identifier}/files`;
-        const filesRes = await fetch(filesUrl, { signal: AbortSignal.timeout(5000) });
+        const filesRes = await fetchWithRetry(filesUrl, {}, 5000);
         if (filesRes.ok) {
           const filesJson = await filesRes.json();
           const srtFiles = (filesJson.result || []).filter((f: any) => 
@@ -1996,6 +2019,18 @@ async function findOfficialWikipediaPoster(title: string, isBackdrop: boolean): 
   return null;
 }
 
+// Clears a /uploads/... subtitle reference whose file no longer actually exists on disk
+// (observed cause: files deleted outside the app - e.g. a Desktop OneDrive sync conflict -
+// while the database kept the stale reference). Without this, a "broken" reference is
+// indistinguishable from a real one until someone actually tries to play the movie, at
+// which point it silently fails to load and falls through to a full live re-search anyway -
+// this just makes that discovery happen proactively during healing instead of reactively.
+function clearMissingUploadedSubtitle(url: string | undefined): string | undefined {
+  if (!url || !url.startsWith("/uploads/")) return url;
+  const filePath = path.join(process.cwd(), "uploads", path.basename(url));
+  return fs.existsSync(filePath) ? url : "";
+}
+
 function getValidSubtitleUrl(url: string | undefined | null, movieId: string, lang: string, seasonId?: string, episodeId?: string, movieOrEp?: any, isEditMode: boolean = false): string {
   // If explicitly cleared by admin/user or empty string, preserve empty string so subtitle deletion works!
   if (url === "" || url === "none") {
@@ -2377,10 +2412,12 @@ async function scrapeTMDBMetadata(searchQueryOrUrl: string, lang: string = "ar")
     }
     if (genres.length === 0) genres.push("دراما", "تشويق");
 
-    // Real original language from TMDB - replaces the old title-text-guessing heuristic
-    // (hardcoded exact-title checks, "كوري"/"anime" substring matching) that the healing
-    // cycle previously relied on for movies with no authoritative source.
-    const language = details.original_language === "ar" ? "ar" : details.original_language === "en" ? "en" : "other";
+    // Real original language from TMDB (raw ISO 639-1 code, e.g. "ko", "hi", "tr") - replaces
+    // the old title-text-guessing heuristic (hardcoded exact-title checks, "كوري"/"anime"
+    // substring matching) that the healing cycle previously relied on for movies with no
+    // authoritative source. Stored as the real code rather than bucketed so the frontend
+    // filter can offer each language its own option instead of lumping them into "other".
+    const language = details.original_language || "en";
 
     // Production country - stored as Arabic (matching how genres are stored) via the shared
     // ISO 3166-1 lookup, since TMDB's country name is only ever returned in English/the
@@ -2804,6 +2841,20 @@ async function healAndSyncDatabase() {
       movieHealed = true;
     }
 
+    // A1. Detect and clear subtitle references whose uploaded file no longer exists on disk
+    const healedSubAr = clearMissingUploadedSubtitle(movie.originalSubtitlesUrlAr);
+    if (healedSubAr !== movie.originalSubtitlesUrlAr) {
+      console.log(`[Healer] Subtitle file missing on disk for "${movie.titleEn}" (ar): ${movie.originalSubtitlesUrlAr} - clearing so it can be re-searched.`);
+      movie.originalSubtitlesUrlAr = healedSubAr;
+      movieHealed = true;
+    }
+    const healedSubEn = clearMissingUploadedSubtitle(movie.originalSubtitlesUrlEn);
+    if (healedSubEn !== movie.originalSubtitlesUrlEn) {
+      console.log(`[Healer] Subtitle file missing on disk for "${movie.titleEn}" (en): ${movie.originalSubtitlesUrlEn} - clearing so it can be re-searched.`);
+      movie.originalSubtitlesUrlEn = healedSubEn;
+      movieHealed = true;
+    }
+
     // B. Validate and correct series episode subtitle tracks
     if (movie.type === "series" && movie.seasons) {
       movie.seasons.forEach((season) => {
@@ -2818,6 +2869,17 @@ async function healAndSyncDatabase() {
             const correctEpSubEn = getValidSubtitleUrl(episode.subtitlesUrlEn, movie.id, "en", season.id, episode.id, episode);
             if (episode.subtitlesUrlEn !== correctEpSubEn) {
               episode.subtitlesUrlEn = correctEpSubEn;
+              movieHealed = true;
+            }
+
+            const healedEpSubAr = clearMissingUploadedSubtitle(episode.originalSubtitlesUrlAr);
+            if (healedEpSubAr !== episode.originalSubtitlesUrlAr) {
+              episode.originalSubtitlesUrlAr = healedEpSubAr;
+              movieHealed = true;
+            }
+            const healedEpSubEn = clearMissingUploadedSubtitle(episode.originalSubtitlesUrlEn);
+            if (healedEpSubEn !== episode.originalSubtitlesUrlEn) {
+              episode.originalSubtitlesUrlEn = healedEpSubEn;
               movieHealed = true;
             }
           });
@@ -2879,6 +2941,12 @@ async function healAndSyncDatabase() {
   });
 
   await Promise.all(healPromises);
+
+  // Proactively search for missing subtitles instead of waiting for a viewer to trigger it.
+  const subtitlesBackfilled = await proactivelyFetchMissingSubtitles(moviesDatabase);
+  if (subtitlesBackfilled) {
+    changed = true;
+  }
 
   // Backfill real language + production country for entries missing them (pre-TMDB-migration
   // imports, or the old title-text-guessing heuristic below never having a country to set).
@@ -3235,6 +3303,64 @@ function extractExactPartNumber(titleAr: string, titleEn: string, defaultPart = 
   return defaultPart;
 }
 
+// Proactively searches for real subtitles during the healing cycle instead of only ever
+// searching reactively at the moment a user tries to play a specific movie (see
+// /api/subtitles below) - under the old fully-reactive design, the first viewer of any given
+// title always paid the multi-second live-search latency, and titles nobody happened to play
+// yet stayed subtitle-less even when a real file was findable in advance. Capped small per
+// cycle since a full subtitle search is the heaviest network operation in the whole healing
+// pass (OpenSubtitles + Archive.org, each with their own retries); respects the same
+// subtitleSearchFailedAtAr/En negative-cache fields as the reactive endpoint so a title with
+// no subtitle available anywhere isn't hammered again every single cycle.
+async function proactivelyFetchMissingSubtitles(movies: Movie[]): Promise<boolean> {
+  let changed = false;
+  const NEGATIVE_CACHE_MS = 24 * 60 * 60 * 1000;
+  const isMissing = (original: string | undefined, failedAt: string | undefined): boolean => {
+    if (original) return false;
+    if (failedAt && (Date.now() - new Date(failedAt).getTime()) < NEGATIVE_CACHE_MS) return false;
+    return true;
+  };
+
+  const candidates = movies.filter(m =>
+    m.type === "movie" &&
+    (isMissing(m.originalSubtitlesUrlAr, m.subtitleSearchFailedAtAr) || isMissing(m.originalSubtitlesUrlEn, m.subtitleSearchFailedAtEn))
+  ).slice(0, 5);
+
+  for (const movie of candidates) {
+    try {
+      console.log(`[Subtitles] Proactively searching for missing subtitles: "${movie.titleEn}"`);
+      const needsAr = isMissing(movie.originalSubtitlesUrlAr, movie.subtitleSearchFailedAtAr);
+      const needsEn = isMissing(movie.originalSubtitlesUrlEn, movie.subtitleSearchFailedAtEn);
+      const subs = await findSubtitlesForWork(movie.titleEn, movie.year, movie.type);
+
+      if (needsAr) {
+        if (subs.ar) {
+          movie.originalSubtitlesUrlAr = subs.ar;
+          movie.subtitlesUrlAr = `/api/subtitles?movieId=${movie.id}&lang=ar`;
+          movie.subtitleSearchFailedAtAr = undefined;
+        } else {
+          movie.subtitleSearchFailedAtAr = new Date().toISOString();
+        }
+        changed = true;
+      }
+      if (needsEn) {
+        if (subs.en) {
+          movie.originalSubtitlesUrlEn = subs.en;
+          movie.subtitlesUrlEn = `/api/subtitles?movieId=${movie.id}&lang=en`;
+          movie.subtitleSearchFailedAtEn = undefined;
+        } else {
+          movie.subtitleSearchFailedAtEn = new Date().toISOString();
+        }
+        changed = true;
+      }
+    } catch (err: any) {
+      console.warn(`[Subtitles] Proactive search failed for "${movie.titleEn}":`, err.message || err);
+    }
+  }
+
+  return changed;
+}
+
 // Backfills real language + production country for catalog entries imported before these
 // fields existed (or via a non-TMDB path, where the old code guessed language from hardcoded
 // title-text checks and never set a country at all). Reuses a single details call for both
@@ -3255,7 +3381,7 @@ async function backfillLanguageAndCountry(movies: Movie[]): Promise<boolean> {
       if (!details) { changed = true; continue; }
 
       if (!movie.language) {
-        movie.language = details.original_language === "ar" ? "ar" : details.original_language === "en" ? "en" : "other";
+        movie.language = details.original_language || "en";
       }
       if (!movie.country) {
         const prodCountries: any[] = details.production_countries ?? [];
@@ -4529,6 +4655,15 @@ app.get("/api/subtitles", async (req, res) => {
     }
   }
 
+  // The target object (movie or episode) that actually holds the subtitle fields for this
+  // request - used both to persist a found URL and to read/write the negative-search-cache
+  // timestamp below, so a title that genuinely has no subtitle available anywhere isn't
+  // re-searched (burning limited OpenSubtitles quota and adding multi-second latency) on
+  // every single playback attempt.
+  const subtitleTarget: any = (movie && movie.type === "series" && movie.seasons && seasonId && episodeId)
+    ? movie.seasons.find(s => s.id === seasonId)?.episodes?.find(e => e.id === episodeId)
+    : movie;
+
   const persistFoundUrl = (foundUrl: string, forLang: string = lang) => {
     if (!movie) return;
     if (movie.type === "series" && movie.seasons && seasonId && episodeId) {
@@ -4538,18 +4673,22 @@ app.get("/api/subtitles", async (req, res) => {
         if (forLang === "ar") {
           episode.originalSubtitlesUrlAr = foundUrl;
           episode.subtitlesUrlAr = `/api/subtitles?movieId=${movie.id}&seasonId=${seasonId}&episodeId=${episodeId}&lang=ar`;
+          episode.subtitleSearchFailedAtAr = undefined;
         } else {
           episode.originalSubtitlesUrlEn = foundUrl;
           episode.subtitlesUrlEn = `/api/subtitles?movieId=${movie.id}&seasonId=${seasonId}&episodeId=${episodeId}&lang=en`;
+          episode.subtitleSearchFailedAtEn = undefined;
         }
       }
     } else {
       if (forLang === "ar") {
         movie.originalSubtitlesUrlAr = foundUrl;
         movie.subtitlesUrlAr = `/api/subtitles?movieId=${movie.id}&lang=ar`;
+        movie.subtitleSearchFailedAtAr = undefined;
       } else {
         movie.originalSubtitlesUrlEn = foundUrl;
         movie.subtitlesUrlEn = `/api/subtitles?movieId=${movie.id}&lang=en`;
+        movie.subtitleSearchFailedAtEn = undefined;
       }
     }
     saveMoviesDatabase();
@@ -4589,9 +4728,21 @@ app.get("/api/subtitles", async (req, res) => {
   }
 
   // 2. If we still have nothing playable (no stored URL, or the stored one just failed),
-  // always attempt a fresh real-source search - this no longer requires Gemini, since
-  // OpenSubtitles/Archive.org work without it too.
-  if (!finalRawVtt) {
+  // attempt a fresh real-source search - this no longer requires Gemini, since
+  // OpenSubtitles/Archive.org work without it too. Skipped entirely if a search for this
+  // exact title/language genuinely failed within the negative-cache window (below): the
+  // title still isn't going to have a subtitle a few minutes later, and re-searching every
+  // playback attempt only wastes OpenSubtitles' limited daily quota and adds latency.
+  const NEGATIVE_CACHE_MS = 24 * 60 * 60 * 1000;
+  const failedAtField = lang === "ar" ? "subtitleSearchFailedAtAr" : "subtitleSearchFailedAtEn";
+  const failedAt = subtitleTarget?.[failedAtField];
+  const recentlyFailed = failedAt && (Date.now() - new Date(failedAt).getTime()) < NEGATIVE_CACHE_MS;
+
+  if (!finalRawVtt && recentlyFailed) {
+    console.log(`[Subtitles API] Skipping live search for "${title}" (${lang}) - a search already failed within the last 24h.`);
+  }
+
+  if (!finalRawVtt && !recentlyFailed) {
     try {
       console.log(`[Subtitles API] No usable subtitle for "${title}" (${lang}). Triggering live real-source search...`);
       const year = movie ? movie.year : new Date().getFullYear();
@@ -4607,6 +4758,10 @@ app.get("/api/subtitles", async (req, res) => {
         console.log(`[Subtitles API] Live search found a verified real subtitle: ${foundUrl}`);
         finalRawVtt = (await loadCandidateUrl(foundUrl)) || "";
         if (finalRawVtt) persistFoundUrl(foundUrl);
+      }
+      if (!foundUrl && subtitleTarget) {
+        subtitleTarget[failedAtField] = new Date().toISOString();
+        saveMoviesDatabase();
       }
     } catch (searchErr) {
       console.warn(`[Subtitles API] Live subtitle search failed:`, searchErr);

@@ -210,6 +210,38 @@ const ALL_GENRES = [
   "رياضي"
 ];
 
+// movie.language stores the raw TMDB ISO 639-1 code (e.g. "ko", "hi", "es") rather than a
+// bucketed value, so the filter can offer every common language its own option instead of
+// lumping them all into "other". "other" here means "a real language we didn't curate a
+// button for" - still matched, just grouped rather than named.
+const ALL_LANGUAGES = ["الكل", "ar", "en", "hi", "es", "ko", "ja", "tr", "fr", "de", "it", "zh", "ru", "pt", "other"];
+
+const languageMap: Record<string, { ar: string; en: string }> = {
+  "الكل": { ar: "الكل", en: "All" },
+  "ar": { ar: "العربية", en: "Arabic" },
+  "en": { ar: "الإنجليزية", en: "English" },
+  "hi": { ar: "الهندية", en: "Hindi" },
+  "es": { ar: "الإسبانية", en: "Spanish" },
+  "ko": { ar: "الكورية", en: "Korean" },
+  "ja": { ar: "اليابانية", en: "Japanese" },
+  "tr": { ar: "التركية", en: "Turkish" },
+  "fr": { ar: "الفرنسية", en: "French" },
+  "de": { ar: "الألمانية", en: "German" },
+  "it": { ar: "الإيطالية", en: "Italian" },
+  "zh": { ar: "الصينية", en: "Chinese" },
+  "ru": { ar: "الروسية", en: "Russian" },
+  "pt": { ar: "البرتغالية", en: "Portuguese" },
+  "other": { ar: "لغات أخرى", en: "Other" },
+};
+
+const KNOWN_LANGUAGE_CODES = ["ar", "en", "hi", "es", "ko", "ja", "tr", "fr", "de", "it", "zh", "ru", "pt"];
+
+const matchLanguageFilter = (movieLanguage: string | undefined, filter: string): boolean => {
+  if (!filter || filter === "الكل") return true;
+  if (filter === "other") return !!movieLanguage && !KNOWN_LANGUAGE_CODES.includes(movieLanguage);
+  return movieLanguage === filter;
+};
+
 const matchGenreFilter = (movieGenres: string[] | undefined, filter: string): boolean => {
   if (!filter || filter === "الكل") return true;
   if (!movieGenres || !Array.isArray(movieGenres) || movieGenres.length === 0) return false;
@@ -2351,7 +2383,7 @@ export default function App() {
       const options = isGenre
         ? ALL_GENRES
         : isLanguage
-        ? ["الكل", "ar", "en", "other"]
+        ? ALL_LANGUAGES
         : ["most_watched", "highest_rated", "newest"];
 
       if (direction === "down") {
@@ -2846,7 +2878,7 @@ export default function App() {
           list = allMovies
             .filter(m => m.type === "movie")
             .filter(m => matchGenreFilter(m.genres, movieGenreFilter))
-            .filter(m => movieLanguageFilter === "الكل" || m.language === movieLanguageFilter)
+            .filter(m => matchLanguageFilter(m.language, movieLanguageFilter))
             .sort((a, b) => {
               if (movieSortBy === "newest") return b.year - a.year;
               if (movieSortBy === "highest_rated") return b.rating - a.rating;
@@ -2861,7 +2893,7 @@ export default function App() {
           list = allMovies
             .filter(m => m.type === "series")
             .filter(m => matchGenreFilter(m.genres, seriesGenreFilter))
-            .filter(m => seriesLanguageFilter === "الكل" || m.language === seriesLanguageFilter)
+            .filter(m => matchLanguageFilter(m.language, seriesLanguageFilter))
             .sort((a, b) => {
               if (seriesSortBy === "newest") return b.year - a.year;
               if (seriesSortBy === "highest_rated") return b.rating - a.rating;
@@ -4298,36 +4330,25 @@ export default function App() {
                             }`}
                           >
                             <span>
-                              {movieLanguageFilter === "الكل" 
-                                ? (lang === "ar" ? "الكل" : "All") 
-                                : movieLanguageFilter === "ar" 
-                                ? (lang === "ar" ? "العربية" : "Arabic")
-                                : movieLanguageFilter === "en"
-                                ? (lang === "ar" ? "الإنجليزية" : "English")
-                                : (lang === "ar" ? "أخرى" : "Other")}
+                              {lang === "ar" ? (languageMap[movieLanguageFilter]?.ar || movieLanguageFilter) : (languageMap[movieLanguageFilter]?.en || movieLanguageFilter)}
                             </span>
                             <ChevronDown className={`w-3.5 h-3.5 text-zinc-300 transition-transform duration-200 ${activeDropdown === "movie_language" ? "rotate-180" : ""}`} />
                           </button>
-                          
+
                           {activeDropdown === "movie_language" && (
-                            <div className="absolute right-0 top-full mt-2 bg-black/98 text-white rounded-lg shadow-[0_16px_40px_rgba(0,0,0,0.95)] min-w-[140px] overflow-hidden z-50 flex flex-col py-1.5 border border-white/20 backdrop-blur-2xl">
-                              {[
-                                { id: "الكل", labelAr: "الكل", labelEn: "All" },
-                                { id: "ar", labelAr: "العربية", labelEn: "Arabic" },
-                                { id: "en", labelAr: "الإنجليزية", labelEn: "English" },
-                                { id: "other", labelAr: "لغات أخرى", labelEn: "Other" }
-                              ].map((opt, idx) => (
+                            <div className="absolute right-0 top-full mt-2 bg-black/98 text-white rounded-lg shadow-[0_16px_40px_rgba(0,0,0,0.95)] min-w-[140px] max-h-64 overflow-y-auto no-scrollbar z-50 flex flex-col py-1.5 border border-white/20 backdrop-blur-2xl">
+                              {ALL_LANGUAGES.map((id, idx) => (
                                 <button
-                                  key={opt.id}
+                                  key={id}
                                   onClick={() => {
-                                    setMovieLanguageFilter(opt.id);
+                                    setMovieLanguageFilter(id);
                                     setActiveDropdown(null);
                                   }}
                                   className={`w-full px-4 py-2 text-xs font-bold transition-all border-0 cursor-pointer ${lang === "ar" ? "text-right" : "text-left"} ${
-                                    movieLanguageFilter === opt.id ? "text-black bg-white font-extrabold shadow-sm" : "text-zinc-300 hover:text-white hover:bg-zinc-900"
+                                    movieLanguageFilter === id ? "text-black bg-white font-extrabold shadow-sm" : "text-zinc-300 hover:text-white hover:bg-zinc-900"
                                   } ${activeDropdown === "movie_language" && focusedDropdownItemIndex === idx ? "bg-white text-black font-black" : ""}`}
                                 >
-                                  {lang === "ar" ? opt.labelAr : opt.labelEn}
+                                  {lang === "ar" ? languageMap[id]?.ar : languageMap[id]?.en}
                                 </button>
                               ))}
                             </div>
@@ -4389,7 +4410,7 @@ export default function App() {
                   {allMovies
                     .filter(m => m.type === "movie")
                     .filter(m => matchGenreFilter(m.genres, movieGenreFilter))
-                    .filter(m => movieLanguageFilter === "الكل" || m.language === movieLanguageFilter)
+                    .filter(m => matchLanguageFilter(m.language, movieLanguageFilter))
                     .length === 0 ? (
                     <div className="flex flex-col items-center justify-center p-12 bg-slate-900/20 border border-dashed border-slate-800 rounded-3xl">
                       <Compass className="w-12 h-12 text-slate-700 mb-3" />
@@ -4401,7 +4422,7 @@ export default function App() {
                       {allMovies
                         .filter(m => m.type === "movie")
                         .filter(m => matchGenreFilter(m.genres, movieGenreFilter))
-                        .filter(m => movieLanguageFilter === "الكل" || m.language === movieLanguageFilter)
+                        .filter(m => matchLanguageFilter(m.language, movieLanguageFilter))
                         .sort((a, b) => {
                           if (movieSortBy === "newest") return b.year - a.year;
                           if (movieSortBy === "highest_rated") return b.rating - a.rating;
@@ -4503,36 +4524,25 @@ export default function App() {
                             }`}
                           >
                             <span>
-                              {seriesLanguageFilter === "الكل" 
-                                ? (lang === "ar" ? "الكل" : "All") 
-                                : seriesLanguageFilter === "ar" 
-                                ? (lang === "ar" ? "العربية" : "Arabic")
-                                : seriesLanguageFilter === "en"
-                                ? (lang === "ar" ? "الإنجليزية" : "English")
-                                : (lang === "ar" ? "أخرى" : "Other")}
+                              {lang === "ar" ? (languageMap[seriesLanguageFilter]?.ar || seriesLanguageFilter) : (languageMap[seriesLanguageFilter]?.en || seriesLanguageFilter)}
                             </span>
                             <ChevronDown className={`w-3.5 h-3.5 text-zinc-300 transition-transform duration-200 ${activeDropdown === "series_language" ? "rotate-180" : ""}`} />
                           </button>
-                          
+
                           {activeDropdown === "series_language" && (
-                            <div className="absolute right-0 top-full mt-2 bg-black/98 text-white rounded-lg shadow-[0_16px_40px_rgba(0,0,0,0.95)] min-w-[140px] overflow-hidden z-50 flex flex-col py-1.5 border border-white/20 backdrop-blur-2xl">
-                              {[
-                                { id: "الكل", labelAr: "الكل", labelEn: "All" },
-                                { id: "ar", labelAr: "العربية", labelEn: "Arabic" },
-                                { id: "en", labelAr: "الإنجليزية", labelEn: "English" },
-                                { id: "other", labelAr: "لغات أخرى", labelEn: "Other" }
-                              ].map((opt, idx) => (
+                            <div className="absolute right-0 top-full mt-2 bg-black/98 text-white rounded-lg shadow-[0_16px_40px_rgba(0,0,0,0.95)] min-w-[140px] max-h-64 overflow-y-auto no-scrollbar z-50 flex flex-col py-1.5 border border-white/20 backdrop-blur-2xl">
+                              {ALL_LANGUAGES.map((id, idx) => (
                                 <button
-                                  key={opt.id}
+                                  key={id}
                                   onClick={() => {
-                                    setSeriesLanguageFilter(opt.id);
+                                    setSeriesLanguageFilter(id);
                                     setActiveDropdown(null);
                                   }}
                                   className={`w-full px-4 py-2 text-xs font-bold transition-all border-0 cursor-pointer ${lang === "ar" ? "text-right" : "text-left"} ${
-                                    seriesLanguageFilter === opt.id ? "text-black bg-white font-extrabold shadow-sm" : "text-zinc-300 hover:text-white hover:bg-zinc-900"
+                                    seriesLanguageFilter === id ? "text-black bg-white font-extrabold shadow-sm" : "text-zinc-300 hover:text-white hover:bg-zinc-900"
                                   } ${activeDropdown === "series_language" && focusedDropdownItemIndex === idx ? "bg-white text-black font-black" : ""}`}
                                 >
-                                  {lang === "ar" ? opt.labelAr : opt.labelEn}
+                                  {lang === "ar" ? languageMap[id]?.ar : languageMap[id]?.en}
                                 </button>
                               ))}
                             </div>
@@ -4594,7 +4604,7 @@ export default function App() {
                   {allMovies
                     .filter(m => m.type === "series")
                     .filter(m => matchGenreFilter(m.genres, seriesGenreFilter))
-                    .filter(m => seriesLanguageFilter === "الكل" || m.language === seriesLanguageFilter)
+                    .filter(m => matchLanguageFilter(m.language, seriesLanguageFilter))
                     .length === 0 ? (
                     <div className="flex flex-col items-center justify-center p-12 bg-slate-900/20 border border-dashed border-slate-800 rounded-3xl">
                       <Compass className="w-12 h-12 text-slate-700 mb-3" />
@@ -4606,7 +4616,7 @@ export default function App() {
                       {allMovies
                         .filter(m => m.type === "series")
                         .filter(m => matchGenreFilter(m.genres, seriesGenreFilter))
-                        .filter(m => seriesLanguageFilter === "الكل" || m.language === seriesLanguageFilter)
+                        .filter(m => matchLanguageFilter(m.language, seriesLanguageFilter))
                         .sort((a, b) => {
                           if (seriesSortBy === "newest") return b.year - a.year;
                           if (seriesSortBy === "highest_rated") return b.rating - a.rating;

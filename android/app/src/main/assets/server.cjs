@@ -913,6 +913,20 @@ async function downloadAndSaveSubtitleFromUrl(url, langHint = "ar") {
     return null;
   }
 }
+async function fetchWithRetry(url, options = {}, timeoutMs = 6e3) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (err) {
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("unreachable");
+}
 async function scrapeRealSubtitlesDirect(title, year, imdbId) {
   const result = { ar: "", en: "" };
   if (!title) return result;
@@ -921,13 +935,13 @@ async function scrapeRealSubtitlesDirect(title, year, imdbId) {
     const cleanTitle = title.replace(/[^\w\s]/gi, " ").trim();
     const query = `title:("${cleanTitle}") AND (format:"SubRip" OR extension:srt OR extension:vtt) AND mediatype:(texts OR movies)`;
     const archiveUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(query)}&fl[]=identifier,title&output=json`;
-    const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(6e3) });
+    const res = await fetchWithRetry(archiveUrl, {}, 6e3);
     if (res.ok) {
       const json = await res.json();
       const docs = json.response?.docs || [];
       for (const doc2 of docs.slice(0, 3)) {
         const filesUrl = `https://archive.org/metadata/${doc2.identifier}/files`;
-        const filesRes = await fetch(filesUrl, { signal: AbortSignal.timeout(5e3) });
+        const filesRes = await fetchWithRetry(filesUrl, {}, 5e3);
         if (filesRes.ok) {
           const filesJson = await filesRes.json();
           const srtFiles = (filesJson.result || []).filter(
@@ -1957,6 +1971,11 @@ async function findOfficialWikipediaPoster(title, isBackdrop) {
   }
   return null;
 }
+function clearMissingUploadedSubtitle(url) {
+  if (!url || !url.startsWith("/uploads/")) return url;
+  const filePath = import_path2.default.join(process.cwd(), "uploads", import_path2.default.basename(url));
+  return import_fs.default.existsSync(filePath) ? url : "";
+}
 function getValidSubtitleUrl(url, movieId, lang, seasonId, episodeId, movieOrEp, isEditMode = false) {
   if (url === "" || url === "none") {
     if (movieOrEp) {
@@ -2166,6 +2185,68 @@ async function fetchTMDBSeriesSeasons(tmdbId, seriesTitleEn, seriesTitleAr, back
     return [];
   }
 }
+var TMDB_COUNTRY_MAP = {
+  "US": "\u0627\u0644\u0648\u0644\u0627\u064A\u0627\u062A \u0627\u0644\u0645\u062A\u062D\u062F\u0629",
+  "GB": "\u0627\u0644\u0645\u0645\u0644\u0643\u0629 \u0627\u0644\u0645\u062A\u062D\u062F\u0629",
+  "FR": "\u0641\u0631\u0646\u0633\u0627",
+  "DE": "\u0623\u0644\u0645\u0627\u0646\u064A\u0627",
+  "IT": "\u0625\u064A\u0637\u0627\u0644\u064A\u0627",
+  "ES": "\u0625\u0633\u0628\u0627\u0646\u064A\u0627",
+  "KR": "\u0643\u0648\u0631\u064A\u0627 \u0627\u0644\u062C\u0646\u0648\u0628\u064A\u0629",
+  "JP": "\u0627\u0644\u064A\u0627\u0628\u0627\u0646",
+  "CN": "\u0627\u0644\u0635\u064A\u0646",
+  "HK": "\u0647\u0648\u0646\u063A \u0643\u0648\u0646\u063A",
+  "TW": "\u062A\u0627\u064A\u0648\u0627\u0646",
+  "IN": "\u0627\u0644\u0647\u0646\u062F",
+  "TR": "\u062A\u0631\u0643\u064A\u0627",
+  "EG": "\u0645\u0635\u0631",
+  "SA": "\u0627\u0644\u0633\u0639\u0648\u062F\u064A\u0629",
+  "AE": "\u0627\u0644\u0625\u0645\u0627\u0631\u0627\u062A",
+  "LB": "\u0644\u0628\u0646\u0627\u0646",
+  "IQ": "\u0627\u0644\u0639\u0631\u0627\u0642",
+  "SY": "\u0633\u0648\u0631\u064A\u0627",
+  "JO": "\u0627\u0644\u0623\u0631\u062F\u0646",
+  "KW": "\u0627\u0644\u0643\u0648\u064A\u062A",
+  "QA": "\u0642\u0637\u0631",
+  "BH": "\u0627\u0644\u0628\u062D\u0631\u064A\u0646",
+  "OM": "\u0639\u0645\u0627\u0646",
+  "MA": "\u0627\u0644\u0645\u063A\u0631\u0628",
+  "TN": "\u062A\u0648\u0646\u0633",
+  "DZ": "\u0627\u0644\u062C\u0632\u0627\u0626\u0631",
+  "LY": "\u0644\u064A\u0628\u064A\u0627",
+  "SD": "\u0627\u0644\u0633\u0648\u062F\u0627\u0646",
+  "PS": "\u0641\u0644\u0633\u0637\u064A\u0646",
+  "YE": "\u0627\u0644\u064A\u0645\u0646",
+  "CA": "\u0643\u0646\u062F\u0627",
+  "AU": "\u0623\u0633\u062A\u0631\u0627\u0644\u064A\u0627",
+  "NZ": "\u0646\u064A\u0648\u0632\u064A\u0644\u0646\u062F\u0627",
+  "RU": "\u0631\u0648\u0633\u064A\u0627",
+  "BR": "\u0627\u0644\u0628\u0631\u0627\u0632\u064A\u0644",
+  "MX": "\u0627\u0644\u0645\u0643\u0633\u064A\u0643",
+  "AR": "\u0627\u0644\u0623\u0631\u062C\u0646\u062A\u064A\u0646",
+  "SE": "\u0627\u0644\u0633\u0648\u064A\u062F",
+  "NO": "\u0627\u0644\u0646\u0631\u0648\u064A\u062C",
+  "DK": "\u0627\u0644\u062F\u0646\u0645\u0627\u0631\u0643",
+  "FI": "\u0641\u0646\u0644\u0646\u062F\u0627",
+  "NL": "\u0647\u0648\u0644\u0646\u062F\u0627",
+  "BE": "\u0628\u0644\u062C\u064A\u0643\u0627",
+  "CH": "\u0633\u0648\u064A\u0633\u0631\u0627",
+  "AT": "\u0627\u0644\u0646\u0645\u0633\u0627",
+  "IE": "\u0623\u064A\u0631\u0644\u0646\u062F\u0627",
+  "PT": "\u0627\u0644\u0628\u0631\u062A\u063A\u0627\u0644",
+  "GR": "\u0627\u0644\u064A\u0648\u0646\u0627\u0646",
+  "PL": "\u0628\u0648\u0644\u0646\u062F\u0627",
+  "TH": "\u062A\u0627\u064A\u0644\u0627\u0646\u062F",
+  "ID": "\u0625\u0646\u062F\u0648\u0646\u064A\u0633\u064A\u0627",
+  "PH": "\u0627\u0644\u0641\u0644\u0628\u064A\u0646",
+  "MY": "\u0645\u0627\u0644\u064A\u0632\u064A\u0627",
+  "SG": "\u0633\u0646\u063A\u0627\u0641\u0648\u0631\u0629",
+  "IL": "\u0625\u0633\u0631\u0627\u0626\u064A\u0644",
+  "IR": "\u0625\u064A\u0631\u0627\u0646",
+  "PK": "\u0628\u0627\u0643\u0633\u062A\u0627\u0646",
+  "NG": "\u0646\u064A\u062C\u064A\u0631\u064A\u0627",
+  "ZA": "\u062C\u0646\u0648\u0628 \u0623\u0641\u0631\u064A\u0642\u064A\u0627"
+};
 async function scrapeTMDBMetadata(searchQueryOrUrl, lang = "ar") {
   try {
     let query = searchQueryOrUrl.trim();
@@ -2235,6 +2316,9 @@ async function scrapeTMDBMetadata(searchQueryOrUrl, lang = "ar") {
       if (mapped && !genres.includes(mapped)) genres.push(mapped);
     }
     if (genres.length === 0) genres.push("\u062F\u0631\u0627\u0645\u0627", "\u062A\u0634\u0648\u064A\u0642");
+    const language = details.original_language || "en";
+    const prodCountries = details.production_countries ?? [];
+    const country = prodCountries.length > 0 ? TMDB_COUNTRY_MAP[prodCountries[0].iso_3166_1] || prodCountries[0].name : "";
     const rawPoster = posterUrl(details.poster_path) || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1920&q=95&auto=format&fit=crop";
     const rawBackdrop = backdropUrl(details.backdrop_path) || "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=3840&q=95&auto=format&fit=crop";
     const logoPath = details.images?.logos?.[0]?.file_path;
@@ -2314,6 +2398,8 @@ async function scrapeTMDBMetadata(searchQueryOrUrl, lang = "ar") {
       duration,
       ageRating,
       genres,
+      language,
+      country,
       poster,
       backdrop,
       logoUrl: logoUrl2,
@@ -2572,6 +2658,18 @@ async function healAndSyncDatabase() {
       movie.subtitlesUrlEn = correctSubEn;
       movieHealed = true;
     }
+    const healedSubAr = clearMissingUploadedSubtitle(movie.originalSubtitlesUrlAr);
+    if (healedSubAr !== movie.originalSubtitlesUrlAr) {
+      console.log(`[Healer] Subtitle file missing on disk for "${movie.titleEn}" (ar): ${movie.originalSubtitlesUrlAr} - clearing so it can be re-searched.`);
+      movie.originalSubtitlesUrlAr = healedSubAr;
+      movieHealed = true;
+    }
+    const healedSubEn = clearMissingUploadedSubtitle(movie.originalSubtitlesUrlEn);
+    if (healedSubEn !== movie.originalSubtitlesUrlEn) {
+      console.log(`[Healer] Subtitle file missing on disk for "${movie.titleEn}" (en): ${movie.originalSubtitlesUrlEn} - clearing so it can be re-searched.`);
+      movie.originalSubtitlesUrlEn = healedSubEn;
+      movieHealed = true;
+    }
     if (movie.type === "series" && movie.seasons) {
       movie.seasons.forEach((season) => {
         if (season.episodes) {
@@ -2584,6 +2682,16 @@ async function healAndSyncDatabase() {
             const correctEpSubEn = getValidSubtitleUrl(episode.subtitlesUrlEn, movie.id, "en", season.id, episode.id, episode);
             if (episode.subtitlesUrlEn !== correctEpSubEn) {
               episode.subtitlesUrlEn = correctEpSubEn;
+              movieHealed = true;
+            }
+            const healedEpSubAr = clearMissingUploadedSubtitle(episode.originalSubtitlesUrlAr);
+            if (healedEpSubAr !== episode.originalSubtitlesUrlAr) {
+              episode.originalSubtitlesUrlAr = healedEpSubAr;
+              movieHealed = true;
+            }
+            const healedEpSubEn = clearMissingUploadedSubtitle(episode.originalSubtitlesUrlEn);
+            if (healedEpSubEn !== episode.originalSubtitlesUrlEn) {
+              episode.originalSubtitlesUrlEn = healedEpSubEn;
               movieHealed = true;
             }
           });
@@ -2600,19 +2708,6 @@ async function healAndSyncDatabase() {
     const validatedBackdrop = await verifyAndCorrectImageUrl(movie.backdrop, movie.titleEn || movie.titleAr || "Untitled", true, movie.genres);
     if (movie.backdrop !== validatedBackdrop) {
       movie.backdrop = validatedBackdrop;
-      movieHealed = true;
-    }
-    if (!movie.language) {
-      const titleAr = movie.titleAr || "";
-      const titleEn = (movie.titleEn || "").toLowerCase();
-      const isAr = titleAr === "\u0622\u0633\u0641 \u0639\u0644\u0649 \u0627\u0644\u0625\u0632\u0639\u0627\u062C" || titleAr === "\u0645\u0631\u062C\u0627\u0646 \u0623\u062D\u0645\u062F \u0645\u0631\u062C\u0627\u0646" || titleAr === "\u0627\u0644\u062D\u0634\u0627\u0634\u064A\u0646" || movie.actors && movie.actors.some((a) => /[\u0600-\u06FF]/.test(a) && !/^[a-zA-Z\s]+$/.test(a)) || movie.id === "series_2";
-      if (isAr) {
-        movie.language = "ar";
-      } else if (titleAr.includes("\u0643\u0648\u0631\u064A") || titleEn.includes("squid game") || titleEn.includes("demon slayer") || titleAr.includes("\u0623\u0646\u0645\u064A") || movie.genres && movie.genres.includes("\u0631\u0633\u0648\u0645 \u0645\u062A\u062D\u0631\u0643\u0629") && !titleAr.includes("\u0633\u0628\u0627\u064A\u062F\u0631\u0645\u0627\u0646")) {
-        movie.language = "other";
-      } else {
-        movie.language = "en";
-      }
       movieHealed = true;
     }
     if (movie.director) {
@@ -2647,6 +2742,14 @@ async function healAndSyncDatabase() {
     }
   });
   await Promise.all(healPromises);
+  const subtitlesBackfilled = await proactivelyFetchMissingSubtitles(moviesDatabase);
+  if (subtitlesBackfilled) {
+    changed = true;
+  }
+  const metadataBackfilled = await backfillLanguageAndCountry(moviesDatabase);
+  if (metadataBackfilled) {
+    changed = true;
+  }
   const tmdbCollectionsAssigned = await assignTmdbMovieCollections(moviesDatabase);
   if (tmdbCollectionsAssigned) {
     changed = true;
@@ -2874,6 +2977,81 @@ function extractExactPartNumber(titleAr, titleEn, defaultPart = 1) {
   if (/\b(part\s*2|chapter\s*2|\b2\b|ii|الجزء\s*الثاني)\b/i.test(text)) return 2;
   if (/\b(part\s*1|chapter\s*1|\b1\b|i|الجزء\s*الأول|الجزء\s*الاول)\b/i.test(text)) return 1;
   return defaultPart;
+}
+async function proactivelyFetchMissingSubtitles(movies) {
+  let changed = false;
+  const NEGATIVE_CACHE_MS = 24 * 60 * 60 * 1e3;
+  const isMissing = (original, failedAt) => {
+    if (original) return false;
+    if (failedAt && Date.now() - new Date(failedAt).getTime() < NEGATIVE_CACHE_MS) return false;
+    return true;
+  };
+  const candidates = movies.filter(
+    (m) => m.type === "movie" && (isMissing(m.originalSubtitlesUrlAr, m.subtitleSearchFailedAtAr) || isMissing(m.originalSubtitlesUrlEn, m.subtitleSearchFailedAtEn))
+  ).slice(0, 5);
+  for (const movie of candidates) {
+    try {
+      console.log(`[Subtitles] Proactively searching for missing subtitles: "${movie.titleEn}"`);
+      const needsAr = isMissing(movie.originalSubtitlesUrlAr, movie.subtitleSearchFailedAtAr);
+      const needsEn = isMissing(movie.originalSubtitlesUrlEn, movie.subtitleSearchFailedAtEn);
+      const subs = await findSubtitlesForWork(movie.titleEn, movie.year, movie.type);
+      if (needsAr) {
+        if (subs.ar) {
+          movie.originalSubtitlesUrlAr = subs.ar;
+          movie.subtitlesUrlAr = `/api/subtitles?movieId=${movie.id}&lang=ar`;
+          movie.subtitleSearchFailedAtAr = void 0;
+        } else {
+          movie.subtitleSearchFailedAtAr = (/* @__PURE__ */ new Date()).toISOString();
+        }
+        changed = true;
+      }
+      if (needsEn) {
+        if (subs.en) {
+          movie.originalSubtitlesUrlEn = subs.en;
+          movie.subtitlesUrlEn = `/api/subtitles?movieId=${movie.id}&lang=en`;
+          movie.subtitleSearchFailedAtEn = void 0;
+        } else {
+          movie.subtitleSearchFailedAtEn = (/* @__PURE__ */ new Date()).toISOString();
+        }
+        changed = true;
+      }
+    } catch (err) {
+      console.warn(`[Subtitles] Proactive search failed for "${movie.titleEn}":`, err.message || err);
+    }
+  }
+  return changed;
+}
+async function backfillLanguageAndCountry(movies) {
+  let changed = false;
+  const candidates = movies.filter((m) => !m.metadataCheckedAt && (!m.language || !m.country)).slice(0, 15);
+  for (const movie of candidates) {
+    const numericId = movie.id.replace(/\D/g, "");
+    movie.metadataCheckedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (!numericId) {
+      changed = true;
+      continue;
+    }
+    try {
+      const details = movie.type === "series" ? await getTvDetails(numericId) : await getMovieDetails(numericId);
+      if (!details) {
+        changed = true;
+        continue;
+      }
+      if (!movie.language) {
+        movie.language = details.original_language || "en";
+      }
+      if (!movie.country) {
+        const prodCountries = details.production_countries ?? [];
+        if (prodCountries.length > 0) {
+          movie.country = TMDB_COUNTRY_MAP[prodCountries[0].iso_3166_1] || prodCountries[0].name;
+        }
+      }
+      changed = true;
+    } catch (err) {
+      console.warn(`[TMDB] Language/country backfill failed for movie ${movie.id}:`, err.message || err);
+    }
+  }
+  return changed;
 }
 async function assignTmdbMovieCollections(movies) {
   let changed = false;
@@ -4076,6 +4254,7 @@ app.get("/api/subtitles", async (req, res) => {
       }
     }
   }
+  const subtitleTarget = movie && movie.type === "series" && movie.seasons && seasonId && episodeId ? movie.seasons.find((s) => s.id === seasonId)?.episodes?.find((e) => e.id === episodeId) : movie;
   const persistFoundUrl = (foundUrl, forLang = lang) => {
     if (!movie) return;
     if (movie.type === "series" && movie.seasons && seasonId && episodeId) {
@@ -4085,18 +4264,22 @@ app.get("/api/subtitles", async (req, res) => {
         if (forLang === "ar") {
           episode.originalSubtitlesUrlAr = foundUrl;
           episode.subtitlesUrlAr = `/api/subtitles?movieId=${movie.id}&seasonId=${seasonId}&episodeId=${episodeId}&lang=ar`;
+          episode.subtitleSearchFailedAtAr = void 0;
         } else {
           episode.originalSubtitlesUrlEn = foundUrl;
           episode.subtitlesUrlEn = `/api/subtitles?movieId=${movie.id}&seasonId=${seasonId}&episodeId=${episodeId}&lang=en`;
+          episode.subtitleSearchFailedAtEn = void 0;
         }
       }
     } else {
       if (forLang === "ar") {
         movie.originalSubtitlesUrlAr = foundUrl;
         movie.subtitlesUrlAr = `/api/subtitles?movieId=${movie.id}&lang=ar`;
+        movie.subtitleSearchFailedAtAr = void 0;
       } else {
         movie.originalSubtitlesUrlEn = foundUrl;
         movie.subtitlesUrlEn = `/api/subtitles?movieId=${movie.id}&lang=en`;
+        movie.subtitleSearchFailedAtEn = void 0;
       }
     }
     saveMoviesDatabase();
@@ -4130,7 +4313,14 @@ app.get("/api/subtitles", async (req, res) => {
       console.warn(`[Subtitles API] Stored subtitle URL failed to load or is no longer valid, will re-search: ${externalUrl}`);
     }
   }
-  if (!finalRawVtt) {
+  const NEGATIVE_CACHE_MS = 24 * 60 * 60 * 1e3;
+  const failedAtField = lang === "ar" ? "subtitleSearchFailedAtAr" : "subtitleSearchFailedAtEn";
+  const failedAt = subtitleTarget?.[failedAtField];
+  const recentlyFailed = failedAt && Date.now() - new Date(failedAt).getTime() < NEGATIVE_CACHE_MS;
+  if (!finalRawVtt && recentlyFailed) {
+    console.log(`[Subtitles API] Skipping live search for "${title}" (${lang}) - a search already failed within the last 24h.`);
+  }
+  if (!finalRawVtt && !recentlyFailed) {
     try {
       console.log(`[Subtitles API] No usable subtitle for "${title}" (${lang}). Triggering live real-source search...`);
       const year = movie ? movie.year : (/* @__PURE__ */ new Date()).getFullYear();
@@ -4144,6 +4334,10 @@ app.get("/api/subtitles", async (req, res) => {
         console.log(`[Subtitles API] Live search found a verified real subtitle: ${foundUrl}`);
         finalRawVtt = await loadCandidateUrl(foundUrl) || "";
         if (finalRawVtt) persistFoundUrl(foundUrl);
+      }
+      if (!foundUrl && subtitleTarget) {
+        subtitleTarget[failedAtField] = (/* @__PURE__ */ new Date()).toISOString();
+        saveMoviesDatabase();
       }
     } catch (searchErr) {
       console.warn(`[Subtitles API] Live subtitle search failed:`, searchErr);

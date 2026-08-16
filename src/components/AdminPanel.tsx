@@ -3020,9 +3020,20 @@ export default function AdminPanel({ lang, onClose, onRefreshData, onLogout, adm
                       onChange={(e) => setFormData({ ...formData, language: e.target.value })}
                       className="w-full bg-black border border-white/20 rounded-lg px-3 py-2 text-xs text-white font-bold focus:outline-none focus:border-white focus:ring-1 focus:ring-white transition-all"
                     >
-                      <option value="ar" className="bg-black text-white font-bold">{lang === "ar" ? "اللغة العربية" : "Arabic"}</option>
-                      <option value="en" className="bg-black text-white font-bold">{lang === "ar" ? "اللغة الإنجليزية" : "English"}</option>
-                      <option value="other" className="bg-black text-white font-bold">{lang === "ar" ? "لغة أخرى (كوري، ياباني...)" : "Other Language"}</option>
+                      <option value="ar" className="bg-black text-white font-bold">{lang === "ar" ? "العربية" : "Arabic"}</option>
+                      <option value="en" className="bg-black text-white font-bold">{lang === "ar" ? "الإنجليزية" : "English"}</option>
+                      <option value="hi" className="bg-black text-white font-bold">{lang === "ar" ? "الهندية" : "Hindi"}</option>
+                      <option value="es" className="bg-black text-white font-bold">{lang === "ar" ? "الإسبانية" : "Spanish"}</option>
+                      <option value="ko" className="bg-black text-white font-bold">{lang === "ar" ? "الكورية" : "Korean"}</option>
+                      <option value="ja" className="bg-black text-white font-bold">{lang === "ar" ? "اليابانية" : "Japanese"}</option>
+                      <option value="tr" className="bg-black text-white font-bold">{lang === "ar" ? "التركية" : "Turkish"}</option>
+                      <option value="fr" className="bg-black text-white font-bold">{lang === "ar" ? "الفرنسية" : "French"}</option>
+                      <option value="de" className="bg-black text-white font-bold">{lang === "ar" ? "الألمانية" : "German"}</option>
+                      <option value="it" className="bg-black text-white font-bold">{lang === "ar" ? "الإيطالية" : "Italian"}</option>
+                      <option value="zh" className="bg-black text-white font-bold">{lang === "ar" ? "الصينية" : "Chinese"}</option>
+                      <option value="ru" className="bg-black text-white font-bold">{lang === "ar" ? "الروسية" : "Russian"}</option>
+                      <option value="pt" className="bg-black text-white font-bold">{lang === "ar" ? "البرتغالية" : "Portuguese"}</option>
+                      <option value="other" className="bg-black text-white font-bold">{lang === "ar" ? "لغة أخرى" : "Other Language"}</option>
                     </select>
                   </div>
 
