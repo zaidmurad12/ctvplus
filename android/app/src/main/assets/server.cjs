@@ -23,7 +23,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // server.ts
 var import_express = __toESM(require("express"), 1);
-var import_path = __toESM(require("path"), 1);
+var import_path2 = __toESM(require("path"), 1);
 var import_vite = require("vite");
 var import_genai = require("@google/genai");
 var import_dotenv = __toESM(require("dotenv"), 1);
@@ -31,13 +31,134 @@ var import_fs = __toESM(require("fs"), 1);
 var import_adm_zip = __toESM(require("adm-zip"), 1);
 var import_app = require("firebase/app");
 var import_firestore = require("firebase/firestore");
+
+// db.ts
+var import_better_sqlite3 = __toESM(require("better-sqlite3"), 1);
+var import_path = __toESM(require("path"), 1);
+var DB_PATH = import_path.default.join(process.cwd(), "cinemana.db");
+var _db = null;
+function getDb() {
+  if (_db) return _db;
+  _db = new import_better_sqlite3.default(DB_PATH);
+  _db.pragma("journal_mode = WAL");
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS movies (
+      id           TEXT PRIMARY KEY,
+      type         TEXT NOT NULL,
+      title_ar     TEXT NOT NULL,
+      title_en     TEXT NOT NULL,
+      year         INTEGER,
+      rating       REAL,
+      is_published INTEGER NOT NULL DEFAULT 1,
+      updated_at   TEXT NOT NULL,
+      data         TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_movies_type ON movies(type);
+    CREATE INDEX IF NOT EXISTS idx_movies_year ON movies(year);
+    CREATE INDEX IF NOT EXISTS idx_movies_rating ON movies(rating);
+    CREATE INDEX IF NOT EXISTS idx_movies_is_published ON movies(is_published);
+
+    CREATE TABLE IF NOT EXISTS config (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS deleted_ids (
+      kind  TEXT NOT NULL CHECK(kind IN ('id','title')),
+      value TEXT NOT NULL,
+      PRIMARY KEY (kind, value)
+    );
+  `);
+  return _db;
+}
+function loadAllMoviesFromDb() {
+  const rows = getDb().prepare("SELECT data FROM movies ORDER BY rowid").all();
+  return rows.map((r) => JSON.parse(r.data));
+}
+function replaceAllMoviesInDb(movies) {
+  const db2 = getDb();
+  const insertStmt = db2.prepare(`
+    INSERT INTO movies (id, type, title_ar, title_en, year, rating, is_published, updated_at, data)
+    VALUES (@id, @type, @title_ar, @title_en, @year, @rating, @is_published, @updated_at, @data)
+  `);
+  const tx = db2.transaction((rows) => {
+    db2.prepare("DELETE FROM movies").run();
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    for (const m of rows) {
+      insertStmt.run({
+        id: String(m.id),
+        type: m.type ?? "movie",
+        title_ar: m.titleAr ?? "",
+        title_en: m.titleEn ?? "",
+        year: m.year ?? null,
+        rating: m.rating ?? null,
+        is_published: m.isPublished !== false ? 1 : 0,
+        updated_at: now,
+        data: JSON.stringify(m)
+      });
+    }
+  });
+  tx(movies);
+}
+var CONFIG_KEYS = ["customHeroId", "customTrendingIds", "customPromos", "adsSettings"];
+function loadConfigFromDb() {
+  const rows = getDb().prepare("SELECT key, value FROM config").all();
+  const byKey = new Map(rows.map((r) => [r.key, r.value]));
+  const parse = (key, fallback) => {
+    const raw = byKey.get(key);
+    if (raw === void 0) return fallback;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    customHeroId: parse("customHeroId", null),
+    customTrendingIds: parse("customTrendingIds", []),
+    customPromos: parse("customPromos", []),
+    adsSettings: parse("adsSettings", null)
+  };
+}
+function saveConfigToDb(config) {
+  const db2 = getDb();
+  const upsertStmt = db2.prepare("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)");
+  const tx = db2.transaction(() => {
+    for (const key of CONFIG_KEYS) {
+      upsertStmt.run(key, JSON.stringify(config[key] ?? null));
+    }
+  });
+  tx();
+}
+function loadDeletedIdsFromDb() {
+  const rows = getDb().prepare("SELECT kind, value FROM deleted_ids").all();
+  const ids = [];
+  const titles = [];
+  for (const row of rows) {
+    if (row.kind === "id") ids.push(row.value);
+    else titles.push(row.value);
+  }
+  return { ids, titles };
+}
+function replaceDeletedIdsInDb(ids, titles) {
+  const db2 = getDb();
+  const insertStmt = db2.prepare("INSERT OR IGNORE INTO deleted_ids (kind, value) VALUES (?, ?)");
+  const tx = db2.transaction(() => {
+    db2.prepare("DELETE FROM deleted_ids").run();
+    for (const id of ids) insertStmt.run("id", id);
+    for (const title of titles) insertStmt.run("title", title);
+  });
+  tx();
+}
+
+// server.ts
 import_dotenv.default.config();
 var app = (0, import_express.default)();
 var PORT = Number(process.env.PORT) || 3e3;
 app.use(import_express.default.json({ limit: "50mb" }));
 var db = null;
 try {
-  const firebaseConfigPath = import_path.default.join(process.cwd(), "firebase-applet-config.json");
+  const firebaseConfigPath = import_path2.default.join(process.cwd(), "firebase-applet-config.json");
   if (import_fs.default.existsSync(firebaseConfigPath)) {
     const firebaseConfig = JSON.parse(import_fs.default.readFileSync(firebaseConfigPath, "utf8"));
     const firebaseApp = (0, import_app.initializeApp)(firebaseConfig);
@@ -80,8 +201,8 @@ function handleGeminiError(error, contextName) {
     console.warn(`[Gemini Rate Limit] Quota limit hit in ${contextName}. Pausing all Gemini queries for 15 minutes.`);
   }
 }
-var MOVIES_DB_PATH = import_path.default.join(process.cwd(), "movies_db.json");
-var CONFIG_PATH = import_path.default.join(process.cwd(), "config.json");
+var MOVIES_DB_PATH = import_path2.default.join(process.cwd(), "movies_db.json");
+var CONFIG_PATH = import_path2.default.join(process.cwd(), "config.json");
 var customHeroId = null;
 var customTrendingIds = [];
 var customPromos = [];
@@ -170,15 +291,20 @@ var defaultPromos = [
 ];
 function saveMoviesDatabase() {
   try {
+    replaceAllMoviesInDb(moviesDatabase);
+  } catch (error) {
+    console.error("[Server] Error saving movies to SQLite:", error);
+  }
+  try {
     const dataStr = JSON.stringify(moviesDatabase, null, 2);
     import_fs.default.writeFileSync(MOVIES_DB_PATH, dataStr, "utf8");
     try {
-      const publicPath = import_path.default.join(process.cwd(), "public", "movies.json");
-      if (import_fs.default.existsSync(import_path.default.dirname(publicPath))) import_fs.default.writeFileSync(publicPath, dataStr, "utf8");
-      const distPath = import_path.default.join(process.cwd(), "dist", "movies.json");
-      if (import_fs.default.existsSync(import_path.default.dirname(distPath))) import_fs.default.writeFileSync(distPath, dataStr, "utf8");
-      const androidAssetsPath = import_path.default.join(process.cwd(), "android", "app", "src", "main", "assets", "movies.json");
-      if (import_fs.default.existsSync(import_path.default.dirname(androidAssetsPath))) import_fs.default.writeFileSync(androidAssetsPath, dataStr, "utf8");
+      const publicPath = import_path2.default.join(process.cwd(), "public", "movies.json");
+      if (import_fs.default.existsSync(import_path2.default.dirname(publicPath))) import_fs.default.writeFileSync(publicPath, dataStr, "utf8");
+      const distPath = import_path2.default.join(process.cwd(), "dist", "movies.json");
+      if (import_fs.default.existsSync(import_path2.default.dirname(distPath))) import_fs.default.writeFileSync(distPath, dataStr, "utf8");
+      const androidAssetsPath = import_path2.default.join(process.cwd(), "android", "app", "src", "main", "assets", "movies.json");
+      if (import_fs.default.existsSync(import_path2.default.dirname(androidAssetsPath))) import_fs.default.writeFileSync(androidAssetsPath, dataStr, "utf8");
     } catch (_e) {
     }
     cachedHomeData = null;
@@ -263,29 +389,23 @@ function enrichMovieMetadata(movie) {
 }
 var deletedMovieIds = /* @__PURE__ */ new Set();
 var deletedMovieTitles = /* @__PURE__ */ new Set();
-var DELETED_IDS_PATH = import_path.default.join(process.cwd(), "deleted_ids.json");
+var DELETED_IDS_PATH = import_path2.default.join(process.cwd(), "deleted_ids.json");
 function loadDeletedMovieIds() {
   try {
-    if (import_fs.default.existsSync(DELETED_IDS_PATH)) {
-      const data = import_fs.default.readFileSync(DELETED_IDS_PATH, "utf8");
-      const parsed = JSON.parse(data);
-      if (parsed && typeof parsed === "object") {
-        if (Array.isArray(parsed.ids)) {
-          parsed.ids.forEach((id) => deletedMovieIds.add(id));
-        }
-        if (Array.isArray(parsed.titles)) {
-          parsed.titles.forEach((t) => deletedMovieTitles.add(t.toLowerCase().trim()));
-        }
-      } else if (Array.isArray(parsed)) {
-        parsed.forEach((id) => deletedMovieIds.add(id));
-      }
-      console.log(`[Server] Loaded ${deletedMovieIds.size} deleted movie IDs and ${deletedMovieTitles.size} deleted movie titles from local storage.`);
-    }
+    const { ids, titles } = loadDeletedIdsFromDb();
+    ids.forEach((id) => deletedMovieIds.add(id));
+    titles.forEach((t) => deletedMovieTitles.add(t.toLowerCase().trim()));
+    console.log(`[Server] Loaded ${deletedMovieIds.size} deleted movie IDs and ${deletedMovieTitles.size} deleted movie titles from SQLite.`);
   } catch (err) {
-    console.error("[Server] Error loading deleted_ids.json:", err);
+    console.error("[Server] Error loading deleted ids from SQLite:", err);
   }
 }
 function saveDeletedMovieIds() {
+  try {
+    replaceDeletedIdsInDb(deletedMovieIds, deletedMovieTitles);
+  } catch (err) {
+    console.error("[Server] Error saving deleted ids to SQLite:", err);
+  }
   try {
     const payload = {
       ids: Array.from(deletedMovieIds),
@@ -315,14 +435,19 @@ function unmarkMovieAsDeleted(id, titleAr, titleEn) {
   saveDeletedMovieIds();
 }
 function saveConfig() {
+  saveDeletedMovieIds();
+  const config = {
+    customHeroId,
+    customTrendingIds,
+    customPromos,
+    adsSettings
+  };
   try {
-    saveDeletedMovieIds();
-    const config = {
-      customHeroId,
-      customTrendingIds,
-      customPromos,
-      adsSettings
-    };
+    saveConfigToDb(config);
+  } catch (error) {
+    console.error("[Server] Error saving config to SQLite:", error);
+  }
+  try {
     import_fs.default.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf8");
   } catch (error) {
     console.error("[Server] Error saving config:", error);
@@ -634,13 +759,13 @@ async function downloadAndSaveSubtitleFromUrl(url, langHint = "ar") {
       console.warn(`[Subtitle Downloader] Rejected: content does not genuinely match requested language "${langHint}" or looks like non-dialogue noise: ${url}`);
       return null;
     }
-    const UPLOADS_DIR = import_path.default.join(process.cwd(), "uploads");
+    const UPLOADS_DIR = import_path2.default.join(process.cwd(), "uploads");
     if (!import_fs.default.existsSync(UPLOADS_DIR)) {
       import_fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
     }
-    const safeName = `real_${langHint}_${Date.now()}_` + import_path.default.basename(fileName).replace(/[^a-zA-Z0-9.-]/g, "_");
+    const safeName = `real_${langHint}_${Date.now()}_` + import_path2.default.basename(fileName).replace(/[^a-zA-Z0-9.-]/g, "_");
     const finalName = safeName.toLowerCase().endsWith(".vtt") || safeName.toLowerCase().endsWith(".srt") ? safeName : safeName + ".srt";
-    const filePath = import_path.default.join(UPLOADS_DIR, finalName);
+    const filePath = import_path2.default.join(UPLOADS_DIR, finalName);
     import_fs.default.writeFileSync(filePath, finalDecodedText, "utf8");
     console.log(`[Subtitle Downloader] Saved real subtitle file to: ${filePath}`);
     return `/uploads/${finalName}`;
@@ -806,13 +931,13 @@ async function downloadAndExtractSubsourceSubtitle(url, langHint = "ar") {
       console.warn(`[Subsource Downloader] Rejected: content does not genuinely match requested language "${langHint}" or looks like non-dialogue noise: ${url}`);
       return null;
     }
-    const UPLOADS_DIR = import_path.default.join(process.cwd(), "uploads");
+    const UPLOADS_DIR = import_path2.default.join(process.cwd(), "uploads");
     if (!import_fs.default.existsSync(UPLOADS_DIR)) {
       import_fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
     }
-    const safeName = "subsource_" + Date.now() + "_" + import_path.default.basename(fileName).replace(/[^a-zA-Z0-9.-]/g, "_");
+    const safeName = "subsource_" + Date.now() + "_" + import_path2.default.basename(fileName).replace(/[^a-zA-Z0-9.-]/g, "_");
     const finalName = safeName.toLowerCase().endsWith(".vtt") || safeName.toLowerCase().endsWith(".srt") ? safeName : safeName + ".srt";
-    const filePath = import_path.default.join(UPLOADS_DIR, finalName);
+    const filePath = import_path2.default.join(UPLOADS_DIR, finalName);
     import_fs.default.writeFileSync(filePath, finalDecodedText, "utf8");
     console.log(`[Subsource Downloader] Subtitle successfully saved to: ${filePath}`);
     return `/uploads/${finalName}`;
@@ -1708,11 +1833,11 @@ function getValidSubtitleUrl(url, movieId, lang, seasonId, episodeId, movieOrEp,
   }
   if (url === void 0 || url === null) {
     if (isEditMode) return "";
-    let path2 = `/api/subtitles?movieId=${movieId}`;
-    if (seasonId) path2 += `&seasonId=${seasonId}`;
-    if (episodeId) path2 += `&episodeId=${episodeId}`;
-    path2 += `&lang=${lang}`;
-    return path2;
+    let path3 = `/api/subtitles?movieId=${movieId}`;
+    if (seasonId) path3 += `&seasonId=${seasonId}`;
+    if (episodeId) path3 += `&episodeId=${episodeId}`;
+    path3 += `&lang=${lang}`;
+    return path3;
   }
   if (url.startsWith("/uploads/") || url.startsWith("data:") || url.startsWith("blob:")) {
     if (movieOrEp) {
@@ -2567,15 +2692,9 @@ async function healAndSyncDatabase() {
   }
   let localReferenceMovies = [];
   try {
-    if (import_fs.default.existsSync(MOVIES_DB_PATH)) {
-      const data = import_fs.default.readFileSync(MOVIES_DB_PATH, "utf8");
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) {
-        localReferenceMovies = parsed;
-      }
-    }
+    localReferenceMovies = loadAllMoviesFromDb();
   } catch (error) {
-    console.error("[Server] Error reading local reference for healing:", error);
+    console.error("[Server] Error reading SQLite reference for healing:", error);
   }
   for (const refMovie of localReferenceMovies) {
     if (isMovieDeleted(refMovie.id, refMovie.titleAr, refMovie.titleEn)) {
@@ -2799,37 +2918,30 @@ async function loadDatabaseFromFirestore() {
 function loadDatabase() {
   loadDeletedMovieIds();
   try {
-    if (import_fs.default.existsSync(MOVIES_DB_PATH)) {
-      const data = import_fs.default.readFileSync(MOVIES_DB_PATH, "utf8");
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        moviesDatabase.length = 0;
-        const filtered = parsed.filter((m) => !isMovieDeleted(m.id, m.titleAr, m.titleEn));
-        moviesDatabase.push(...filtered);
-        console.log(`[Server] Loaded ${moviesDatabase.length} movies from local persistent backup (filtered ${parsed.length - filtered.length} deleted).`);
-      }
+    const dbMovies = loadAllMoviesFromDb();
+    if (dbMovies.length > 0) {
+      moviesDatabase.length = 0;
+      const filtered = dbMovies.filter((m) => !isMovieDeleted(m.id, m.titleAr, m.titleEn));
+      moviesDatabase.push(...filtered);
+      console.log(`[Server] Loaded ${moviesDatabase.length} movies from SQLite (filtered ${dbMovies.length - filtered.length} deleted).`);
     } else {
+      console.log("[Server] cinemana.db has no movies yet \u2014 run `npm run db:migrate` to import movies_db.json. Persisting in-memory seed data for now.");
       saveMoviesDatabase();
     }
   } catch (error) {
-    console.error("[Server] Error loading local movies backup:", error);
+    console.error("[Server] Error loading movies from SQLite:", error);
   }
   try {
-    if (import_fs.default.existsSync(CONFIG_PATH)) {
-      const data = import_fs.default.readFileSync(CONFIG_PATH, "utf8");
-      const config = JSON.parse(data);
-      customHeroId = config.customHeroId || null;
-      customTrendingIds = config.customTrendingIds || [];
-      customPromos = config.customPromos || [];
-      if (config.adsSettings) {
-        adsSettings = config.adsSettings;
-      }
-      console.log("[Server] Loaded local config backup successfully.");
-    } else {
-      saveConfig();
+    const config = loadConfigFromDb();
+    customHeroId = config.customHeroId || null;
+    customTrendingIds = config.customTrendingIds || [];
+    customPromos = config.customPromos || [];
+    if (config.adsSettings) {
+      adsSettings = config.adsSettings;
     }
+    console.log("[Server] Loaded config from SQLite.");
   } catch (error) {
-    console.error("[Server] Error loading local config backup:", error);
+    console.error("[Server] Error loading config from SQLite:", error);
   }
   setTimeout(() => {
     healAndSyncDatabase().catch((err) => console.error("[Server] Local database healing failed:", err));
@@ -3687,9 +3799,9 @@ async function fetchRealTMDBTrendingPaths() {
         const html = await res.text();
         const matches = html.matchAll(/href="(\/(movie|tv)\/(\d+)[^"]*)"/gi);
         for (const m of matches) {
-          const path2 = `/${m[2]}/${m[3]}`;
-          if (!tmdbPaths.includes(path2)) {
-            tmdbPaths.push(path2);
+          const path3 = `/${m[2]}/${m[3]}`;
+          if (!tmdbPaths.includes(path3)) {
+            tmdbPaths.push(path3);
           }
         }
       }
@@ -4159,8 +4271,8 @@ app.get("/api/subtitles", async (req, res) => {
   const loadCandidateUrl = async (candidateUrl) => {
     if (candidateUrl.startsWith("/uploads/") || candidateUrl.includes("uploads/")) {
       try {
-        const fileName = import_path.default.basename(candidateUrl);
-        const filePath = import_path.default.join(process.cwd(), "uploads", fileName);
+        const fileName = import_path2.default.basename(candidateUrl);
+        const filePath = import_path2.default.join(process.cwd(), "uploads", fileName);
         if (import_fs.default.existsSync(filePath)) {
           let content = import_fs.default.readFileSync(filePath, "utf8");
           if (filePath.endsWith(".srt") || !content.includes("WEBVTT") && content.includes("-->")) {
@@ -4611,13 +4723,13 @@ app.post("/api/admin/ads/upload-media", (req, res) => {
     if (!fileName || !fileContent) {
       return res.status(400).json({ error: "\u0627\u0644\u0631\u062C\u0627\u0621 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0645\u0644\u0641 \u0648\u0627\u0644\u0645\u062D\u062A\u0648\u0649" });
     }
-    const UPLOADS_DIR = import_path.default.join(process.cwd(), "uploads");
+    const UPLOADS_DIR = import_path2.default.join(process.cwd(), "uploads");
     if (!import_fs.default.existsSync(UPLOADS_DIR)) {
       import_fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
     }
-    const safeName = import_path.default.basename(fileName).replace(/[^a-zA-Z0-9.-]/g, "_");
+    const safeName = import_path2.default.basename(fileName).replace(/[^a-zA-Z0-9.-]/g, "_");
     const uniqueName = `ad_${Date.now()}_${safeName}`;
-    const filePath = import_path.default.join(UPLOADS_DIR, uniqueName);
+    const filePath = import_path2.default.join(UPLOADS_DIR, uniqueName);
     let buffer;
     if (fileContent.startsWith("data:") && fileContent.includes(";base64,")) {
       const base64Data = fileContent.split(";base64,")[1];
@@ -4637,13 +4749,13 @@ app.post("/api/admin/upload-subtitle", (req, res) => {
     if (!fileName || !fileContent) {
       return res.status(400).json({ error: "Missing fileName or fileContent" });
     }
-    const UPLOADS_DIR = import_path.default.join(process.cwd(), "uploads");
+    const UPLOADS_DIR = import_path2.default.join(process.cwd(), "uploads");
     if (!import_fs.default.existsSync(UPLOADS_DIR)) {
       import_fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
     }
-    const safeName = import_path.default.basename(fileName).replace(/[^a-zA-Z0-9.-]/g, "_");
+    const safeName = import_path2.default.basename(fileName).replace(/[^a-zA-Z0-9.-]/g, "_");
     const uniqueName = `${Date.now()}_${safeName}`;
-    const filePath = import_path.default.join(UPLOADS_DIR, uniqueName);
+    const filePath = import_path2.default.join(UPLOADS_DIR, uniqueName);
     let buffer;
     if (fileContent.startsWith("data:") && fileContent.includes(";base64,")) {
       const base64Data = fileContent.split(";base64,")[1];
@@ -4793,13 +4905,13 @@ app.post("/api/admin/import-subsource", async (req, res) => {
     }
     const finalDecodedText = decodeSubtitleBuffer(buffer);
     console.log(`[Subsource Importer] Decoded ${finalDecodedText.length} characters, contains Arabic: ${/[\u0600-\u06FF]/.test(finalDecodedText)}`);
-    const UPLOADS_DIR = import_path.default.join(process.cwd(), "uploads");
+    const UPLOADS_DIR = import_path2.default.join(process.cwd(), "uploads");
     if (!import_fs.default.existsSync(UPLOADS_DIR)) {
       import_fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
     }
-    const safeName = "subsource_" + Date.now() + "_" + import_path.default.basename(fileName).replace(/[^a-zA-Z0-9.-]/g, "_");
+    const safeName = "subsource_" + Date.now() + "_" + import_path2.default.basename(fileName).replace(/[^a-zA-Z0-9.-]/g, "_");
     const finalName = safeName.toLowerCase().endsWith(".vtt") || safeName.toLowerCase().endsWith(".srt") ? safeName : safeName + ".srt";
-    const filePath = import_path.default.join(UPLOADS_DIR, finalName);
+    const filePath = import_path2.default.join(UPLOADS_DIR, finalName);
     import_fs.default.writeFileSync(filePath, finalDecodedText, "utf8");
     console.log(`[Subsource Importer] Subtitle successfully saved to ${filePath}`);
     return res.json({ success: true, url: `/uploads/${finalName}` });
@@ -5296,7 +5408,7 @@ app.get("/api/movies/detail", async (req, res) => {
   res.status(404).json({ error: "Movie not found" });
 });
 async function startServer() {
-  const UPLOADS_DIR = import_path.default.join(process.cwd(), "uploads");
+  const UPLOADS_DIR = import_path2.default.join(process.cwd(), "uploads");
   if (!import_fs.default.existsSync(UPLOADS_DIR)) {
     import_fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
@@ -5308,10 +5420,10 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = import_path.default.join(process.cwd(), "dist");
+    const distPath = import_path2.default.join(process.cwd(), "dist");
     app.use(import_express.default.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(import_path.default.join(distPath, "index.html"));
+      res.sendFile(import_path2.default.join(distPath, "index.html"));
     });
   }
   app.listen(PORT, "0.0.0.0", () => {

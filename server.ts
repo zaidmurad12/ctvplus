@@ -7,6 +7,14 @@ import fs from "fs";
 import AdmZip from "adm-zip";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, getDoc, getDocs, collection, deleteDoc } from "firebase/firestore";
+import {
+  loadAllMoviesFromDb,
+  replaceAllMoviesInDb,
+  loadConfigFromDb,
+  saveConfigToDb,
+  loadDeletedIdsFromDb,
+  replaceDeletedIdsInDb,
+} from "./db.ts";
 
 dotenv.config();
 
@@ -237,6 +245,16 @@ const defaultPromos = [
 ];
 
 function saveMoviesDatabase() {
+  // SQLite is the real source of truth now — atomic (a throw rolls the whole write back,
+  // unlike the plain writeFileSync below, which truncates before it writes and would leave
+  // a half-written file on a crash mid-write). Kept in its own try/catch so a DB failure is
+  // logged distinctly rather than silently masked by the JSON export below "succeeding".
+  try {
+    replaceAllMoviesInDb(moviesDatabase);
+  } catch (error) {
+    console.error("[Server] Error saving movies to SQLite:", error);
+  }
+
   try {
     const dataStr = JSON.stringify(moviesDatabase, null, 2);
     fs.writeFileSync(MOVIES_DB_PATH, dataStr, "utf8");
@@ -369,27 +387,23 @@ const DELETED_IDS_PATH = path.join(process.cwd(), "deleted_ids.json");
 
 function loadDeletedMovieIds() {
   try {
-    if (fs.existsSync(DELETED_IDS_PATH)) {
-      const data = fs.readFileSync(DELETED_IDS_PATH, "utf8");
-      const parsed = JSON.parse(data);
-      if (parsed && typeof parsed === "object") {
-        if (Array.isArray(parsed.ids)) {
-          parsed.ids.forEach((id: string) => deletedMovieIds.add(id));
-        }
-        if (Array.isArray(parsed.titles)) {
-          parsed.titles.forEach((t: string) => deletedMovieTitles.add(t.toLowerCase().trim()));
-        }
-      } else if (Array.isArray(parsed)) {
-        parsed.forEach((id: string) => deletedMovieIds.add(id));
-      }
-      console.log(`[Server] Loaded ${deletedMovieIds.size} deleted movie IDs and ${deletedMovieTitles.size} deleted movie titles from local storage.`);
-    }
+    const { ids, titles } = loadDeletedIdsFromDb();
+    ids.forEach(id => deletedMovieIds.add(id));
+    // Titles were already lowercased/trimmed before being stored, but normalize again here
+    // too so this stays correct even if a row was ever written by another path.
+    titles.forEach(t => deletedMovieTitles.add(t.toLowerCase().trim()));
+    console.log(`[Server] Loaded ${deletedMovieIds.size} deleted movie IDs and ${deletedMovieTitles.size} deleted movie titles from SQLite.`);
   } catch (err) {
-    console.error("[Server] Error loading deleted_ids.json:", err);
+    console.error("[Server] Error loading deleted ids from SQLite:", err);
   }
 }
 
 function saveDeletedMovieIds() {
+  try {
+    replaceDeletedIdsInDb(deletedMovieIds, deletedMovieTitles);
+  } catch (err) {
+    console.error("[Server] Error saving deleted ids to SQLite:", err);
+  }
   try {
     const payload = {
       ids: Array.from(deletedMovieIds),
@@ -423,14 +437,19 @@ function unmarkMovieAsDeleted(id: string, titleAr?: string, titleEn?: string) {
 }
 
 function saveConfig() {
+  saveDeletedMovieIds();
+  const config = {
+    customHeroId,
+    customTrendingIds,
+    customPromos,
+    adsSettings
+  };
   try {
-    saveDeletedMovieIds();
-    const config = {
-      customHeroId,
-      customTrendingIds,
-      customPromos,
-      adsSettings
-    };
+    saveConfigToDb(config);
+  } catch (error) {
+    console.error("[Server] Error saving config to SQLite:", error);
+  }
+  try {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf8");
   } catch (error) {
     console.error("[Server] Error saving config:", error);
@@ -3016,18 +3035,14 @@ async function healAndSyncDatabase() {
     }
   }
 
-  // Read robust local backup file as the golden reference
+  // Read SQLite as the golden reference (previously read movies_db.json directly — which
+  // would have kept resurrecting stale pre-migration data now that SQLite is the real
+  // source of truth saveMoviesDatabase actually writes to first).
   let localReferenceMovies: Movie[] = [];
   try {
-    if (fs.existsSync(MOVIES_DB_PATH)) {
-      const data = fs.readFileSync(MOVIES_DB_PATH, "utf8");
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) {
-        localReferenceMovies = parsed;
-      }
-    }
+    localReferenceMovies = loadAllMoviesFromDb();
   } catch (error) {
-    console.error("[Server] Error reading local reference for healing:", error);
+    console.error("[Server] Error reading SQLite reference for healing:", error);
   }
 
   // Iterate over reference movies to restore missing ones (skipping deleted)
@@ -3321,40 +3336,37 @@ async function loadDatabaseFromFirestore() {
 function loadDatabase() {
   loadDeletedMovieIds();
 
-  // 1. Initial robust local load (instant)
+  // 1. Load from SQLite (the real source of truth — see saveMoviesDatabase). If the
+  // movies table is empty, this is either a fresh install or the one-time migration
+  // (`npm run db:migrate`) hasn't been run yet: fall back to whatever seed data this file
+  // already has in memory (see the moviesDatabase literal above) and persist it, exactly
+  // like the old "file doesn't exist yet" branch used to.
   try {
-    if (fs.existsSync(MOVIES_DB_PATH)) {
-      const data = fs.readFileSync(MOVIES_DB_PATH, "utf8");
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        moviesDatabase.length = 0;
-        const filtered = parsed.filter(m => !isMovieDeleted(m.id, m.titleAr, m.titleEn));
-        moviesDatabase.push(...filtered);
-        console.log(`[Server] Loaded ${moviesDatabase.length} movies from local persistent backup (filtered ${parsed.length - filtered.length} deleted).`);
-      }
+    const dbMovies = loadAllMoviesFromDb();
+    if (dbMovies.length > 0) {
+      moviesDatabase.length = 0;
+      const filtered = dbMovies.filter(m => !isMovieDeleted(m.id, m.titleAr, m.titleEn));
+      moviesDatabase.push(...filtered);
+      console.log(`[Server] Loaded ${moviesDatabase.length} movies from SQLite (filtered ${dbMovies.length - filtered.length} deleted).`);
     } else {
+      console.log("[Server] cinemana.db has no movies yet — run `npm run db:migrate` to import movies_db.json. Persisting in-memory seed data for now.");
       saveMoviesDatabase();
     }
   } catch (error) {
-    console.error("[Server] Error loading local movies backup:", error);
+    console.error("[Server] Error loading movies from SQLite:", error);
   }
 
   try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      const data = fs.readFileSync(CONFIG_PATH, "utf8");
-      const config = JSON.parse(data);
-      customHeroId = config.customHeroId || null;
-      customTrendingIds = config.customTrendingIds || [];
-      customPromos = config.customPromos || [];
-      if (config.adsSettings) {
-        adsSettings = config.adsSettings;
-      }
-      console.log("[Server] Loaded local config backup successfully.");
-    } else {
-      saveConfig();
+    const config = loadConfigFromDb();
+    customHeroId = config.customHeroId || null;
+    customTrendingIds = config.customTrendingIds || [];
+    customPromos = config.customPromos || [];
+    if (config.adsSettings) {
+      adsSettings = config.adsSettings;
     }
+    console.log("[Server] Loaded config from SQLite.");
   } catch (error) {
-    console.error("[Server] Error loading local config backup:", error);
+    console.error("[Server] Error loading config from SQLite:", error);
   }
 
   // 1.5 Run database healing on local load to fix any subtitle or poster mismatches instantly on startup

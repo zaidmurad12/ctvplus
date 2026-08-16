@@ -32,3 +32,10 @@ android/app/src/main/assets/assets/
 
 # Same auto-copy target at the web project root
 public/movies.json
+
+# SQLite database — the real source of truth (see db.ts), regenerable from
+# movies_db.json/config.json/deleted_ids.json via `npm run db:migrate`
+cinemana.db
+cinemana.db-journal
+cinemana.db-wal
+cinemana.db-shm
