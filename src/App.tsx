@@ -661,8 +661,16 @@ const translateActorName = (name: string, currentLang: "ar" | "en") => {
 };
 
 export default function App() {
-  // Splash Screen State (disabled by default to ensure immediate zero-delay render)
-  const [showSplash, setShowSplash] = useState<boolean>(false);
+  // Splash Screen State. Shown by default: the very first render uses
+  // defaultCategoriesList/defaultHeroMovieItem, a synchronous fallback built from
+  // whatever movies_db.json snapshot happened to be bundled at build time (see top of
+  // file) purely to avoid a literal black screen. fetchMoviesData() below always then
+  // overwrites that with live data (from /api/movies, or ./movies.json as a second
+  // fallback), which on an active install can differ noticeably from the bundled
+  // snapshot - a different hero movie, different rows - so users saw two visibly
+  // different home screens flash in succession. Covering that swap with the splash
+  // screen means only the final, correct state is ever visible.
+  const [showSplash, setShowSplash] = useState<boolean>(true);
 
   // Navigation & View States
   const [lang, setLang] = useState<"ar" | "en">(() => {
@@ -1205,12 +1213,15 @@ export default function App() {
 
   // Fetch Movies on Mount & Splash Screen Timer
   useEffect(() => {
-    fetchMoviesData();
+    // Hide the splash as soon as real data is in (whichever source it came from), so it
+    // never shows for longer than necessary. The fixed ceiling below is just a safety net
+    // in case the fetch chain hangs (e.g. a dead network with no fallback responding) -
+    // it should normally never fire.
+    fetchMoviesData().finally(() => setShowSplash(false));
 
-    // Auto-hide splash screen after initial launch animation
     const splashTimer = setTimeout(() => {
       setShowSplash(false);
-    }, 1200);
+    }, 6000);
 
     // Load favorites from local storage
     const savedFavs = safeStorage.getItem("cinemana_tv_favorites");
