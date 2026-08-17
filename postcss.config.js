@@ -24,6 +24,20 @@ export default {
     postcssPresetEnv({
       features: {
         'cascade-layers': true,
+        // The .browserslistrc target (needed for cascade-layers above) includes
+        // browsers old enough to lack native CSS logical properties, which made
+        // postcss-preset-env auto-enable this feature too, even though it was never
+        // asked for. Its default conversion collapses inset-inline-start/
+        // padding-inline-start/etc. to a *fixed* physical left or right at build time -
+        // it has no way to know this app flips dir per-language at runtime - so every
+        // rtl-language screen using ps-*/start-* utilities (there are ~9 of them, all
+        // of the app's main content wrappers, all reserving space for the sidebar)
+        // silently got the LTR-only side, in both dev and production builds. Force it
+        // off so Tailwind's native inset-inline-start/padding-inline-start output
+        // reaches the browser as-is, which resolves correctly per-direction on its own
+        // (logical properties are a much older, better-supported feature than cascade
+        // layers - not something this app's actual old-WebView target needs help with).
+        'logical-properties-and-values': false,
       },
     }),
   ],
