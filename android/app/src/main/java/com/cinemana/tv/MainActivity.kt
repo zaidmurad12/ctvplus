@@ -149,8 +149,16 @@ class MainActivity : AppCompatActivity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
-            useWideViewPort = false
-            loadWithOverviewMode = false
+            // useWideViewPort=false makes WebView ignore the page's own
+            // <meta name="viewport" content="width=device-width..."> tag entirely and
+            // render into a legacy fixed virtual viewport (~980px) instead, which then
+            // gets scaled to fit the physical screen. On a large/4K panel that scaling is
+            // dramatic enough to look like a completely broken layout (oversized logo,
+            // the sidebar collapsing into a stacked column, settings rows losing their
+            // styling) and can throw off touch coordinate mapping too. Respect the page's
+            // real device width instead.
+            useWideViewPort = true
+            loadWithOverviewMode = true
             mediaPlaybackRequiresUserGesture = false
             allowFileAccess = true
             allowContentAccess = true
@@ -168,7 +176,10 @@ class MainActivity : AppCompatActivity() {
 
             userAgentString = "Mozilla/5.0 (Linux; Android 10; SmartTV; CinemanaTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36 SmartTV CinemanaTV/1.0"
         }
-        webView.setInitialScale(100)
+        // No explicit setInitialScale() call: the page's own meta viewport
+        // (width=device-width, initial-scale=1.0) now drives scaling correctly since
+        // useWideViewPort is honored above - a hardcoded 100% here would fight that,
+        // particularly on high-DPI 4K panels.
 
         // NOTE: Forcing LAYER_TYPE_HARDWARE creates an off-screen GPU texture that some
         // Android TV box GPU drivers (common on budget/no-name boxes) fail to composite,
