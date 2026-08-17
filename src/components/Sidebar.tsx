@@ -51,7 +51,13 @@ export function Sidebar({ lang, activeIndex, onSelect, onExit }: SidebarProps) {
   return (
     <div
       id="tv-sidebar"
-      className="absolute inset-y-0 start-0 z-40 bg-transparent transition-all duration-300 flex flex-col justify-between py-6 w-20 items-center pointer-events-none"
+      // Tailwind's start-0 (inset-inline-start) is supposed to flip with dir
+      // automatically, but the production build's CSS minifier resolves it down to a
+      // fixed physical left/right at build time instead of leaving it direction-aware -
+      // invisible for as long as the production build had no styling at all, but once
+      // that got fixed the sidebar was hardcoded to one physical side regardless of
+      // language. Resolve the side from lang directly instead of relying on the CSS.
+      className={`absolute inset-y-0 ${lang === "ar" ? "right-0" : "left-0"} z-40 bg-transparent transition-all duration-300 flex flex-col justify-between py-6 w-20 items-center pointer-events-none`}
     >
       <div
         className="flex items-center justify-center pt-2 pb-2 cursor-pointer transition-transform duration-300 hover:scale-105 pointer-events-auto drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)]"
