@@ -307,6 +307,13 @@ class MainActivity : AppCompatActivity() {
         fullscreenContainer.addView(webView)
         setContentView(fullscreenContainer)
 
+        // Every build serves the exact same URL (https://appassets.androidplatform.net/index.html)
+        // for entirely different bundled content - WebView's own HTTP cache has no way to know
+        // that, and our shouldInterceptRequest responses above don't set any cache-control
+        // headers telling it not to keep them. Without clearing it, updating the APK could still
+        // show whatever HTML/JS/CSS got cached from a previous install.
+        webView.clearCache(true)
+
         // Load local app assets via WebViewAssetLoader domain for full Web API, LocalStorage & HTTPS origin support.
         // This makes the app fully standalone after install - no dev server or network reachability to this
         // PC required. To point at a local dev server instead (emulator only), use localServerUrl.

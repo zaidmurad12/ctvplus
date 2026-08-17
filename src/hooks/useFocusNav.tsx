@@ -7,6 +7,16 @@
  * its own row/col layout and what happens at its edges; a "node" is one focusable leaf
  * inside a zone. Screens register zones/nodes with hooks; this file owns the single
  * global keydown listener and all directional/RTL resolution.
+ *
+ * The active zone/node is deliberately NOT carried in the FocusNavContext's own value -
+ * only a stable subscribe()/getActive() pair is. Passing activeZoneId/activeNodeId
+ * through the context value directly (as an earlier version of this file did) meant
+ * every single focus move, anywhere in the app, re-rendered every component calling any
+ * of the hooks below - every visible movie card, every sidebar button, everywhere -
+ * since React re-renders every consumer of a context whose value identity changed,
+ * regardless of whether that specific consumer's own slice of it did. Each hook instead
+ * reads its own isFocused/isActive via useSyncExternalStore, which only re-renders a
+ * given component when the value *it* asked for actually flips.
  */
 
 import React, {
@@ -16,7 +26,7 @@ import React, {
   useEffect,
   useMemo,
   useRef,
-  useState,
+  useSyncExternalStore,
 } from "react";
 
 export type Dir = "up" | "down" | "left" | "right" | "ok" | "back";
@@ -74,10 +84,15 @@ interface Registry {
   anyInputListeners: Set<() => void>;
 }
 
+interface ActiveState {
+  zoneId: string;
+  nodeId: string | null;
+}
+
 interface FocusNavContextValue {
   registry: Registry;
-  activeZoneId: string;
-  activeNodeId: string | null;
+  subscribe: (cb: () => void) => () => void;
+  getActive: () => ActiveState;
   setFocus: (zoneId: string, nodeId?: string) => void;
   shouldSuppressInitialAutoFocus: () => boolean;
 }
@@ -120,23 +135,34 @@ interface FocusNavProviderProps {
 
 export function FocusNavProvider({ children, dir, initialZoneId, onUnhandledBack, startUnfocused }: FocusNavProviderProps) {
   const registryRef = useRef<Registry>({ zones: new Map(), nodes: new Map(), anyInputListeners: new Set() });
-  const [activeZoneId, setActiveZoneId] = useState(initialZoneId);
-  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const activeRef = useRef<ActiveState>({ zoneId: initialZoneId, nodeId: null });
+  const subscribersRef = useRef(new Set<() => void>());
   const suppressInitialAutoFocusRef = useRef(!!startUnfocused);
 
   const dirRef = useRef(dir);
   dirRef.current = dir;
   const onUnhandledBackRef = useRef(onUnhandledBack);
   onUnhandledBackRef.current = onUnhandledBack;
-  const activeZoneIdRef = useRef(activeZoneId);
-  activeZoneIdRef.current = activeZoneId;
+
+  const notify = useCallback(() => {
+    subscribersRef.current.forEach((cb) => cb());
+  }, []);
+
+  const subscribe = useCallback((cb: () => void) => {
+    subscribersRef.current.add(cb);
+    return () => {
+      subscribersRef.current.delete(cb);
+    };
+  }, []);
+
+  const getActive = useCallback(() => activeRef.current, []);
 
   const setFocus = useCallback((zoneId: string, nodeId?: string) => {
     const zone = registryRef.current.zones.get(zoneId);
     const resolvedNode = nodeId ?? (zone ? firstNodeId(zone.layout()) : null);
-    setActiveZoneId(zoneId);
-    setActiveNodeId(resolvedNode);
-  }, []);
+    activeRef.current = { zoneId, nodeId: resolvedNode };
+    notify();
+  }, [notify]);
 
   // A pure read, never mutated here — StrictMode double-invokes effects in dev
   // mode, so a "consume on first effect call" flag would get un-consumed by the
@@ -144,22 +170,18 @@ export function FocusNavProvider({ children, dir, initialZoneId, onUnhandledBack
   // driven by a genuine key event, which StrictMode does not double-invoke.
   const shouldSuppressInitialAutoFocus = useCallback(() => suppressInitialAutoFocusRef.current, []);
 
-  // If the active zone unmounts, fall back to its parent (or the initial zone) instead
-  // of leaving activeZoneId pointing at a dead zone — this is what makes a blank/dead
-  // focus state structurally impossible rather than something each screen must avoid.
+  // If the active zone unmounts, fall back to the initial zone instead of leaving
+  // activeZoneId pointing at a dead zone — this is what makes a blank/dead focus state
+  // structurally impossible rather than something each screen must avoid.
   const reconcileActiveZone = useCallback(() => {
     const { zones } = registryRef.current;
-    if (zones.has(activeZoneId)) return;
-    let fallback: string | undefined = undefined;
-    // We no longer know the dead zone's parent (it's gone from the registry), so fall
-    // back to the app's declared initial zone, which is always expected to be alive.
-    fallback = zones.has(initialZoneId) ? initialZoneId : undefined;
-    if (fallback) {
-      const zone = zones.get(fallback)!;
-      setActiveZoneId(fallback);
-      setActiveNodeId(firstNodeId(zone.layout()));
+    if (zones.has(activeRef.current.zoneId)) return;
+    if (zones.has(initialZoneId)) {
+      const zone = zones.get(initialZoneId)!;
+      activeRef.current = { zoneId: initialZoneId, nodeId: firstNodeId(zone.layout()) };
+      notify();
     }
-  }, [activeZoneId, initialZoneId]);
+  }, [initialZoneId, notify]);
 
   useEffect(() => {
     reconcileActiveZone();
@@ -178,13 +200,13 @@ export function FocusNavProvider({ children, dir, initialZoneId, onUnhandledBack
     // zone with it, say), fall back to the root zone rather than letting the next
     // "back" press silently escape further than intended, or any other move no-op
     // forever against a zone that no longer exists.
-    let effectiveZoneId = activeZoneId;
-    let effectiveNodeId = activeNodeId;
+    let effectiveZoneId = activeRef.current.zoneId;
+    let effectiveNodeId = activeRef.current.nodeId;
     if (!zones.has(effectiveZoneId)) {
       effectiveZoneId = initialZoneId;
       effectiveNodeId = null;
-      setActiveZoneId(effectiveZoneId);
-      setActiveNodeId(effectiveNodeId);
+      activeRef.current = { zoneId: effectiveZoneId, nodeId: effectiveNodeId };
+      notify();
     }
 
     if (rawDir === "back") {
@@ -233,7 +255,8 @@ export function FocusNavProvider({ children, dir, initialZoneId, onUnhandledBack
         const targetCol = Math.min(c, Math.max(0, targetRow.length - 1));
         const candidate = targetRow[targetCol];
         if (candidate && !nodes.get(nodeKey(effectiveZoneId, candidate))?.disabled) {
-          setActiveNodeId(candidate);
+          activeRef.current = { zoneId: effectiveZoneId, nodeId: candidate };
+          notify();
           return;
         }
         r = nr;
@@ -245,7 +268,8 @@ export function FocusNavProvider({ children, dir, initialZoneId, onUnhandledBack
         }
         const candidate = layout[r][nc];
         if (candidate && !nodes.get(nodeKey(effectiveZoneId, candidate))?.disabled) {
-          setActiveNodeId(candidate);
+          activeRef.current = { zoneId: effectiveZoneId, nodeId: candidate };
+          notify();
           return;
         }
         c = nc;
@@ -264,9 +288,9 @@ export function FocusNavProvider({ children, dir, initialZoneId, onUnhandledBack
         const result = currentZone.onEdge?.(dir, currentRow, currentCol);
         if (result === "stay") return;
         if (result && result !== "bubble") {
-          setActiveZoneId(result.zoneId);
           const targetZone = zones.get(result.zoneId);
-          setActiveNodeId(result.nodeId ?? (targetZone ? firstNodeId(targetZone.layout()) : null));
+          activeRef.current = { zoneId: result.zoneId, nodeId: result.nodeId ?? (targetZone ? firstNodeId(targetZone.layout()) : null) };
+          notify();
           return;
         }
         currentZoneId = currentZone.parentZoneId;
@@ -275,14 +299,14 @@ export function FocusNavProvider({ children, dir, initialZoneId, onUnhandledBack
       }
       // No zone in the chain handled it — no-op, never a blank/broken state.
     }
-  }, [activeZoneId, activeNodeId, initialZoneId]);
+  }, [initialZoneId, notify]);
 
   const handleDirRef = useRef(handleDir);
   handleDirRef.current = handleDir;
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const activeZone = registryRef.current.zones.get(activeZoneIdRef.current);
+      const activeZone = registryRef.current.zones.get(activeRef.current.zoneId);
       if (activeZone?.passthrough) return;
 
       const activeIsTextInput = document.activeElement?.tagName === "INPUT";
@@ -326,13 +350,17 @@ export function FocusNavProvider({ children, dir, initialZoneId, onUnhandledBack
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Referentially stable for the lifetime of the provider — registry/subscribe/getActive/
+  // setFocus/shouldSuppressInitialAutoFocus never change identity across renders, so this
+  // context value never changes either, and no consumer ever re-renders just because
+  // *something else's* focus moved. See the file-level comment for why that matters.
   const contextValue = useMemo<FocusNavContextValue>(() => ({
     registry: registryRef.current,
-    activeZoneId,
-    activeNodeId,
+    subscribe,
+    getActive,
     setFocus,
     shouldSuppressInitialAutoFocus,
-  }), [activeZoneId, activeNodeId, setFocus, shouldSuppressInitialAutoFocus]);
+  }), [subscribe, getActive, setFocus, shouldSuppressInitialAutoFocus]);
 
   return <FocusNavContext.Provider value={contextValue}>{children}</FocusNavContext.Provider>;
 }
@@ -345,7 +373,7 @@ function useFocusNavContext(): FocusNavContextValue {
 
 /** Register a zone (a screen or sub-region). Safe to call unconditionally on every render. */
 export function useFocusZone(config: FocusZoneConfig) {
-  const { registry, activeZoneId, activeNodeId, setFocus, shouldSuppressInitialAutoFocus } = useFocusNavContext();
+  const { registry, subscribe, getActive, setFocus, shouldSuppressInitialAutoFocus } = useFocusNavContext();
   const configRef = useRef(config);
   configRef.current = config;
 
@@ -370,7 +398,8 @@ export function useFocusZone(config: FocusZoneConfig) {
     // so activeNodeId was left null even though this zone is now the active one.
     // Suppressed until the user's first real key press if the provider asked to
     // start with no visible focus (see shouldSuppressInitialAutoFocus).
-    if (activeZoneId === config.id && activeNodeId == null) {
+    const active = getActive();
+    if (active.zoneId === config.id && active.nodeId == null) {
       if (!shouldSuppressInitialAutoFocus()) {
         setFocus(config.id);
       }
@@ -382,7 +411,7 @@ export function useFocusZone(config: FocusZoneConfig) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.id]);
 
-  const isActive = activeZoneId === config.id;
+  const isActive = useSyncExternalStore(subscribe, () => getActive().zoneId === config.id);
   const activate = useCallback((nodeId?: string) => setFocus(config.id, nodeId), [config.id, setFocus]);
 
   return { isActive, activate };
@@ -390,7 +419,7 @@ export function useFocusZone(config: FocusZoneConfig) {
 
 /** Register a focusable leaf inside a zone. Returns isFocused + a ref for scroll-into-view. */
 export function useFocusNode(config: FocusNodeConfig) {
-  const { registry, activeZoneId, activeNodeId } = useFocusNavContext();
+  const { registry, subscribe, getActive } = useFocusNavContext();
   const configRef = useRef(config);
   configRef.current = config;
   const elRef = useRef<HTMLElement | null>(null);
@@ -415,7 +444,10 @@ export function useFocusNode(config: FocusNodeConfig) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.zoneId, config.id]);
 
-  const isFocused = activeZoneId === config.zoneId && activeNodeId === config.id;
+  const isFocused = useSyncExternalStore(subscribe, () => {
+    const active = getActive();
+    return active.zoneId === config.zoneId && active.nodeId === config.id;
+  });
 
   useEffect(() => {
     if (isFocused) {
@@ -432,14 +464,14 @@ export function useFocusNode(config: FocusNodeConfig) {
  * this registers/deregisters the whole id array from a single effect instead, and hands
  * back plain functions (`isFocused`/`getRef`) safe to call per item inside a .map(). */
 export function useFocusNodes(zoneId: string, ids: string[], options?: { onSelect?: (id: string) => void; isDisabled?: (id: string) => boolean }) {
-  const { registry, activeZoneId, activeNodeId } = useFocusNavContext();
+  const { registry, subscribe, getActive } = useFocusNavContext();
   const optionsRef = useRef(options);
   optionsRef.current = options;
   const elsRef = useRef(new Map<string, HTMLElement | null>());
-  const idsKey = ids.join(" ");
+  const idsKey = ids.join(" ");
 
   useEffect(() => {
-    const currentIds = idsKey.length ? idsKey.split(" ") : [];
+    const currentIds = idsKey.length ? idsKey.split(" ") : [];
     for (const id of currentIds) {
       registry.nodes.set(nodeKey(zoneId, id), {
         get onSelect() {
@@ -461,14 +493,22 @@ export function useFocusNodes(zoneId: string, ids: string[], options?: { onSelec
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoneId, idsKey]);
 
+  // Scoped to this zone: re-renders (and re-runs the effect below) when this zone's own
+  // active node changes, or when focus enters/leaves this zone entirely - not on every
+  // focus move anywhere else in the app.
+  const activeNodeInZone = useSyncExternalStore(subscribe, () => {
+    const active = getActive();
+    return active.zoneId === zoneId ? active.nodeId : null;
+  });
+
   useEffect(() => {
-    if (activeZoneId === zoneId && activeNodeId) {
-      elsRef.current.get(activeNodeId)?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    if (activeNodeInZone) {
+      elsRef.current.get(activeNodeInZone)?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
     }
-  }, [activeZoneId, activeNodeId, zoneId]);
+  }, [activeNodeInZone]);
 
   return {
-    isFocused: (id: string) => activeZoneId === zoneId && activeNodeId === id,
+    isFocused: (id: string) => activeNodeInZone === id,
     getRef: (id: string) => (el: HTMLElement | null) => {
       elsRef.current.set(id, el);
     },
@@ -499,6 +539,7 @@ export function useFocusAnyInput(callback: () => void) {
 
 /** Read-only current focus state, for the dev debug overlay. */
 export function useFocusNavState() {
-  const { activeZoneId, activeNodeId } = useFocusNavContext();
-  return { activeZoneId, activeNodeId };
+  const { subscribe, getActive } = useFocusNavContext();
+  const active = useSyncExternalStore(subscribe, getActive);
+  return { activeZoneId: active.zoneId, activeNodeId: active.nodeId };
 }
