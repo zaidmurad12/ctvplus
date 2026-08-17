@@ -110,7 +110,8 @@
     "storyAr": "عُرض على ديدبول مكان في عالم مارفل السينمائي من قبل هيئة التباين الزمني، لكنه بدلاً من ذلك قام بتجنيد نسخة معدلة من وولفرين لإنقاذ عالمه من الانقراض.",
     "isPublished": true,
     "rating": 7.6,
-    "subtitleSearchFailedAtAr": "2026-08-16T14:48:06.560Z"
+    "subtitleSearchFailedAtAr": "2026-08-16T14:48:06.560Z",
+    "subtitleSearchFailedAtEn": "2026-08-16T16:01:17.467Z"
   },
   {
     "trailerUrl": "https://www.youtube.com/results?search_query=Gladiator%20II%20trailer",
@@ -186,7 +187,8 @@
       }
     ],
     "backdrop": "https://image.tmdb.org/t/p/original/tOqIwliWMovSIZ9DyvHcHI7p2im.jpg",
-    "titleEn": "Gladiator II"
+    "titleEn": "Gladiator II",
+    "subtitleSearchFailedAtAr": "2026-08-16T15:59:40.250Z"
   },
   {
     "rating": 6,
@@ -9612,7 +9614,9 @@
         "role": "ممثل رئيسي",
         "photoUrl": "https://image.tmdb.org/t/p/w300/reQXsqd6qLpQHcWEiSeVBdYbX3W.jpg"
       }
-    ]
+    ],
+    "subtitleSearchFailedAtEn": "2026-08-16T15:58:50.565Z",
+    "subtitleSearchFailedAtAr": "2026-08-16T15:58:50.812Z"
   },
   {
     "year": 2019,
@@ -17083,7 +17087,9 @@
     "type": "movie",
     "backdrop": "https://image.tmdb.org/t/p/original/h6wflubjTvlYgFUfcRKmZOPBPzM.jpg",
     "id": "movie_91314",
-    "originalSubtitlesUrlAr": "/uploads/real_en_1786605699944_subtitle_en.srt"
+    "originalSubtitlesUrlAr": "/uploads/real_en_1786605699944_subtitle_en.srt",
+    "subtitleSearchFailedAtEn": "2026-08-16T16:46:54.562Z",
+    "subtitleSearchFailedAtAr": "2026-08-16T16:46:54.858Z"
   },
   {
     "rating": 7,
@@ -34299,6 +34305,8 @@
     "collectionNameEn": "",
     "logoUrl": "https://image.tmdb.org/t/p/w500/BnDydsaEeMhywD5Snv6jN77ifh.png",
     "isPublished": true,
-    "id": "movie_1786890268689"
+    "id": "movie_1786890268689",
+    "subtitleSearchFailedAtAr": "2026-08-16T16:39:45.696Z",
+    "subtitleSearchFailedAtEn": "2026-08-16T16:39:45.871Z"
   }
 ]

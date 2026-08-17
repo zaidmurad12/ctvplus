@@ -84,8 +84,18 @@ export function SubtitlePanel(props: SubtitlePanelProps) {
 
   return (
     <div
-      className="absolute bottom-full mb-3 right-0 rtl:left-0 rtl:right-auto w-[calc(100vw-2.5rem)] max-w-sm sm:w-96 bg-zinc-950/98 border border-white/10 backdrop-blur-3xl p-5 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] z-[60] flex flex-col gap-4 animate-fade-in"
-      dir={lang === "ar" ? "rtl" : "ltr"}
+      // Anchored directly above its trigger button, opening upward from it - the button's
+      // row is now forced ltr regardless of app language (see VideoPlayer.tsx), so the
+      // button sits in the same physical spot in Arabic as in English and this anchor no
+      // longer needs to flip sides per language the way it used to.
+      className="absolute bottom-full mb-3 left-0 w-[calc(100vw-2.5rem)] max-w-sm sm:w-96 bg-zinc-950/98 border border-white/10 backdrop-blur-3xl p-5 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.95)] z-[60] flex flex-col gap-4 animate-panel-in"
+      // Pinned to ltr regardless of app language: this panel's grids/rows are only laid out
+      // for one fixed visual order (see the shadow toggle below, which already has to
+      // manually counteract rtl mirroring) - only the label text is localized. Letting dir
+      // follow the app language double-mirrors everything else (header row, option grids) on
+      // top of that, which is what made the panel look flipped in Arabic while English (the
+      // layout's native direction) looked normal.
+      dir="ltr"
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between border-b border-white/5 pb-3">
@@ -241,7 +251,7 @@ export function SubtitlePanel(props: SubtitlePanelProps) {
               <span
                 className={`pointer-events-none inline-block h-4.5 w-4.5 transform rounded-full shadow ring-0 transition duration-200 ease-in-out ${
                   props.subShadow ? "bg-zinc-950" : "bg-white"
-                } ${props.subShadow ? (lang === "ar" ? "-translate-x-5" : "translate-x-5") : "translate-x-0"}`}
+                } ${props.subShadow ? "translate-x-5" : "translate-x-0"}`}
               />
             </button>
           );

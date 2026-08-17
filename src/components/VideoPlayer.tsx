@@ -148,10 +148,14 @@ function VideoPlayerInner(props: VideoPlayerProps) {
   });
   const seekNode = useFocusNode({ zoneId: "player.seek", id: "seek", onSelect: togglePlay });
 
-  // Order matches DOM/reading order of the three flex groups in the control bar
-  // (subtitles group, transport group, mute group) — dir="rtl" on the row mirrors
-  // this visually, and the single RTL flip point in useFocusNav mirrors the input to
-  // match, so this array stays language-invariant.
+  // Fixed physical/visual order of the three flex groups in the control bar (subtitles
+  // group, transport group, mute group) - the row itself is forced dir="ltr" below
+  // regardless of app language (same button positions in Arabic as in English), unlike
+  // the rest of the player which mirrors with dir. Since useFocusNav's single RTL flip
+  // point (physical Left/Right -> logical start/end) still applies uniformly across the
+  // whole player, a row that no longer visually mirrors needs its *navigation* layout
+  // reversed to compensate, so a logical move still lands on the button that's physically
+  // adjacent on screen - see navControlIds below.
   const controlIds = [
     "subtitles",
     ...(playingMovie.type === "series" ? ["prev"] : []),
@@ -159,9 +163,10 @@ function VideoPlayerInner(props: VideoPlayerProps) {
     ...(playingMovie.type === "series" ? ["next"] : []),
     "mute",
   ];
+  const navControlIds = lang === "ar" ? [...controlIds].reverse() : controlIds;
   useFocusZone({
     id: "player.controls",
-    layout: () => [controlIds],
+    layout: () => [navControlIds],
     onEdge: (dir) => {
       if (dir === "up") return { zoneId: "player.seek", nodeId: "seek" };
       return;
@@ -420,7 +425,11 @@ function VideoPlayerInner(props: VideoPlayerProps) {
             <span className="text-xs text-zinc-300 font-num font-bold min-w-[42px]">{formatDuration(playerDuration)}</span>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          {/* Forced ltr regardless of app language: buttons stay in the same physical
+              position in Arabic as in English (matches the seek bar's existing "always
+              ltr" precedent above) - navControlIds compensates the keyboard navigation
+              for this, see its definition above. */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4" dir="ltr">
             {/* Left: Subtitles Dropdown */}
             <div className="relative flex items-center gap-2.5 w-full sm:w-auto justify-start">
               <div className="relative">

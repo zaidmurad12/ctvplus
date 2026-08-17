@@ -140,6 +140,17 @@ html, body, *, ::-webkit-scrollbar {
   animation: heroZoomOut 10s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* Floating panel entrance (subtitle settings, and any similar anchored popover) - a slight
+   rise + fade reads as "opening from its anchor" rather than just popping into place. */
+@keyframes panelRiseIn {
+  0% { opacity: 0; transform: translateY(10px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-panel-in {
+  animation: panelRiseIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 /* Giant Outline / Hollow Stroke Numbers for Top 10 & Parts */
 .stroke-number {
   color: transparent;
