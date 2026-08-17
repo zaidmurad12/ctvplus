@@ -44,6 +44,22 @@ function processHtmlFile(htmlPath) {
     htmlContent = htmlContent.replace(/type="module"/g, '');
     htmlContent = htmlContent.replace(/\s+defer/g, '');
 
+    // Inline the stylesheet into <head> instead of leaving it as an external <link>.
+    // Because the script above now runs synchronously (no defer/module), it can mount
+    // and paint the DOM before that external CSS request finishes - especially on slow
+    // device storage - producing a visible flash of raw unstyled content (oversized logo,
+    // sidebar icons with no layout, bare hero title text) until a later reload picks up
+    // the by-then-cached CSS. A <style> block is parsed synchronously as part of <head>,
+    // so this removes the race instead of just narrowing it.
+    const cssPath = path.join(path.dirname(htmlPath), 'assets', 'index.css');
+    if (fs.existsSync(cssPath)) {
+      const cssContent = fs.readFileSync(cssPath, 'utf8');
+      htmlContent = htmlContent.replace(
+        /<link\s+rel="stylesheet"\s+href="\.\/assets\/index\.css"\s*\/?>/i,
+        `<style>${cssContent}</style>`
+      );
+    }
+
     // Ensure standard script tag is placed at end of body for reliable DOM mounting
     htmlContent = htmlContent.replace(/<script\s+[^>]*src=["']\.\/assets\/index\.js["'][^>]*><\/script>/gi, '');
     if (!htmlContent.includes('./assets/index.js')) {
