@@ -15,7 +15,15 @@ export default defineConfig(() => {
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       hmr: process.env.DISABLE_HMR !== 'true',
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      watch: process.env.DISABLE_HMR === 'true' ? null : {
+        // movies_db.json is imported by src/data/initialMovies.ts as a static build-time
+        // fallback, which puts it in Vite's watched module graph. The server rewrites this
+        // same file constantly (imports, healing passes, Firestore sync - see
+        // saveMoviesDatabase() call sites in server.ts), and each write was forcing a full
+        // page reload for anyone connected, killing in-progress video playback every few
+        // minutes. The fallback only needs the value at build time, never a live update.
+        ignored: ['**/movies_db.json', '**/*.db', '**/*.db-wal', '**/*.db-shm'],
+      },
     },
     build: {
       outDir: 'dist',
