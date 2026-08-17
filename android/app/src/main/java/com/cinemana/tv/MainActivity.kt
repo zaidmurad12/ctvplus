@@ -24,6 +24,8 @@ class MainActivity : AppCompatActivity() {
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private lateinit var fullscreenContainer: FrameLayout
     private var fallbackToFileAssetAttempted = false
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var contentCheckScheduled = false
 
     // Domain & Asset URIs for maximum Android TV & Emulator compatibility
     private val fileAssetUrl = "file:///android_asset/index.html"
@@ -105,7 +107,19 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A device with no usable WebView provider (common on Play-Services-less TV
+        // firmware) throws here instead of just failing to render, which used to leave
+        // the launcher's app-transition banner on screen forever with nothing in logcat
+        // to explain why. Surface it as visible text instead.
+        try {
+            initializeWebView()
+        } catch (e: Throwable) {
+            android.util.Log.e("CinemanaTV", "Fatal error initializing WebView", e)
+            showFatalErrorScreen(e)
+        }
+    }
 
+    private fun initializeWebView() {
         // Fullscreen and Keep Screen On during video playback for TV experience
         window.setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
@@ -286,6 +300,46 @@ class MainActivity : AppCompatActivity() {
         // This makes the app fully standalone after install - no dev server or network reachability to this
         // PC required. To point at a local dev server instead (emulator only), use localServerUrl.
         webView.loadUrl(appAssetsUrl)
+        scheduleContentCheck()
+    }
+
+    // The page can return HTTP 200 and still never show anything - e.g. the bundled JS
+    // throwing on a syntax/API the device's WebView doesn't support. That failure mode
+    // never fires WebViewClient's onReceivedError (the request itself succeeded), so
+    // without this check the screen just stays black/on the launcher's app-open banner
+    // forever with no way to tell "still loading" apart from "silently broken".
+    private fun scheduleContentCheck() {
+        if (contentCheckScheduled) return
+        contentCheckScheduled = true
+        mainHandler.postDelayed({
+            webView.evaluateJavascript(
+                "(function(){try{var r=document.getElementById('root');return !!(r&&r.children&&r.children.length>0);}catch(e){return false;}})()"
+            ) { result ->
+                contentCheckScheduled = false
+                if (result != "true") {
+                    android.util.Log.e("CinemanaTV", "App did not render within timeout (root empty), result=$result")
+                    if (!fallbackToFileAssetAttempted) {
+                        fallbackToFileAssetAttempted = true
+                        webView.loadUrl(fileAssetUrl)
+                        scheduleContentCheck()
+                    } else {
+                        showOfflineErrorPage(webView)
+                    }
+                }
+            }
+        }, 10000)
+    }
+
+    private fun showFatalErrorScreen(e: Throwable) {
+        val message = "تعذر تشغيل التطبيق (WebView غير متاح على هذا الجهاز)\n\n${e.javaClass.simpleName}: ${e.message}"
+        val textView = android.widget.TextView(this)
+        textView.text = message
+        textView.setTextColor(Color.WHITE)
+        textView.setBackgroundColor(Color.parseColor("#090b11"))
+        textView.textSize = 16f
+        textView.gravity = android.view.Gravity.CENTER
+        textView.setPadding(60, 60, 60, 60)
+        setContentView(textView)
     }
 
     private fun showOfflineErrorPage(view: WebView?) {
@@ -363,6 +417,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (!this::webView.isInitialized) {
+            if (keyCode == KeyEvent.KEYCODE_BACK) {
+                finish()
+                return true
+            }
+            return super.onKeyDown(keyCode, event)
+        }
         if (customView != null) {
             if (keyCode == KeyEvent.KEYCODE_BACK) {
                 webView.webChromeClient?.onHideCustomView()
@@ -388,16 +449,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        webView.onPause()
+        if (this::webView.isInitialized) webView.onPause()
     }
 
     override fun onResume() {
         super.onResume()
-        webView.onResume()
+        if (this::webView.isInitialized) webView.onResume()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        webView.destroy()
+        mainHandler.removeCallbacksAndMessages(null)
+        if (this::webView.isInitialized) webView.destroy()
     }
 }
