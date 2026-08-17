@@ -1,0 +1,8 @@
+# Kept in sync with vite.config.ts's build.target - this app ships inside an Android
+# WebView on TV hardware that's frequently years old with no auto-updating browser
+# engine, well below what Tailwind CSS v4's native output (CSS cascade layers,
+# color-mix, etc.) assumes. postcss-preset-env uses this to flatten/polyfill for them.
+chrome >= 65
+firefox >= 60
+safari >= 11
+edge >= 79
