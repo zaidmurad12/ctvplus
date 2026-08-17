@@ -282,10 +282,10 @@ class MainActivity : AppCompatActivity() {
         fullscreenContainer.addView(webView)
         setContentView(fullscreenContainer)
 
-        // Load local app assets via WebViewAssetLoader domain for full Web API, LocalStorage & HTTPS origin support
-        // Change this to localServerUrl to connect to a local development server
-        // webView.loadUrl(appAssetsUrl)
-        webView.loadUrl(localServerUrl) // Using local dev server (http://10.0.2.2:3000)
+        // Load local app assets via WebViewAssetLoader domain for full Web API, LocalStorage & HTTPS origin support.
+        // This makes the app fully standalone after install - no dev server or network reachability to this
+        // PC required. To point at a local dev server instead (emulator only), use localServerUrl.
+        webView.loadUrl(appAssetsUrl)
     }
 
     private fun showOfflineErrorPage(view: WebView?) {
