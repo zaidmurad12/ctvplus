@@ -57,6 +57,17 @@ html, body {
     image-rendering: -webkit-optimize-contrast;
   }
 
+  /* The player has its own custom play/pause button and buffering spinner - without
+     this, some WebKit/Chromium builds (notably some Android WebView versions) still
+     render their own built-in giant center play button on top of <video>, even though
+     the "controls" attribute is never set on it, showing up stacked behind our spinner. */
+  video::-webkit-media-controls,
+  video::-webkit-media-controls-start-playback-button,
+  video::-webkit-media-controls-panel {
+    display: none !important;
+    -webkit-appearance: none !important;
+  }
+
   /* 4K & Ultra-HD display scaling support */
   @media (min-width: 2500px) {
     html {

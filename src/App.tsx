@@ -3942,8 +3942,6 @@ export default function App() {
 
   const movieTrailerId = selectedMovie ? (getYoutubeId(selectedMovie.trailerUrl) || getYoutubeId(selectedMovie.backdrop)) : null;
 
-  const splashPosters = allMovies.map(m => m.poster).filter(Boolean);
-
   // What content screen to actually render. navSection itself flips to the literal
   // "sidebar" value while the sidebar has focus (see the mirroring effect above) so the
   // old handleKeyDown knows to stand down — but the screen the user came from should stay
@@ -3954,7 +3952,7 @@ export default function App() {
   return (
     <div dir={lang === "ar" ? "rtl" : "ltr"} className={`w-full h-full min-h-screen relative bg-[#090b11] text-[#f8fafc] flex flex-col overflow-hidden select-none`}>
       {/* APP LAUNCH SPLASH SCREEN */}
-      {showSplash && <SplashScreen posters={splashPosters} lang={lang} onDismiss={() => setShowSplash(false)} />}
+      {showSplash && <SplashScreen lang={lang} onDismiss={() => setShowSplash(false)} />}
       
       {/* Android TV Top Ambient Ambient Glow */}
       <div className="absolute top-0 left-1/4 right-1/4 h-16 bg-white/10 blur-3xl pointer-events-none rounded-full" />
