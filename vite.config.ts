@@ -17,12 +17,15 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: process.env.DISABLE_HMR === 'true' ? null : {
         // movies_db.json is imported by src/data/initialMovies.ts as a static build-time
-        // fallback, which puts it in Vite's watched module graph. The server rewrites this
-        // same file constantly (imports, healing passes, Firestore sync - see
-        // saveMoviesDatabase() call sites in server.ts), and each write was forcing a full
-        // page reload for anyone connected, killing in-progress video playback every few
-        // minutes. The fallback only needs the value at build time, never a live update.
-        ignored: ['**/movies_db.json', '**/*.db', '**/*.db-wal', '**/*.db-shm'],
+        // fallback, which puts it in Vite's watched module graph. public/movies.json is a
+        // separate copy that server.ts's saveMoviesDatabase() also rewrites every time -
+        // Vite treats any change inside publicDir as a reason to force a full page reload,
+        // independent of the module graph. Both get rewritten constantly (imports, healing
+        // passes, Firestore sync - saveMoviesDatabase() has ~19 call sites, several inside
+        // per-movie loops), and each write was forcing a reload for anyone connected,
+        // killing in-progress video playback every few minutes. Neither file needs a live
+        // update - the app already fetches fresh data over /api/movies at runtime.
+        ignored: ['**/movies_db.json', '**/public/movies.json', '**/*.db', '**/*.db-wal', '**/*.db-shm'],
       },
     },
     build: {
