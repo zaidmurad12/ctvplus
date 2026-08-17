@@ -1,4 +1,3 @@
-import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
@@ -6,7 +5,10 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     base: './',
-    plugins: [react(), tailwindcss()],
+    // Tailwind v3 is a standard PostCSS plugin (see postcss.config.js) picked up
+    // automatically by Vite's built-in CSS pipeline - no dedicated Vite plugin needed,
+    // unlike v4's @tailwindcss/vite.
+    plugins: [react()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
