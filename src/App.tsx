@@ -1083,8 +1083,16 @@ export default function App() {
     if (isHls) {
       if (Hls.isSupported()) {
         hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: true,
+          // Web Worker support is a known trouble spot on older/quirky Android WebView
+          // engines (this app already targets several - see the cascade-layers CSS
+          // compat work). Transmuxing on the main thread instead is somewhat heavier for
+          // the UI thread, but a hang/jank there is recoverable - a worker crashing the
+          // renderer outright on a device with a broken/partial Worker implementation is
+          // not, and looks identical to "the app just exits" a few seconds into playback.
+          enableWorker: false,
+          // Low-latency HLS is a live-streaming feature (keeping playback close to the
+          // live edge); this app only ever plays VOD movies/episodes, so it adds
+          // complexity (different buffering/seeking behavior) with no benefit here.
           maxBufferLength: 30,
         });
         hls.loadSource(streamUrl);
