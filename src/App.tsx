@@ -2327,6 +2327,20 @@ export default function App() {
     return () => window.removeEventListener("keydown", listener);
   }, []);
 
+  // Exposes whether the back/escape key above has anywhere left to go within the app -
+  // read by MainActivity.kt (see its onKeyDown) before deciding whether a physical back
+  // press should close the app. Without this the native side had no way to tell "the web
+  // app just closed a video/dialog" apart from "there's nothing left to close", and was
+  // exiting on every single back press regardless of screen. Mirrors exactly the set of
+  // conditions the Escape branch above checks, in the same order/precedence.
+  useEffect(() => {
+    (window as any).__cinemanaAtRoot =
+      !playingMovie &&
+      !selectedMovie &&
+      !selectedPerson &&
+      (navSection === "hero" || navSection === "rails" || navSection === "sidebar");
+  }, [playingMovie, selectedMovie, selectedPerson, navSection]);
+
   // Auto-scroll category rails smoothly into view when focused rail changes
   useEffect(() => {
     if (navSection === "rails") {

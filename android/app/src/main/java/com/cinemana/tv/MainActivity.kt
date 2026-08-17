@@ -444,13 +444,21 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (keyCode == KeyEvent.KEYCODE_BACK) {
+            // This is a single-page app - it never has real browser history, so
+            // canGoBack() is always false and finish()-ing on that basis meant every
+            // single back press exited the app outright, from any screen (closing a
+            // video, a details page, a settings panel - none of it mattered). Dispatch
+            // Escape first so the web app's own back-handling gets a chance to close
+            // whatever's open, then only exit if it reports there was nothing left to
+            // close (see the __cinemanaAtRoot effect in App.tsx, which mirrors the exact
+            // same conditions its Escape key handler checks).
             webView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ESCAPE))
             webView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ESCAPE))
 
-            if (!webView.canGoBack()) {
-                finish()
-            } else {
-                webView.goBack()
+            webView.evaluateJavascript("window.__cinemanaAtRoot === true") { result ->
+                if (result == "true") {
+                    finish()
+                }
             }
             return true
         }
