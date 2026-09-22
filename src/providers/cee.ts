@@ -38,8 +38,26 @@ export interface CeeEpisode extends CeeSearchItem {
 // No request here used to have a timeout: a source that accepts the connection and then never answers
 // (blocked/throttled network, overloaded server) left every caller waiting forever - the Watch button sat on
 // "Preparing..." indefinitely. Bounded now so a dead source fails fast and the others still get their turn.
-const REQUEST_TIMEOUT_MS = 8000;
-async function request<T>(path: string): Promise<T> {
+// Was 8000 - too tight in practice: this same request() also backs the *matching* searches
+// (searchCee, up to 3 fired in parallel per title - see findCeeMatch), not just a single stream
+// fetch, and those routinely needed more than 8s on a real, slower connection to this source.
+// Missing that window silently returned "no match" (caught, not surfaced) for every title on
+// such a connection - reported as "movies don't fetch playback links and the Watch button
+// doesn't even show" for basically everything, not a specific title. 20s trades a slightly
+// longer worst-case wait for actually finding the match that was really there.
+const REQUEST_TIMEOUT_MS = 20000;
+// A single dropped packet/DNS hiccup on a weak connection used to fail the whole request
+// outright (timeout or a network error) with no second attempt - reported as titles flickering
+// between working and not depending on nothing the viewer did differently, exactly what a flaky
+// link (not a dead one) looks like. Two retries, a short growing pause between them, gives a
+// connection that's merely weak (not actually down) a real chance to succeed on attempt 2 or 3
+// instead of the whole match/playback lookup giving up on a single bad moment.
+const REQUEST_RETRIES = 2;
+const RETRY_DELAY_MS = 700;
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function requestOnce<T>(path: string): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -49,6 +67,18 @@ async function request<T>(path: string): Promise<T> {
   } finally {
     clearTimeout(timer);
   }
+}
+async function request<T>(path: string): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= REQUEST_RETRIES; attempt++) {
+    try {
+      return await requestOnce<T>(path);
+    } catch (err) {
+      lastError = err;
+      if (attempt < REQUEST_RETRIES) await sleep(RETRY_DELAY_MS * (attempt + 1));
+    }
+  }
+  throw lastError;
 }
 
 function asArray<T>(value: T[] | { data?: T[] } | null | undefined): T[] {

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exposes only the app's own cache folder (see ApkUpdaterModule.kt - a plain cacheDir download,
+     never external storage, which some real devices can't reliably provide) through the
+     FileProvider below - nothing else on the device is ever shared via this authority. -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="updates" path="." />
+</paths>

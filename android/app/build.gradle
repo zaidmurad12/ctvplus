@@ -86,8 +86,8 @@ android {
         // same-versionCode APK as "nothing to update" and silently keep the old app installed,
         // which was indistinguishable from "the fix didn't work" from the outside. Bump this on
         // every release build going forward so a reinstall is unambiguous.
-        versionCode 112
-        versionName "1.22.72-in-app-update"
+        versionCode 122
+        versionName "1.22.82-okhttp-updater"
     }
     signingConfigs {
         debug {
@@ -127,4 +127,15 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // ApkUpdaterModule's own HTTP client (the in-app update download) - already present
+    // transitively (react-android itself depends on it internally), but declared explicitly here
+    // so it's guaranteed to actually be on this module's own compile classpath rather than relying
+    // on however react-android happened to scope its own internal use of it. Replaced a plain
+    // java.net.HttpURLConnection implementation that reliably connected but then transferred zero
+    // bytes and simply stalled on at least one real device/network, while the exact same URL
+    // downloaded instantly in that same device's browser - OkHttp's own connection handling
+    // (TLS/HTTP2/redirect negotiation) is what real browsers and most modern Android apps actually
+    // rely on instead of the older java.net stack for exactly this class of reliability.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

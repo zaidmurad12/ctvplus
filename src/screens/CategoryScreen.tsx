@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, Dimensions, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, StyleSheet, Dimensions, ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import type { Category, Movie } from "../api";
 import MovieCard, { CARD_TOTAL_WIDTH } from "../components/MovieCard";
 import { colors, font, spacing } from "../theme";
@@ -17,6 +17,10 @@ const ROW_GAP = s(26);
 // Only the rows near the focused one decode their poster (the grid itself keeps every row mounted so
 // D-pad navigation stays exact - see PersonScreen/BrowseScreen for why the scroll container is never virtualised).
 const IMAGE_REVEAL_RADIUS = 3;
+// See renderedRowCount's own comment below - same fix, same reasoning as BrowseScreen's identical constants.
+const INITIAL_ROWS = 6;
+const ROWS_PER_BATCH = 6;
+const SCROLL_END_THRESHOLD = 1200;
 
 interface Props {
   category: Category;
@@ -85,16 +89,40 @@ export default function CategoryScreen({ category, lang, onSelectMovie, onBack }
     return out;
   }, [items]);
 
+  // `items` can jump from a short head (~20) to the full list (up to 100) in one synchronous state
+  // update the instant loadAll() resolves - up to ~17 rows' worth of real MovieCard components
+  // (Focusable + gradient + Image each) mounting all at once, reported as the app freezing and
+  // exiting outright right after this screen was added. Same fix, same reasoning as BrowseScreen's
+  // own renderedRowCount: cap how many rows actually mount at first, growing in batches as the
+  // viewer scrolls further - it only ever grows, never shrinks, so a row already mounted (and thus
+  // already measured via its own onLayout) is never later unmounted from under scrollToRow.
+  const [renderedRowCount, setRenderedRowCount] = useState(INITIAL_ROWS);
+  useEffect(() => {
+    setRenderedRowCount(INITIAL_ROWS);
+  }, [category.id]);
+  const renderedRows = rows.length > renderedRowCount ? rows.slice(0, renderedRowCount) : rows;
+  const onGridScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    if (contentOffset.y + layoutMeasurement.height < contentSize.height - SCROLL_END_THRESHOLD) return;
+    setRenderedRowCount((n) => (n < rows.length ? n + ROWS_PER_BATCH : n));
+  }, [rows.length]);
+
   return (
     <View style={styles.root}>
-      <ScrollView ref={gridScrollRef} contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={gridScrollRef}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        onScroll={onGridScroll}
+        scrollEventThrottle={100}
+      >
         <View style={styles.header}>
           <View style={styles.titleBar} />
           <Text style={styles.title}>{pickText(category.titleAr, category.titleEn, lang)}</Text>
           <Text style={styles.count}>{lang === "ar" ? `${items.length} عمل` : `${items.length} titles`}</Text>
           {loading && <ActivityIndicator color="#fff" size="small" />}
         </View>
-        {rows.map((rowItems, rowIndex) => (
+        {renderedRows.map((rowItems, rowIndex) => (
           <Row
             key={rowIndex}
             items={rowItems}

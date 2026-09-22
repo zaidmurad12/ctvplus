@@ -44,8 +44,17 @@ export interface CinemanaEpisode {
 // No request here used to have a timeout: a source that accepts the connection and then never answers
 // (blocked/throttled network, overloaded server) left every caller waiting forever - the Watch button sat on
 // "Preparing..." indefinitely. Bounded now so a dead source fails fast and the others still get their turn.
-const REQUEST_TIMEOUT_MS = 8000;
-async function request<T>(path: string): Promise<T> {
+// See cee.ts's own identical constant for why this is 20s, not the original 8s - same reasoning,
+// same fix, applies equally to this source's own matching searches.
+const REQUEST_TIMEOUT_MS = 20000;
+// See cee.ts's own identical retry logic for the full reasoning - a flaky (not dead) connection
+// used to fail the whole request on one bad moment with no second attempt.
+const REQUEST_RETRIES = 2;
+const RETRY_DELAY_MS = 700;
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function requestOnce<T>(path: string): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -55,6 +64,18 @@ async function request<T>(path: string): Promise<T> {
   } finally {
     clearTimeout(timer);
   }
+}
+async function request<T>(path: string): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= REQUEST_RETRIES; attempt++) {
+    try {
+      return await requestOnce<T>(path);
+    } catch (err) {
+      lastError = err;
+      if (attempt < REQUEST_RETRIES) await sleep(RETRY_DELAY_MS * (attempt + 1));
+    }
+  }
+  throw lastError;
 }
 
 function asArray<T>(value: T[] | { data?: T[] } | null | undefined): T[] {

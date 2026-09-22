@@ -1457,13 +1457,16 @@ export default function VideoPlayerScreen({
               ) : (
                 <Text style={styles.title} numberOfLines={1}>{title}</Text>
               )}
-            </View>
-            <View style={styles.headerRight}>
+              {/* Season/episode/title - moved under the logo (was beside the age/year/genre facts
+                  row on the other side) per explicit request, so it reads as this title's own
+                  subtitle instead of competing with the unrelated facts row for the same line. */}
               {!!metaText && (
                 <Text style={styles.metaText} numberOfLines={1}>
                   {metaText}
                 </Text>
               )}
+            </View>
+            <View style={styles.headerRight}>
               <View style={styles.factsRow}>
                 {!!movie.ageRating && (
                   <View style={styles.ageBadge}>
@@ -1916,13 +1919,16 @@ export default function VideoPlayerScreen({
             ) : (
               <Text style={styles.title} numberOfLines={1}>{title}</Text>
             )}
-          </View>
-          <View style={styles.headerRight}>
+            {/* Season/episode/title - moved under the logo (was beside the age/year/genre facts
+                row on the other side) per explicit request, so it reads as this title's own
+                subtitle instead of competing with the unrelated facts row for the same line. */}
             {!!metaText && (
               <Text style={styles.metaText} numberOfLines={1}>
                 {metaText}
               </Text>
             )}
+          </View>
+          <View style={styles.headerRight}>
             {/* Everything folds into this single second line - age rating included, right next
                 to year+country (kept adjacent per request) rather than off on its own. */}
             <View style={styles.factsRow}>
@@ -3070,7 +3076,10 @@ const styles = StyleSheet.create({
   headerRight: { alignItems: "flex-end", gap: s(6), maxWidth: "60%" },
   playerLogo: { marginBottom: s(4) },
   title: { color: "#fff", fontSize: fs(18), fontFamily: font.extraBold },
-  metaText: { color: "#d4d4d8", fontSize: fs(13), fontFamily: font.semiBold, textAlign: "right" },
+  // No textAlign override anymore - this used to sit in the right-aligned facts column
+  // (headerRight) and needed it there; now that it's under the logo in headerLeft, it should
+  // read the same natural direction as the title/logo above it, not force-align opposite them.
+  metaText: { color: "#d4d4d8", fontSize: fs(13), fontFamily: font.semiBold, marginTop: s(2) },
   // More items land in this one line now (age rating, year, country, language, genres,
   // quality, rating) - wraps rather than overflowing the screen edge or squeezing the title
   // on a narrower device, and stays right-aligned on every wrapped line to match headerRight.

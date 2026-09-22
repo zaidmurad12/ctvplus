@@ -10,6 +10,7 @@ import { useSidebarHomeHandle } from "../focusRefs";
 import { pushBackHandler } from "../backStack";
 import { fetchAppUpdate, AppUpdateInfo } from "../api";
 import { CURRENT_VERSION_CODE, CURRENT_VERSION_NAME } from "../appVersion";
+import { downloadAndInstallApk, isApkUpdaterAvailable, subscribeApkUpdaterEvents } from "../apkUpdater";
 import {
   SUBTITLE_FONTS,
   SUBTITLE_SIZES,
@@ -340,7 +341,9 @@ const NavItem = React.forwardRef<
               reads as "this is the open section" without competing visually with the white
               filled state a focused row also uses. */}
           <View style={[styles.navItemAccent, active && styles.navItemAccentActive]} />
-          <Icon size={s(17)} color={focused ? "#000" : active ? "#fff" : colors.textMuted} strokeWidth={2.1} />
+          <View style={[styles.navItemIconWrap, active && styles.navItemIconWrapActive, focused && styles.navItemIconWrapFocused]}>
+            <Icon size={s(17)} color={focused ? "#000" : active ? "#fff" : colors.textMuted} strokeWidth={2.1} />
+          </View>
           <Text style={[styles.navItemText, active && styles.navItemTextActive, focused && styles.navItemTextFocused]} numberOfLines={1}>
             {label}
           </Text>
@@ -355,7 +358,7 @@ const NavItem = React.forwardRef<
   );
 });
 
-type UpdateState = "idle" | "checking" | "upToDate" | "available" | "error";
+type UpdateState = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installPrompted" | "error";
 
 // A single row, not a separate "check" button plus a separate "download" button - one Focusable
 // with one focus handle to wire, matching every other single-control row on this screen (see this
@@ -370,6 +373,15 @@ const UpdateRow = React.forwardRef<
 >(function UpdateRow({ lang, nextFocusUp, nextFocusLeft }, ref) {
   const [state, setState] = useState<UpdateState>("idle");
   const [info, setInfo] = useState<AppUpdateInfo | null>(null);
+  const [progress, setProgress] = useState(0);
+  // Cleared on unmount and on every fresh download attempt - see download()'s own watchdog
+  // comment for why this exists at all.
+  const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearStallTimer = () => {
+    if (stallTimerRef.current) clearTimeout(stallTimerRef.current);
+    stallTimerRef.current = null;
+  };
+  useEffect(() => clearStallTimer, []);
 
   const check = async () => {
     setState("checking");
@@ -382,16 +394,92 @@ const UpdateRow = React.forwardRef<
     }
   };
 
+  // Opens the browser instead - used both as the very first attempt on a device with no
+  // ApkUpdater module (shouldn't happen on a build that includes it, but costs nothing to guard)
+  // and as the fallback if the native download/install path itself fails partway through.
+  const openInBrowser = (url: string) => {
+    Linking.openURL(url).catch(() => {
+      ToastAndroid.show(lang === "ar" ? "تعذّر فتح رابط التنزيل" : "Could not open the download link", ToastAndroid.SHORT);
+    });
+    ToastAndroid.show(
+      lang === "ar" ? "يُفتح رابط التنزيل في المتصفح..." : "Opening the download link in your browser...",
+      ToastAndroid.SHORT
+    );
+  };
+
+  const download = (targetInfo: AppUpdateInfo) => {
+    if (!isApkUpdaterAvailable()) {
+      openInBrowser(targetInfo.url);
+      return;
+    }
+    setState("downloading");
+    setProgress(0);
+    // A download that genuinely fails (dead link, DownloadManager rejecting the request outright)
+    // fires the native side's own "error" event, already handled below - but a download that gets
+    // silently stuck (queued/paused and never actually transferring a single byte, seen on some TV
+    // boxes' own restricted DownloadManager) fires nothing at all: no error, just a progress bar
+    // that never moves, with no way out but force-closing the app. This watchdog is what actually
+    // ends that: any real forward progress (a "progress" event reporting more bytes than last time)
+    // pushes the deadline back out; if STALL_TIMEOUT_MS ever passes with zero forward progress
+    // since the download started (or since it last moved), it's treated as failed and falls back
+    // to the browser exactly like a real error would.
+    const STALL_TIMEOUT_MS = 15000;
+    let lastDownloaded = 0;
+    const armStallTimer = () => {
+      clearStallTimer();
+      stallTimerRef.current = setTimeout(() => {
+        unsubscribe();
+        ToastAndroid.show(
+          lang === "ar" ? "التنزيل عالق - يُفتح المتصفح بدلاً منه..." : "The download stalled - opening the browser instead...",
+          ToastAndroid.SHORT
+        );
+        openInBrowser(targetInfo.url);
+      }, STALL_TIMEOUT_MS);
+    };
+    armStallTimer();
+    const unsubscribe = subscribeApkUpdaterEvents((event) => {
+      if (event.type === "progress") {
+        if (event.total > 0) setProgress(event.downloaded / event.total);
+        if (event.downloaded > lastDownloaded) {
+          lastDownloaded = event.downloaded;
+          armStallTimer();
+        }
+      } else if (event.type === "installPrompted") {
+        clearStallTimer();
+        setState("installPrompted");
+        unsubscribe();
+      } else if (event.type === "error") {
+        // The download itself failed (network, blocked DownloadManager on this device, etc.) -
+        // the browser is the one path that has to work regardless of what's wrong with the
+        // native one, so it's the fallback rather than just showing an error dead end. The real
+        // message is surfaced too (not just a generic "failed") - the native side's own error
+        // used to vanish the instant this silently jumped to the browser, so a device where
+        // *neither* path works had nothing concrete left to report back.
+        clearStallTimer();
+        unsubscribe();
+        ToastAndroid.show(event.message.slice(0, 120), ToastAndroid.LONG);
+        openInBrowser(targetInfo.url);
+      }
+    });
+    downloadAndInstallApk(targetInfo.url, "ctv-plus-update.apk").catch((err) => {
+      clearStallTimer();
+      unsubscribe();
+      ToastAndroid.show(String(err?.message ?? err).slice(0, 120), ToastAndroid.LONG);
+      openInBrowser(targetInfo.url);
+    });
+  };
+
   const handlePress = () => {
-    if (state === "checking") return;
+    if (state === "checking" || state === "downloading") return;
+    if (state === "installPrompted") {
+      // Pressing again after the installer already opened once just re-offers it - the installer
+      // screen itself may have been backed out of by accident, or the APK simply isn't installed
+      // yet because the viewer hasn't acted on that prompt.
+      if (info) download(info);
+      return;
+    }
     if (state === "available" && info) {
-      Linking.openURL(info.url).catch(() => {
-        ToastAndroid.show(lang === "ar" ? "تعذّر فتح رابط التنزيل" : "Could not open the download link", ToastAndroid.SHORT);
-      });
-      ToastAndroid.show(
-        lang === "ar" ? "يُفتح رابط التنزيل في المتصفح..." : "Opening the download link in your browser...",
-        ToastAndroid.SHORT
-      );
+      download(info);
       return;
     }
     check();
@@ -406,6 +494,10 @@ const UpdateRow = React.forwardRef<
         return lang === "ar" ? "التطبيق محدّث لآخر إصدار" : "You're on the latest version";
       case "available":
         return lang === "ar" ? `إصدار جديد متاح: v${info?.versionName}` : `New version available: v${info?.versionName}`;
+      case "downloading":
+        return lang === "ar" ? `جارٍ التنزيل... ${Math.round(progress * 100)}%` : `Downloading... ${Math.round(progress * 100)}%`;
+      case "installPrompted":
+        return lang === "ar" ? "اكتمل التنزيل - تابع التثبيت من النافذة التي ظهرت" : "Download complete - continue from the install prompt";
       case "error":
         return lang === "ar" ? "تعذّر التحقق من التحديثات" : "Couldn't check for updates";
       default:
@@ -430,18 +522,29 @@ const UpdateRow = React.forwardRef<
             <Text style={[styles.versionLabel, focused && styles.versionLabelFocused]}>
               {lang === "ar" ? "الإصدار الحالي" : "Current version"} · v{CURRENT_VERSION_NAME}
             </Text>
-            <Text style={[styles.versionValue, focused && styles.versionValueFocused, state === "available" && styles.versionValueAvailable]}>
+            <Text
+              style={[
+                styles.versionValue,
+                focused && styles.versionValueFocused,
+                (state === "available" || state === "installPrompted") && styles.versionValueAvailable,
+              ]}
+            >
               {statusText}
             </Text>
+            {state === "downloading" && (
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${Math.max(4, Math.round(progress * 100))}%` }]} />
+              </View>
+            )}
             {state === "available" && !!notes && (
               <Text style={[styles.versionNotes, focused && styles.versionValueFocused]} numberOfLines={2}>
                 {notes}
               </Text>
             )}
           </View>
-          {state === "checking" ? (
+          {state === "checking" || state === "downloading" ? (
             <ActivityIndicator color={focused ? "#000" : "#fff"} size="small" />
-          ) : state === "available" ? (
+          ) : state === "available" || state === "installPrompted" ? (
             <Download size={s(18)} color={focused ? "#000" : "#fff"} strokeWidth={2.2} />
           ) : (
             <RefreshCw size={s(16)} color={focused ? "#000" : colors.textMuted} strokeWidth={2.2} />
@@ -712,21 +815,40 @@ const styles = StyleSheet.create({
   // paddingTop lowered (was 40) - per explicit request, to match BrowseScreen's own headerRow
   // level (see its own comment) - keeps every sidebar-adjacent screen's title at the same height.
   root: { flex: 1, flexDirection: "row", backgroundColor: colors.bg, paddingTop: s(30) },
-  nav: { width: s(220), paddingLeft: spacing.contentStart, paddingRight: s(16), gap: s(6) },
+  // Was 220 - with paddingLeft already eating spacing.contentStart (~94) to clear the sidebar,
+  // that left barely ~110 of real width for icon+label+chevron combined, so "إعدادات النظام"/
+  // "إعدادات الترجمة" (and their English equivalents) never actually fit and silently truncated
+  // to a couple of characters plus an ellipsis - reported as "dots right after the icon". Widened
+  // enough for the longer label ("Subtitle Settings"/"إعدادات الترجمة") to render on one full line
+  // with room to spare, in either language.
+  nav: { width: s(320), paddingLeft: spacing.contentStart, paddingRight: s(16), gap: s(8) },
   pageTitle: { color: "#fff", fontSize: fs(19), fontFamily: font.bold, marginBottom: s(20) },
   navItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: s(10),
-    paddingHorizontal: s(14),
-    paddingVertical: s(13),
-    borderRadius: s(10),
+    gap: s(12),
+    paddingHorizontal: s(16),
+    paddingVertical: s(14),
+    borderRadius: s(12),
     backgroundColor: "rgba(255,255,255,0.03)",
   },
-  navItemAccent: { width: s(3), height: s(16), borderRadius: 2, backgroundColor: "transparent" },
+  navItemAccent: { width: s(3), height: s(18), borderRadius: 2, backgroundColor: "transparent" },
   navItemAccentActive: { backgroundColor: "rgba(255,255,255,0.5)" },
   navItemFocused: { backgroundColor: "#fff" },
   navItemActive: { backgroundColor: "rgba(255,255,255,0.08)" },
+  // A soft round backdrop behind the icon itself (was a bare icon floating in the row) - gives
+  // each tab a real anchor point instead of the label doing all the visual work, closer to how a
+  // real TV settings app (Android TV Settings, Apple TV) treats its own nav icons.
+  navItemIconWrap: {
+    width: s(30),
+    height: s(30),
+    borderRadius: s(9),
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  navItemIconWrapActive: { backgroundColor: "rgba(255,255,255,0.12)" },
+  navItemIconWrapFocused: { backgroundColor: "transparent" },
   navItemText: { flex: 1, color: colors.textMuted, fontSize: fs(13), fontFamily: font.bold },
   navItemTextActive: { color: "#fff" },
   navItemTextFocused: { color: "#000" },
@@ -888,5 +1010,7 @@ const styles = StyleSheet.create({
   versionValueAvailable: { color: "#4ade80" },
   versionValueFocused: { color: "#000" },
   versionNotes: { color: colors.textFaint, fontSize: fs(11), fontFamily: font.semiBold, marginTop: s(4) },
+  progressTrack: { height: s(4), borderRadius: 2, backgroundColor: "rgba(255,255,255,0.15)", marginTop: s(8), overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 2, backgroundColor: "#4ade80" },
   uiScaleNote: { color: colors.textFaint, fontSize: fs(11), fontFamily: font.semiBold, marginTop: -s(8), marginBottom: s(16) },
 });

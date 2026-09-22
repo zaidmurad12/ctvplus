@@ -562,10 +562,20 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                 trailer has no header content of its own to show over it (the movie's title/logo/
                 facts row already sit further down, outside this WebView entirely - see below), so
                 this exists purely to hide whatever YouTube itself might draw near the top edge
-                (its own video title/channel overlay) the same way that one does. */}
+                (its own video title/channel overlay) the same way that one does.
+                A plain 0->35% fade still let that overlay peek through on some titles/devices -
+                it was already dimmed near the very top instead of fully opaque, since a linear
+                fade starts lightening immediately. Holding full black for a brief ~6% (where
+                YouTube's own title/channel text actually sits) before fading out by 24% - the
+                same "solid band, then fade" shape VideoPlayer.tsx's own header uses, just as
+                gradient stops instead of a separate fixed-height View (this box's own height is
+                aspect-ratio-relative, not a fixed scaled unit like the full player's header).
+                Was 0.14/0.42 - covered noticeably more of the trailer than intended, reported as
+                too heavy; this keeps just enough solid band to still fully hide the overlay text
+                without the fade trailing on so long past it. */}
             <LinearGradient
-              colors={["#000", "transparent"]}
-              locations={[0, 0.35]}
+              colors={["#000", "#000", "transparent"]}
+              locations={[0, 0.06, 0.24]}
               style={StyleSheet.absoluteFill}
               pointerEvents="none"
             />

@@ -51,6 +51,9 @@ interface MovieSummaryDto {
   titleAr?: string | null;
   overview?: string | null;
   overviewAr?: string | null;
+  // Now sent on every summary/detail response, not just search results - see
+  // calculateMatchScore's own comment on why every entry point needs this, not just Search.
+  imdbId?: string | null;
   releaseDate?: string | null;
   rating?: number | null;
   runtime?: number | null;
@@ -141,6 +144,7 @@ interface ShowSummaryDto {
   titleAr?: string | null;
   overview?: string | null;
   overviewAr?: string | null;
+  imdbId?: string | null;
   releaseDate?: string | null;
   rating?: number | null;
   numberOfSeasons: number;
@@ -497,6 +501,10 @@ function mapSummary(m: MovieSummaryDto): Movie {
     poster: m.artwork?.poster,
     backdrop: m.artwork?.backdrop,
     logoUrl: m.artwork?.logo,
+    // Now sent on every summary/detail response (see MovieSummaryDto's own comment) - lets
+    // calculateMatchScore's exact-IMDb-id fast path fire regardless of where this title was
+    // opened from, not just Search (the one place that used to carry it).
+    imdbId: extractImdbId(m.imdbId),
     rating: m.rating ?? undefined,
     year: m.releaseDate ? new Date(m.releaseDate).getUTCFullYear() : undefined,
     type: "movie",
@@ -595,6 +603,7 @@ function mapShowSummary(s: ShowSummaryDto): Movie {
     poster: s.artwork?.poster,
     backdrop: s.artwork?.backdrop,
     logoUrl: s.artwork?.logo,
+    imdbId: extractImdbId(s.imdbId),
     rating: s.rating ?? undefined,
     year: s.releaseDate ? new Date(s.releaseDate).getUTCFullYear() : undefined,
     type: "series",
@@ -742,7 +751,15 @@ export async function fetchShowDetail(id: string, playback?: PlaybackMapping, pl
 
   // Tried in order (cinemana source before cee, mirroring the old single-winner priority) but
   // every source is checked - an earlier source's episode gap is filled by the next one instead
-  // of leaving it permanently stuck on "Coming Soon".
+  // of leaving it permanently stuck on "Coming Soon". Every source also gets its own independent
+  // shot at an episode ALREADY claimed by an earlier one (no more "skip once hasPlayableStream is
+  // true") - an episode can end up with both a ceeId and a cinemanaId recorded at once now, not
+  // just whichever source happened to be checked first. That's what actually lets
+  // fetchEpisodePlayback's own "try the next source if this one comes back empty" fallback ever
+  // fire for a series - previously an episode only ever got a *single* source's id, so a dead
+  // link on the first-tried source meant "not available," full stop, even when the other source
+  // had a perfectly working copy of the exact same episode. Same root cause the earlier movie
+  // fallback fix addressed, just one level deeper (per-episode instead of per-title).
   for (const source of sources) {
     const sourceId = source.cinemanaId || source.ceeId;
     if (!sourceId) continue;
@@ -751,15 +768,21 @@ export async function fetchShowDetail(id: string, playback?: PlaybackMapping, pl
       const lookupEpisode = pickEpisodeLookup(providerEpisodes, seasons);
       for (const season of seasons) {
         for (const episode of season.episodes) {
-          if (episode.hasPlayableStream) continue;
+          const alreadyHasThisSource = source.provider === "cee" ? !!episode.ceeId : !!episode.cinemanaId;
+          if (alreadyHasThisSource) continue;
           const providerEpisode = lookupEpisode(season.number, episode.number);
           if (providerEpisode?.nb != null) {
             if (source.provider === "cee") episode.ceeId = makeCeeId(providerEpisode.nb);
             else episode.cinemanaId = makeCinemanaId(providerEpisode.nb);
             episode.hasPlayableStream = true;
-            episode.subtitles = (providerEpisode.translations ?? [])
-              .map((track) => ({ language: track.name || "", url: track.file || track.url || "", defaultOffsetMs: 0, defaultSpeed: 1 }))
-              .filter((track) => !!track.url);
+            // Keeps the first source's subtitle set rather than the last-checked source's -
+            // flipping tracks between two unrelated batches for the same episode on every reload
+            // would be a worse experience than just picking one and staying with it.
+            if (!episode.subtitles?.length) {
+              episode.subtitles = (providerEpisode.translations ?? [])
+                .map((track) => ({ language: track.name || "", url: track.file || track.url || "", defaultOffsetMs: 0, defaultSpeed: 1 }))
+                .filter((track) => !!track.url);
+            }
           }
         }
       }
@@ -784,20 +807,41 @@ export async function fetchShowDetail(id: string, playback?: PlaybackMapping, pl
 // fetchShowDetail above for why this isn't preloaded for every episode up front. Streams and
 // subtitles are fetched together here since they're needed at the exact same moment (handed
 // straight to VideoPlayerScreen via onPlay).
+// An episode can carry BOTH a ceeId and a cinemanaId at once (see fetchShowDetail's own merge
+// loop above - each source fills in whichever episodes it actually has, independently) - this
+// used to return the instant ceeId was present and never even look at cinemanaId, even when CEE's
+// own entry for that specific episode was dead/empty. Same "try the next source if this one
+// yields nothing" fallback fetchCeeMoviePlayback/fetchCinemanaMoviePlayback already use for
+// movies - a source is skipped, not trusted blindly, when it actually has nothing to play.
 export async function fetchEpisodePlayback(
   episodeId: string,
   cinemanaId?: string,
   ceeId?: string,
 ): Promise<{ servers: StreamServer[]; subtitles: SubtitleTrack[] }> {
+  const attempts: Array<() => Promise<{ servers: StreamServer[]; subtitles: SubtitleTrack[] }>> = [];
   if (ceeId) {
-    const [videos, info] = await Promise.all([fetchCeeVideos(ceeId), fetchCeeInfo(ceeId)]);
-    return { servers: mapCinemanaVideos(videos), subtitles: mapCinemanaSubtitles(info) };
+    attempts.push(async () => {
+      const [videos, info] = await Promise.all([fetchCeeVideos(ceeId), fetchCeeInfo(ceeId)]);
+      return { servers: mapCinemanaVideos(videos), subtitles: mapCinemanaSubtitles(info) };
+    });
   }
   const providerId = cinemanaId || (isCinemanaId(episodeId) ? episodeId : undefined);
   if (providerId) {
-    const [videos, info] = await Promise.all([fetchCinemanaEpisodeVideos(providerId), fetchCinemanaInfo(providerId)]);
-    return { servers: mapCinemanaVideos(videos), subtitles: mapCinemanaSubtitles(info) };
+    attempts.push(async () => {
+      const [videos, info] = await Promise.all([fetchCinemanaEpisodeVideos(providerId), fetchCinemanaInfo(providerId)]);
+      return { servers: mapCinemanaVideos(videos), subtitles: mapCinemanaSubtitles(info) };
+    });
   }
+  let last: { servers: StreamServer[]; subtitles: SubtitleTrack[] } = { servers: [], subtitles: [] };
+  for (const attempt of attempts) {
+    try {
+      last = await attempt();
+      if (last.servers.length) return last;
+    } catch {
+      // This source failed outright (network/timeout) - the next one still gets a fair try.
+    }
+  }
+  if (attempts.length) return last;
   const [streamsRes, subtitlesRes] = await Promise.all([
     apiGet<StreamDto[]>(`/episodes/${episodeId}/streams`),
     apiGet<SubtitleDto[]>(`/episodes/${episodeId}/subtitles`),
@@ -1022,6 +1066,11 @@ export interface Category {
   loadAll?: () => Promise<Movie[]>;
 }
 
+// Shared with HomeScreen.tsx's own row rendering (imported from there, not duplicated) - how many
+// items a home row's collapsed strip actually displays before its own "View more" card. Lives
+// here (not HomeScreen) so sectionsToCategories below can compare against the exact same number
+// deciding whether that card should even appear.
+export const HOME_ROW_MAX_ITEMS = 20;
 const VIEW_MORE_LIMIT = 100;
 
 // The full list behind each built-in row, for the "View more" screen - the same ordering the row itself uses,
@@ -1055,6 +1104,9 @@ interface HomeSectionDto {
   titleAr: string;
   titleEn: string;
   items: FeaturedItemDto[] | null;
+  // True when this row's own maxItems cap is hiding more matches - drives whether a CUSTOM/RULE
+  // row's "View more" card appears at all (see sectionsToCategories below).
+  hasMore: boolean;
 }
 
 export interface MoviesResponse {
@@ -1078,21 +1130,43 @@ export async function fetchAppUpdate(): Promise<AppUpdateInfo> {
   return data;
 }
 
+// The app's "View more" screen for a CUSTOM/RULE row - the backend's own display cap (maxItems)
+// only ever sends the row's own head; this asks for the fuller list past it (see homeSections.ts's
+// own fullItems on the backend).
+async function fetchHomeSectionItems(sectionId: string): Promise<Movie[]> {
+  const { data } = await apiGet<FeaturedItemDto[]>(`/home/sections/${sectionId}/items?limit=100`);
+  return data.map((item) => (item.type === "show" ? mapShowSummary(item) : mapSummary(item)));
+}
+
 // Rows in the admin's own order, hidden ones already dropped server-side. A row that ends up empty
 // (a custom list whose titles aren't published, say) is skipped rather than shown as a blank rail.
 function sectionsToCategories(sections: HomeSectionDto[], builtIn: Record<string, Movie[]>): Category[] {
   return sections
-    .map((section) => ({
-      id: section.id,
-      titleAr: section.titleAr,
-      titleEn: section.titleEn,
-      items:
-        // CUSTOM and RULE rows arrive with their own items; the four built-in kinds carry none.
-        section.items
-          ? section.items.map((item) => (item.type === "show" ? mapShowSummary(item) : mapSummary(item)))
-          : builtIn[section.kind] ?? [],
-      loadAll: section.items ? undefined : builtInLoaders[section.kind],
-    }))
+    .map((section) => {
+      const items = section.items
+        ? section.items.map((item) => (item.type === "show" ? mapShowSummary(item) : mapSummary(item)))
+        : builtIn[section.kind] ?? [];
+      return {
+        id: section.id,
+        titleAr: section.titleAr,
+        titleEn: section.titleEn,
+        items,
+        // For CUSTOM/RULE, "more to show" is two separate questions, either one enough on its own:
+        // (a) did the backend already send more than a home row's own strip displays (its own
+        // maxItems can be well above the fixed HOME_ROW_MAX_ITEMS - e.g. a 50-item "top rated"
+        // import shows only 20 in the strip but already has the other 30 in hand, no fetch needed)
+        // (b) does the backend say there's more still beyond even what it sent (section.hasMore -
+        // a row capped at exactly maxItems, the case (a) alone can't see). Checking only (b) - an
+        // earlier version of this - made a 50-item row's own "View more" vanish entirely, since
+        // 50 items sitting at that section's own 50-item cap reads as "no more" to (b) alone even
+        // though the strip itself only ever showed 20 of them.
+        loadAll: section.items
+          ? items.length > HOME_ROW_MAX_ITEMS || section.hasMore
+            ? () => fetchHomeSectionItems(section.id)
+            : undefined
+          : builtInLoaders[section.kind],
+      };
+    })
     .filter((category) => category.items.length > 0);
 }
 

@@ -18,6 +18,7 @@ class MainApplication : Application(), ReactApplication {
           // add(MyReactNativePackage())
           add(KeyEventBridgePackage())
           add(AppRestartPackage())
+          add(ApkUpdaterPackage())
         },
     )
   }

@@ -446,21 +446,55 @@ export default function App() {
   }, [screen, selectedPerson, selectedMovie, selectedCategory]);
 
   const isWatchLater = (id: string) => watchLater.some((f) => f.id === id);
-  const toggleWatchLater = (movie: Movie) => {
+  // useCallback with an empty dependency array - safe (and stable forever) because this only ever
+  // reads its own `movie` argument plus setWatchLater's functional-update form, never anything
+  // reactive from the closure itself. Same "clean up the unstable-prop-through-memo pattern"
+  // pass as isEpisodeWatched/selectEpisodeInPlayer elsewhere in this file - this one specifically
+  // feeds MovieDetailsScreen's onToggleFavorite, a prop threaded past that screen's own memoized
+  // rows the exact same way.
+  const toggleWatchLater = useCallback((movie: Movie) => {
     setWatchLater((prev) => (prev.some((f) => f.id === movie.id) ? prev.filter((f) => f.id !== movie.id) : [...prev, movie]));
-  };
+  }, []);
 
   const historyItems = useMemo(() => history.map((h) => h.movie), [history]);
 
-  const recordHistory = (movie: Movie) => {
+  // Same reasoning as toggleWatchLater just above - only reads its own argument plus
+  // setHistory's functional-update form, so an empty dependency array is safe and keeps this
+  // permanently stable (playFromDetails below calls it, and needs it stable to be stable itself).
+  const recordHistory = useCallback((movie: Movie) => {
     setHistory((prev) => [{ movie, watchedAt: Date.now() }, ...prev.filter((h) => h.movie.id !== movie.id)].slice(0, MAX_HISTORY));
-  };
+  }, []);
 
   const episodeKey = (movieId: string, seasonNumber: number, episodeNumber: number) => `${movieId}:${seasonNumber}:${episodeNumber}`;
-  const isEpisodeWatched = (movieId: string, seasonNumber: number, episodeNumber: number) =>
-    watchedEpisodes.includes(episodeKey(movieId, seasonNumber, episodeNumber));
+  // Wrapped in useCallback (was a plain inline function) for the same reason closePerson/
+  // closeMovieDetails already are (see their own comment) - this is a prop threaded through two
+  // separate React.memo boundaries (MovieDetailsScreen's own EpisodeRail/EpisodeCard, and
+  // VideoPlayer's own EpisodeRow, which its own comment already flags as re-rendering ~4x/second
+  // during playback specifically to defeat exactly this kind of unstable-prop leak). A fresh
+  // closure every single App.tsx render - which a data refresh timer, homeWarm, AppState, or
+  // anything else triggers continuously - was silently busting both memo boundaries on every one
+  // of those renders regardless, fully re-rendering the entire visible episode list each time.
+  // Reported as "the app got heavier, especially the show info page and moving between episodes" -
+  // exactly the symptom an unmemoized boundary produces under continuous background re-renders.
+  const isEpisodeWatched = useCallback(
+    (movieId: string, seasonNumber: number, episodeNumber: number) =>
+      watchedEpisodes.includes(episodeKey(movieId, seasonNumber, episodeNumber)),
+    [watchedEpisodes]
+  );
+  // VideoPlayerScreen's own isEpisodeWatched prop is 2-arg (season/episode only - it already
+  // knows which movie is playing) - this curries that in once, instead of a fresh arrow function
+  // at the JSX call site defeating the stability isEpisodeWatched itself just gained above.
+  const playingMovieId = playing?.movie.id;
+  const isPlayingEpisodeWatched = useCallback(
+    (seasonNumber: number, episodeNumber: number) =>
+      playingMovieId ? isEpisodeWatched(playingMovieId, seasonNumber, episodeNumber) : false,
+    [isEpisodeWatched, playingMovieId]
+  );
 
-  const playFromDetails = (source: { servers: StreamServer[]; movie: Movie; season?: Season; episode?: Episode }) => {
+  // Wrapped in useCallback (was plain) for the same reason handleExitPlayer already is (see its
+  // own comment) - this is MovieDetailsScreen's onPlay prop, and depends only on the now-stable
+  // recordHistory, so it stays stable across every unrelated App.tsx render too.
+  const playFromDetails = useCallback((source: { servers: StreamServer[]; movie: Movie; season?: Season; episode?: Episode }) => {
     recordHistory(source.movie);
     if (source.season && source.episode) {
       const key = episodeKey(source.movie.id, source.season.number, source.episode.number);
@@ -480,7 +514,7 @@ export default function App() {
       ...source,
       servers: source.servers.map((server) => ({ ...server, url: movieUrl(server.url) || server.url })),
     });
-  };
+  }, [recordHistory]);
 
   // Reported as "exiting the player takes a long time, shows a black loading screen." Real
   // on-screen timing diagnostics (since removed, their job done) traced this to two distinct
@@ -548,7 +582,14 @@ export default function App() {
   // the exact same resolve-playback-then-pick-best-servers-then-record-history path
   // MovieDetailsScreen's own playEpisode already goes through - just without ever leaving the
   // player screen to get there.
-  const selectEpisodeInPlayer = async (ep: Episode, season: Season) => {
+  // Wrapped in useCallback (was plain) - this is VideoPlayerScreen's own onSelectEpisode prop,
+  // which reaches EpisodeRow.tsx exactly the way isEpisodeWatched did (see its own comment on
+  // why that mattered: EpisodeRow is memoized specifically because VideoPlayer re-renders ~4x/
+  // second during playback, and an unstable prop here defeated that memo on every one of those
+  // ticks just as much as isEpisodeWatched's did). Depends on playing/resolvingEpisodeInPlayerId
+  // (read directly) and playFromDetails (now itself stable) - only gets a new identity when the
+  // episode-switching state actually changes, not on every unrelated render in between.
+  const selectEpisodeInPlayer = useCallback(async (ep: Episode, season: Season) => {
     if (!playing || !ep.hasPlayableStream || resolvingEpisodeInPlayerId) return;
     setResolvingEpisodeInPlayerId(ep.id);
     try {
@@ -568,7 +609,7 @@ export default function App() {
     } finally {
       setResolvingEpisodeInPlayerId(null);
     }
-  };
+  }, [playing, resolvingEpisodeInPlayerId, playFromDetails]);
 
   // Nothing past this point ever renders a lazy screen - see the top of this file for why that
   // ordering matters for the UI-scale setting specifically. Gated on both settings loads now
@@ -793,9 +834,7 @@ export default function App() {
                   onExit={handleExitPlayer}
                   onSelectEpisode={selectEpisodeInPlayer}
                   resolvingEpisodeId={resolvingEpisodeInPlayerId}
-                  isEpisodeWatched={(seasonNumber, episodeNumber) =>
-                    isEpisodeWatched(playing.movie.id, seasonNumber, episodeNumber)
-                  }
+                  isEpisodeWatched={isPlayingEpisodeWatched}
                 />
               </Suspense>
             </View>

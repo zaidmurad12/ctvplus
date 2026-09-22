@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, us
 import { View, Text, Image, ScrollView, StyleSheet, ActivityIndicator, Animated, Dimensions } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import type { Category, Movie } from "../api";
-import { posterUrl } from "../api";
+import { posterUrl, HOME_ROW_MAX_ITEMS } from "../api";
 import Focusable from "../components/Focusable";
 import LogoImage from "../components/LogoImage";
 import { colors, font, focusShadow, spacing } from "../theme";
@@ -66,7 +66,9 @@ const ROW_REVEAL_RADIUS = 1;
 // Every card in a row is a live view (Focusable + gradient + text + image), so this is the single biggest
 // lever on how smooth moving between cards feels: 40 per row (tried for long imported lists) made
 // navigation visibly heavier than the original 20.
-const ROW_MAX_ITEMS = 20;
+// Imported from api.ts (not defined here) - sectionsToCategories there needs the exact same
+// number to decide whether a row's own "View more" card should appear at all.
+const ROW_MAX_ITEMS = HOME_ROW_MAX_ITEMS;
 
 interface Props {
   heroMovies: Movie[];
@@ -405,9 +407,9 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
             key={cat.id}
             title={pickText(cat.titleAr, cat.titleEn, lang)}
             items={rowItems[index]}
-            // A row shows a head of ROW_MAX_ITEMS; the card at its end opens the rest. Offered when the
-            // list is longer than what the row shows, or when it's a built-in row that can fetch more.
-            category={(cat.items?.length ?? 0) > ROW_MAX_ITEMS || !!cat.loadAll ? cat : undefined}
+            // A row shows a head of ROW_MAX_ITEMS; the card at its end opens the rest. `cat.loadAll` is
+            // only ever set when there's actually more to fetch - see api.ts's sectionsToCategories.
+            category={cat.loadAll ? cat : undefined}
             lang={lang}
             homeHandle={homeHandle}
             onSelect={onSelectMovie}

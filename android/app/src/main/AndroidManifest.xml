@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Lets the app itself prompt to install an APK it downloaded (ApkUpdaterModule) - the
+         in-app update check, without which the system silently blocks the install intent
+         regardless of any "install unknown apps" toggle (that toggle doesn't even appear for
+         this app in Settings without this permission declared). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -31,5 +36,22 @@
             <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
         </intent-filter>
       </activity>
+
+      <!-- Hands the APK ApkUpdaterModule downloaded itself to the system installer via a real
+           content:// URI (a raw file:// URI across the app boundary throws
+           FileUriExposedException on modern Android). Replaced Android's own DownloadManager,
+           which turned out to just never move past 0% on several real devices - the system
+           Download Manager component many Android TV/set-top boxes ship with a stripped-down or
+           entirely disabled Downloads app, so enqueue() would accept the request without
+           anything ever actually running it. -->
+      <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.fileprovider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+          android:name="android.support.FILE_PROVIDER_PATHS"
+          android:resource="@xml/file_paths" />
+      </provider>
     </application>
 </manifest>
