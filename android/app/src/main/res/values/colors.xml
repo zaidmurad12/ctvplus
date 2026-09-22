@@ -1,0 +1,6 @@
+<resources>
+    <!-- Matches theme.ts's colors.bg - the color the Activity window shows before the first
+         React frame ever paints. AppCompat's DayNight theme defaults this to white, which is
+         the "white screen at boot" a plain black-background app doesn't otherwise have. -->
+    <color name="splash_background">#000000</color>
+</resources>

@@ -82,8 +82,12 @@ android {
         applicationId "com.cinemanatvrn"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Bumped from a permanently-static 1 - some sideloading/installer flows treat a
+        // same-versionCode APK as "nothing to update" and silently keep the old app installed,
+        // which was indistinguishable from "the fix didn't work" from the outside. Bump this on
+        // every release build going forward so a reinstall is unambiguous.
+        versionCode 112
+        versionName "1.22.72-in-app-update"
     }
     signingConfigs {
         debug {
@@ -103,6 +107,13 @@ android {
             signingConfig signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+    // The generated file used to be named after applicationId/variant (app-release.apk) - every
+    // exported install file is "ctv plus.apk" now instead, per explicit request.
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            outputFileName = "ctv plus.apk"
         }
     }
 }

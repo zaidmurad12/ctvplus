@@ -1,0 +1,18 @@
+<resources>
+
+    <!-- API 26+ override: Android's own default focus highlight (View#getDefaultFocusHighlightEnabled,
+         on by default) draws a plain square white rectangle over any focused native view, ignoring
+         that view's own borderRadius entirely - it's a platform-level overlay, not something RN's
+         styling touches. Focusable.tsx already works around this per-Pressable via a transparent
+         android_ripple (giving the view its own focus-aware background), but that trick isn't
+         reliable on every device/OEM Android TV skin - reported as the language toggle's focused
+         pill still showing sharp corners despite the pill's own rounded design. Disabling this at
+         the theme level is the documented, device-independent way to turn it off everywhere, for
+         every focusable view in the app, in one place. -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <item name="android:windowBackground">@color/splash_background</item>
+        <item name="android:defaultFocusHighlightEnabled">false</item>
+    </style>
+
+</resources>
