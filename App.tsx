@@ -66,6 +66,15 @@ interface HistoryEntry {
 }
 
 const MAX_HISTORY = 50;
+// watchedEpisodes had no cap at all - it only ever grew, one entry per unique episode watched for
+// the lifetime of the install, persisted to AsyncStorage in full on every change (see the
+// saveJson effect below) and re-read into memory in full on every cold boot. For a long-time
+// viewer that's an unbounded, ever-larger JSON blob being serialized/parsed on the main thread on
+// basically every episode watched - real, worsening jank over the lifetime of an install, matching
+// reports of the app getting slower/less stable over time. Oldest entries are trimmed first since
+// only "was this ever watched" membership matters, not full history (recordHistory/history above
+// already covers "recently watched").
+const MAX_WATCHED_EPISODES = 2000;
 // See selectEpisodeInPlayer's own comment (same floor as MovieDetailsScreen's playEpisode) - a
 // cached/instant fetchEpisodePlayback could otherwise resolve before the resolving spinner ever
 // actually paints.
@@ -498,7 +507,9 @@ export default function App() {
     recordHistory(source.movie);
     if (source.season && source.episode) {
       const key = episodeKey(source.movie.id, source.season.number, source.episode.number);
-      setWatchedEpisodes((prev) => (prev.includes(key) ? prev : [...prev, key]));
+      setWatchedEpisodes((prev) =>
+        prev.includes(key) ? prev : [...prev, key].slice(-MAX_WATCHED_EPISODES),
+      );
     }
     // Warms RN's own image cache for handleExitPlayer's own exitBackdrop, fetched here (at the
     // *start* of playback, with as long as the whole watch itself to actually finish) rather than
