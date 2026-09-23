@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Image, ScrollView, StyleSheet, Dimensions, ActivityIndicator, Animated, ToastAndroid } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import { WebView } from "react-native-webview";
-import { Play, Bookmark, Users, Check, ChevronDown, Layers } from "lucide-react-native";
+import { Play, Bookmark, Users, Check, ChevronDown } from "lucide-react-native";
 import type { Movie, Season, Episode, StreamServer, SubtitleTrack } from "../api";
 import { posterUrl, youtubeVideoId, youtubeEmbedUrl, fetchCollection, fetchMovieDetail, fetchShowDetail, fetchEpisodePlayback, fetchCinemanaMoviePlayback, fetchCeeMoviePlayback, findCinemanaMatch, findCeeMatch, bestQualityLabel } from "../api";
 import { pickBestServers } from "../streamSelect";
@@ -661,17 +661,6 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                 hasTVPreferredFocus
                 onPress={playMovie}
                 onFocusChange={(f) => f && scrollToTop()}
-              />
-            )}
-            {/* Series only - jumps straight down to the seasons/episodes section, per explicit
-                request, instead of needing several down-presses through story/cast first. Reuses
-                scrollToBottom (the same target the cast row's own last-item focus already scrolls
-                to) rather than a new scroll mechanism. */}
-            {isSeries && (
-              <DetailButton
-                label={lang === "ar" ? "المواسم والحلقات" : "Seasons & Episodes"}
-                Icon={Layers}
-                onPress={scrollToBottom}
               />
             )}
             <DetailButton

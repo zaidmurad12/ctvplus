@@ -86,8 +86,8 @@ android {
         // same-versionCode APK as "nothing to update" and silently keep the old app installed,
         // which was indistinguishable from "the fix didn't work" from the outside. Bump this on
         // every release build going forward so a reinstall is unambiguous.
-        versionCode 123
-        versionName "1.22.83-cleanup-ui-fixes"
+        versionCode 124
+        versionName "1.22.84-remove-seasons-button"
     }
     signingConfigs {
         debug {
