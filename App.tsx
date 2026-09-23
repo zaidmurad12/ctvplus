@@ -141,6 +141,10 @@ export default function App() {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const homeRef = useRef<HomeScreenHandle>(null);
   const prevSectionRef = useRef<Section>(section);
+  // See playFromDetails's own comment on the delayed Image.prefetch call below - tracked so a
+  // second play started within the delay window cancels the first's now-pointless prefetch
+  // instead of leaving it to fire for a movie that's no longer playing.
+  const exitBackdropPrefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Home staying permanently mounted (see below) means its scroll position now persists across
   // visits by default - wanted when returning from a movie/person/the player mid-scroll, but not
   // when the sidebar's own Home icon is pressed, which should always land back on the hero at
@@ -511,16 +515,22 @@ export default function App() {
         prev.includes(key) ? prev : [...prev, key].slice(-MAX_WATCHED_EPISODES),
       );
     }
-    // Warms RN's own image cache for handleExitPlayer's own exitBackdrop, fetched here (at the
-    // *start* of playback, with as long as the whole watch itself to actually finish) rather than
-    // only right at exit time - reported as "still shows a black screen" even after adding that
-    // cover image, which this exactly explains: a freshly-mounted <Image> pointed at a URL that's
-    // never been fetched before has nothing to paint until its own network request completes, so
-    // the root's black background was still showing through underneath it for that gap - the same
-    // failure mode as before, just with an invisible Image now sitting on top of it. Prefetching
-    // this far ahead of when it's actually needed is what makes it already-cached and paint
-    // instantly by the time an exit actually happens.
-    Image.prefetch(posterUrl(source.movie.backdrop || source.movie.poster, "w1280")).catch(() => {});
+    // Warms RN's own image cache for handleExitPlayer's own exitBackdrop, with as long as the
+    // whole watch itself to actually finish before it's needed - reported as "still shows a black
+    // screen" even after adding that cover image, which this exactly explains: a freshly-mounted
+    // <Image> pointed at a URL that's never been fetched before has nothing to paint until its own
+    // network request completes, so the root's black background was still showing through
+    // underneath it for that gap - the same failure mode as before, just with an invisible Image
+    // now sitting on top of it.
+    // Delayed (was fired immediately here) - starting a second network download at the exact
+    // moment the video itself begins its own most bandwidth-critical phase (initial buffering) was
+    // real, avoidable contention on a weak connection, reported together with general playback
+    // stutter. A few seconds' delay costs nothing (the backdrop is only ever needed much later, at
+    // exit) but lets the stream's own startup buffering have the connection to itself.
+    if (exitBackdropPrefetchTimer.current) clearTimeout(exitBackdropPrefetchTimer.current);
+    exitBackdropPrefetchTimer.current = setTimeout(() => {
+      Image.prefetch(posterUrl(source.movie.backdrop || source.movie.poster, "w1280")).catch(() => {});
+    }, 4000);
     setPlaying({
       ...source,
       servers: source.servers.map((server) => ({ ...server, url: movieUrl(server.url) || server.url })),

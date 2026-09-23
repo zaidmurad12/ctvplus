@@ -44,7 +44,32 @@ export function parseVtt(raw: string): SubtitleCue[] {
   return cues;
 }
 
+// Was a linear .find() over the WHOLE array from the start every single call - fine for a few
+// cues, but a real 2-hour movie's subtitle file commonly has 1500-2000+ lines, and the video
+// player calls this 4x/second for the entire duration of playback (see VideoPlayer.tsx's
+// progressUpdateInterval). That's thousands of full-array scans a minute, growing longer as
+// currentTime moves later into the file - genuine, continuous main-thread CPU cost on every
+// single playback session, independent of network or resolution, and a real contributor to
+// "playback feels laggy/stutters" reports on weaker TV hardware. Cues are already in chronological
+// (start-time-ascending) order from parseVtt, so a binary search for the last cue whose start is
+// at or before currentTime turns this into O(log n) - ~11 comparisons instead of up to ~2000 for a
+// typical file - and it's naturally correct across seeks in either direction too, no cursor/state
+// to keep in sync.
 export function activeCueText(cues: SubtitleCue[], currentTime: number): string | null {
-  const cue = cues.find((c) => currentTime >= c.start && currentTime <= c.end);
-  return cue ? cue.text : null;
+  if (cues.length === 0) return null;
+  let lo = 0;
+  let hi = cues.length - 1;
+  let candidate = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (cues[mid].start <= currentTime) {
+      candidate = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (candidate === -1) return null;
+  const cue = cues[candidate];
+  return currentTime <= cue.end ? cue.text : null;
 }
