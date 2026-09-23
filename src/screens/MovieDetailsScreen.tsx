@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Image, ScrollView, StyleSheet, Dimensions, ActivityIndicator, Animated, ToastAndroid } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import { WebView } from "react-native-webview";
-import { Play, Bookmark, Users, Check, ChevronDown } from "lucide-react-native";
+import { Play, Bookmark, Users, Check, ChevronDown, Layers } from "lucide-react-native";
 import type { Movie, Season, Episode, StreamServer, SubtitleTrack } from "../api";
 import { posterUrl, youtubeVideoId, youtubeEmbedUrl, fetchCollection, fetchMovieDetail, fetchShowDetail, fetchEpisodePlayback, fetchCinemanaMoviePlayback, fetchCeeMoviePlayback, findCinemanaMatch, findCeeMatch, bestQualityLabel } from "../api";
 import { pickBestServers } from "../streamSelect";
@@ -663,6 +663,17 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                 onFocusChange={(f) => f && scrollToTop()}
               />
             )}
+            {/* Series only - jumps straight down to the seasons/episodes section, per explicit
+                request, instead of needing several down-presses through story/cast first. Reuses
+                scrollToBottom (the same target the cast row's own last-item focus already scrolls
+                to) rather than a new scroll mechanism. */}
+            {isSeries && (
+              <DetailButton
+                label={lang === "ar" ? "المواسم والحلقات" : "Seasons & Episodes"}
+                Icon={Layers}
+                onPress={scrollToBottom}
+              />
+            )}
             <DetailButton
               label={isFavorite ? t("removeFromFavorites", lang) : t("addToFavorites", lang)}
               Icon={Bookmark}
@@ -969,7 +980,13 @@ const EpisodeRail = React.memo(function EpisodeRail({
       </ScrollView>
       {!!shownEpisode && (
         <View style={styles.episodeInfoBlock}>
-          {!!seasonYear && <Text style={styles.episodeInfoYear}>{seasonYear}</Text>}
+          {/* Season number now sits right beside the year, per explicit request - one combined
+              fact line instead of the year standing alone with nothing to place it in the show. */}
+          {(!!seasonYear || !!season.number) && (
+            <Text style={styles.episodeInfoYear}>
+              {[seasonYear, lang === "ar" ? `الموسم ${season.number}` : `Season ${season.number}`].filter(Boolean).join(" • ")}
+            </Text>
+          )}
           <Text numberOfLines={1} style={styles.episodeInfoTitle}>
             {pickText(shownEpisode.titleAr, shownEpisode.titleEn, lang)}
           </Text>
@@ -1279,7 +1296,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: s(18),
     paddingVertical: s(9),
     borderRadius: radius.pill,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: colors.surface,
     marginRight: s(10),
     borderWidth: 2,
     borderColor: "transparent",
@@ -1295,14 +1312,21 @@ const styles = StyleSheet.create({
     width: s(240),
     padding: s(8),
     borderRadius: s(10),
-    backgroundColor: "rgba(255,255,255,0.03)",
+    backgroundColor: colors.surface,
     borderWidth: 2,
     borderColor: "transparent",
     gap: s(6),
   },
-  episodeCardFocused: { borderColor: "#fff", backgroundColor: "rgba(255,255,255,0.08)" },
-  episodeThumbBox: { width: "100%", aspectRatio: 16 / 9, borderRadius: s(6), overflow: "hidden", backgroundColor: "#000" },
-  episodeThumb: { width: "100%", height: "100%" },
+  episodeCardFocused: { borderColor: "#fff", backgroundColor: colors.surfaceActive },
+  // No overflow:hidden on this box anymore - it sits inside a card the focus scale transform
+  // (Focusable's scaleTo) resizes as one unit, and clipping a *child* box that way (overflow:
+  // hidden on a box whose own parent is being transform-scaled) rendered as the card visibly
+  // narrowing and cropping its own content on some devices/GPUs while the transform was live -
+  // reported as "the episode with focus on it gets cropped, on some devices." The image itself
+  // now rounds its own corners directly (episodeThumb's own borderRadius) instead, which doesn't
+  // need any ancestor clip to look right.
+  episodeThumbBox: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000" },
+  episodeThumb: { width: "100%", height: "100%", borderRadius: s(6) },
   episodeNumberBadge: {
     position: "absolute",
     top: s(6),
@@ -1353,8 +1377,10 @@ const styles = StyleSheet.create({
   // inside a small card.
   episodeInfoBlock: { marginTop: s(4), maxWidth: CAST_MAX_WIDTH, gap: s(6) },
   episodeInfoYear: { color: colors.textMuted, fontSize: fs(12), fontFamily: font.bold },
-  episodeInfoTitle: { color: "#fff", fontSize: fs(16), fontFamily: font.bold },
-  episodeInfoStory: { color: colors.textMuted, fontSize: fs(13), lineHeight: fs(19), fontFamily: font.semiBold },
+  // Both bumped slightly (was 16/13) per explicit request - easier to read at a glance from the
+  // couch without the title/description reading as an afterthought next to the episode cards.
+  episodeInfoTitle: { color: "#fff", fontSize: fs(18), fontFamily: font.bold },
+  episodeInfoStory: { color: colors.textMuted, fontSize: fs(14), lineHeight: fs(21), fontFamily: font.semiBold },
 });
 
 function cardShadow() {

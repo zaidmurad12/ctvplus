@@ -17,6 +17,18 @@ export const colors = {
   accentRed: "#ef4444",
   imdbYellow: "#F5C518",
   overlayDark: "rgba(0,0,0,0.85)",
+  // Solid fills for a resting (unfocused) button/panel/card surface - was rgba(255,255,255,0.0X)
+  // over the black background almost everywhere this kind of "gray box" appears (settings rows,
+  // nav items, the episode card frame, ...). An alpha blend's actual rendered color depends on
+  // how that specific panel/TV processes color underneath it (gamma, dynamic contrast, dithering)
+  // - reported as "looks light gray on some TVs, barely different from black on others," the same
+  // box looking different depending purely on the hardware it's shown on. A fixed hex has nothing
+  // left to blend, so it renders identically everywhere. Two tones, not one: `surface` for the
+  // base resting fill, `surfaceActive` a shade up for an "active but not focused right now" state
+  // (was rgba(...,0.08-0.14) at those same call sites) - kept a step apart from each other and
+  // from `surfaceFocused`, which stays solid white (unchanged, unaffected by this issue).
+  surface: "#141414",
+  surfaceActive: "#232323",
 };
 
 export const font = {

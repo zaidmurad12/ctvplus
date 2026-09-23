@@ -25,7 +25,6 @@ import { parseVtt, activeCueText, SubtitleCue } from "../vtt";
 import { decodeSubtitleBytes } from "../subtitleEncoding";
 import { isRtlText } from "../rtl";
 import { pushBackHandler } from "../backStack";
-import { SyncAnchor, correctedSubtitleTime } from "../subtitleSync";
 import { loadJson, saveJson, storageKeys } from "../storage";
 import { Lang, ageRatingDescription, ageRatingColor, countryName, languageName, genreName } from "../i18n";
 
@@ -367,25 +366,19 @@ export default function VideoPlayerScreen({
   // Not part of the persisted SubtitleSettings (font/size/color/background are legitimate
   // global preferences) - a sync fix is specific to *this* one title's particular file/rip.
   // Persisted per movie/episode id (see the load/save effects below), not as a single global
-  // value, specifically so fixing one title's sync (manually or via the auto-sync button) can
-  // never silently carry over and break a different, already-correctly-synced title.
+  // value, so a manual fix for one title never silently carries over and breaks a different,
+  // already-correctly-synced one.
   //
   // Two numbers, not one: a plain offset (subtitleOffsetMs) can only ever be correct at a single
-  // point in the file - reported as "the manual stepper doesn't fix it either" (not just "the
-  // auto-sync button gets it wrong"), which is the tell that the real cause on some titles isn't
-  // a constant offset at all but a frame-rate mismatch between the video and the subtitle file
+  // point in the file - reported as "the manual stepper doesn't fully fix it," which is the tell
+  // that the real cause on some titles isn't a constant offset at all but a frame-rate mismatch
+  // between the video and the subtitle file
   // (e.g. a 23.976fps release timed against a 25fps-authored subtitle) - the gap between them
   // grows the further into the file you go, so no single constant offset can fix more than one
   // moment of it. subtitleSpeed corrects that proportionally; effectiveTime below applies both
   // (speed first, since it's the rate the whole raw timeline runs at, then the constant offset).
   const [subtitleOffsetMs, setSubtitleOffsetMs] = useState(0);
   const [subtitleSpeed, setSubtitleSpeed] = useState(1);
-  // Non-null only while the server's own multi-point analysis (see SubtitleTrack's own comment)
-  // is what's actively driving correction - null the instant the viewer manually adjusts anything
-  // (the stepper or the on-device auto-sync button), at which point subtitleOffsetMs/subtitleSpeed
-  // above take over exclusively instead of competing with it. See correctedSubtitleTime's own
-  // call sites below.
-  const [activeSyncAnchors, setActiveSyncAnchors] = useState<SyncAnchor[] | null>(null);
   const syncStorageKey = episode?.id ?? movie.id;
   const syncLoadedRef = useRef(false);
   // Populated below, once subtitleTrack itself is computed further down this function - read
@@ -393,9 +386,7 @@ export default function VideoPlayerScreen({
   // this effect's own body only ever runs later, asynchronously (after loadJson's own await), by
   // which point every effect from this same render (including the one that fills this ref) has
   // already committed regardless of which one is textually declared first.
-  const subtitleTrackDefaultsRef = useRef<
-    { defaultOffsetMs: number; defaultSpeed: number; syncAnchors: SyncAnchor[] | null } | undefined
-  >(undefined);
+  const subtitleTrackDefaultsRef = useRef<{ defaultOffsetMs: number; defaultSpeed: number } | undefined>(undefined);
   useEffect(() => {
     syncLoadedRef.current = false;
     let cancelled = false;
@@ -424,31 +415,19 @@ export default function VideoPlayerScreen({
       if (typeof saved === "number") {
         // The pre-speed-correction save format (just a delay in ms, speed implicitly 1) - read
         // the same way it always behaved instead of discarding it.
-        setActiveSyncAnchors(null);
         setSubtitleOffsetMs(saved);
         setSubtitleSpeed(1);
       } else if (saved && !isStaleAgainstNewServerDefault) {
-        setActiveSyncAnchors(null);
         setSubtitleOffsetMs(saved.offsetMs);
         setSubtitleSpeed(saved.speed);
       } else {
         // Either no local override yet for this exact title, or one that turned out to be stale
         // against a newer server default (see isStaleAgainstNewServerDefault above) - start from
-        // the backend's own automatic analysis (see SubtitleTrack's own comment) instead of
-        // always defaulting to "no correction," so a viewer gets one that's actually already been
-        // computed and verified, not silently reset to unsynced. Anchors, when present, win over
-        // the legacy single-line serverOffsetMs/serverSpeed - see correctedSubtitleTime's own
-        // comment for why a multi-point curve is strictly more accurate wherever it exists.
-        const anchors = subtitleTrackDefaultsRef.current?.syncAnchors;
-        if (anchors && anchors.length > 0) {
-          setActiveSyncAnchors(anchors);
-          setSubtitleOffsetMs(0);
-          setSubtitleSpeed(1);
-        } else {
-          setActiveSyncAnchors(null);
-          setSubtitleOffsetMs(serverOffsetMs);
-          setSubtitleSpeed(serverSpeed);
-        }
+        // the backend's own manually-entered default instead of always defaulting to "no
+        // correction," so a viewer gets whatever the admin panel already has on file for this
+        // title, not silently reset to unsynced.
+        setSubtitleOffsetMs(serverOffsetMs);
+        setSubtitleSpeed(serverSpeed);
       }
       syncLoadedRef.current = true;
     });
@@ -457,12 +436,7 @@ export default function VideoPlayerScreen({
     };
   }, [syncStorageKey]);
   useEffect(() => {
-    // While anchors are active, subtitleOffsetMs/subtitleSpeed are just inert placeholders (0/1 -
-    // see the load effect above), not a real viewer choice - saving them here would write a
-    // local override that looks exactly like "the viewer explicitly chose no correction," which
-    // the load effect above can't tell apart from a genuine one on the next visit, permanently
-    // shadowing the server's own anchors for this title from then on.
-    if (!syncLoadedRef.current || activeSyncAnchors) return;
+    if (!syncLoadedRef.current) return;
     loadJson<Record<string, SubtitleSyncEntry | number>>(storageKeys.subtitleDelays, {}).then((map) => {
       saveJson(storageKeys.subtitleDelays, {
         ...map,
@@ -476,18 +450,12 @@ export default function VideoPlayerScreen({
         },
       });
     });
-  }, [subtitleOffsetMs, subtitleSpeed, syncStorageKey, activeSyncAnchors]);
+  }, [subtitleOffsetMs, subtitleSpeed, syncStorageKey]);
 
-  // The manual stepper and the on-device auto-sync button both only ever produce a flat
-  // offset+speed pair (see SubtitlePanel's own onAutoSync) - the moment the viewer uses either,
-  // that explicit correction should take over completely rather than compete with the server's
-  // own anchors underneath it, so both wrapper callbacks below clear activeSyncAnchors first.
   const handleManualOffsetChange = (ms: number) => {
-    setActiveSyncAnchors(null);
     setSubtitleOffsetMs(ms);
   };
   const handleManualSpeedChange = (sp: number) => {
-    setActiveSyncAnchors(null);
     setSubtitleSpeed(sp);
   };
 
@@ -680,11 +648,7 @@ export default function VideoPlayerScreen({
   const subtitleTrack = pickSubtitleTrack(availableSubtitles, subtitleSettings.language);
   useEffect(() => {
     subtitleTrackDefaultsRef.current = subtitleTrack
-      ? {
-          defaultOffsetMs: subtitleTrack.defaultOffsetMs,
-          defaultSpeed: subtitleTrack.defaultSpeed,
-          syncAnchors: subtitleTrack.syncAnchors ?? null,
-        }
+      ? { defaultOffsetMs: subtitleTrack.defaultOffsetMs, defaultSpeed: subtitleTrack.defaultSpeed }
       : undefined;
   }, [subtitleTrack]);
   useEffect(() => {
@@ -838,11 +802,6 @@ export default function VideoPlayerScreen({
   const lastYtProgressStateRef = useRef(0);
   const ytPausedRef = useRef(false);
   const ytCurrentTimeRef = useRef(0);
-  // For SubtitlePanel's own auto-sync button (see its own durationRef prop) - degrades gracefully
-  // to "couldn't determine sync" there rather than needing a real value (see SubtitlePanel's own
-  // comment on why that button isn't useful for this content type), but the prop itself is
-  // required regardless.
-  const ytDurationRef = useRef(0);
   // Read by armHideTimer above - true only while YT.PlayerState.BUFFERING (3) is the last state
   // reported, set from the "diag:state:" messages already flowing through onMessage below (the
   // shared backend page posts one on every state change regardless of whether anything here was
@@ -855,9 +814,6 @@ export default function VideoPlayerScreen({
   useEffect(() => {
     ytCurrentTimeRef.current = ytCurrentTime;
   }, [ytCurrentTime]);
-  useEffect(() => {
-    ytDurationRef.current = ytDuration;
-  }, [ytDuration]);
   const ytCommand = (js: string) => ytWebViewRef.current?.injectJavaScript(`${js}; true;`);
 
   // Read from the shared onNavKey/onOkKey listener below (empty-deps, so only ever a ref can give
@@ -966,13 +922,6 @@ export default function VideoPlayerScreen({
   useEffect(() => {
     currentTimeRef.current = progress?.currentTime ?? 0;
   }, [progress?.currentTime]);
-  // For the auto-sync panel's two-point drift calibration below - needs the real duration to
-  // pick a second analysis point far enough from the first to actually measure drift, without
-  // running past the end of the file.
-  const durationRef = useRef(0);
-  useEffect(() => {
-    durationRef.current = progress?.seekableDuration ?? 0;
-  }, [progress?.seekableDuration]);
 
   // See onError's own pendingResumeRef usage below - a manual quality switch reloads the <Video>
   // source exactly the same way a fallback-to-next-server does, so it needs the same "remember
@@ -1404,7 +1353,7 @@ export default function VideoPlayerScreen({
                   setYtDuration(data.duration || 0);
                 }
                 const nextCue = subtitleSettings.enabled
-                  ? activeCueText(cues, correctedSubtitleTime(t, activeSyncAnchors, subtitleOffsetMs, subtitleSpeed))
+                  ? activeCueText(cues, (t - subtitleOffsetMs / 1000) / subtitleSpeed)
                   : null;
                 setYtCueText((prev) => (prev === nextCue ? prev : nextCue));
               }
@@ -1457,16 +1406,15 @@ export default function VideoPlayerScreen({
               ) : (
                 <Text style={styles.title} numberOfLines={1}>{title}</Text>
               )}
-              {/* Season/episode/title - moved under the logo (was beside the age/year/genre facts
-                  row on the other side) per explicit request, so it reads as this title's own
-                  subtitle instead of competing with the unrelated facts row for the same line. */}
+            </View>
+            <View style={styles.headerRight}>
+              {/* Season/episode/title - back above the facts row (age/year/genre/...), its
+                  original place, per explicit request reverting an earlier move to under the logo. */}
               {!!metaText && (
                 <Text style={styles.metaText} numberOfLines={1}>
                   {metaText}
                 </Text>
               )}
-            </View>
-            <View style={styles.headerRight}>
               <View style={styles.factsRow}>
                 {!!movie.ageRating && (
                   <View style={styles.ageBadge}>
@@ -1632,11 +1580,7 @@ export default function VideoPlayerScreen({
             here works exactly the same way as native playback: the panel's own font/size/color/
             background settings and manual offset/speed steppers all apply identically, since both
             branches draw the exact same custom subtitle overlay from the exact same `cues`/
-            subtitleOffsetMs/subtitleSpeed - only the auto-sync button's own audio analysis has
-            nothing to analyze here (no direct, downloadable stream to decode - see AudioSync's own
-            call site), so it degrades to its existing "couldn't determine sync" message instead of
-            actually correcting anything, same as it would for any other title with no clear
-            dialogue in range - not a crash, just not useful for this content type specifically. */}
+            subtitleOffsetMs/subtitleSpeed. */}
         <Animated.View style={[styles.subtitlesBtnFloat, barsHidden && styles.hidden]}>
           <CtrlButton
             ref={setSubtitlesBtnRef}
@@ -1743,7 +1687,7 @@ export default function VideoPlayerScreen({
           // changed (the common case, several times a second), since React bails out on an
           // identical primitive value.
           const nextCue = subtitleSettings.enabled
-            ? activeCueText(cues, correctedSubtitleTime(data.currentTime, activeSyncAnchors, subtitleOffsetMs, subtitleSpeed))
+            ? activeCueText(cues, (data.currentTime - subtitleOffsetMs / 1000) / subtitleSpeed)
             : null;
           setCueText((prev) => (prev === nextCue ? prev : nextCue));
           // Throttled to roughly once every 10s of real time, independent of how often
@@ -1919,16 +1863,15 @@ export default function VideoPlayerScreen({
             ) : (
               <Text style={styles.title} numberOfLines={1}>{title}</Text>
             )}
-            {/* Season/episode/title - moved under the logo (was beside the age/year/genre facts
-                row on the other side) per explicit request, so it reads as this title's own
-                subtitle instead of competing with the unrelated facts row for the same line. */}
+          </View>
+          <View style={styles.headerRight}>
+            {/* Season/episode/title - back above the facts row, its original place, per explicit
+                request reverting an earlier move to under the logo. */}
             {!!metaText && (
               <Text style={styles.metaText} numberOfLines={1}>
                 {metaText}
               </Text>
             )}
-          </View>
-          <View style={styles.headerRight}>
             {/* Everything folds into this single second line - age rating included, right next
                 to year+country (kept adjacent per request) rather than off on its own. */}
             <View style={styles.factsRow}>
@@ -2279,7 +2222,7 @@ function SubtitlePanel({
   const [panelHandleBump, bumpPanelHandles] = useState(0);
   useEffect(() => {
     // A single bump right after mount has intermittently missed the *last* row added to this
-    // chain (reported as "can't go back up from the auto-sync button," while every other already-
+    // chain (reported as "can't go back up from the last row," while every other already-
     // established hop in this same chain keeps working) - a second bump shortly after gives
     // Android's own layout pass more time to fully settle every ref before nextFocusUp/Down are
     // read off rowHandles one more time, same "first attempt can lose the race" story as
@@ -2586,8 +2529,7 @@ function SubtitlePanel({
 
         {/* A plain constant offset can only ever be correct at one point in the file - this
             corrects a frame-rate mismatch's proportional drift on top of that (see
-            subtitleOffsetMs/subtitleSpeed's own comment in VideoPlayerScreen). Manual fallback for
-            when auto-sync's own two-point detection below can't find enough dialogue to fit one. */}
+            subtitleOffsetMs/subtitleSpeed's own comment in VideoPlayerScreen). */}
         <PanelSectionHeader
           ref={speedHeaderRef}
           expanded={openSyncRow === "speed"}
@@ -3076,10 +3018,7 @@ const styles = StyleSheet.create({
   headerRight: { alignItems: "flex-end", gap: s(6), maxWidth: "60%" },
   playerLogo: { marginBottom: s(4) },
   title: { color: "#fff", fontSize: fs(18), fontFamily: font.extraBold },
-  // No textAlign override anymore - this used to sit in the right-aligned facts column
-  // (headerRight) and needed it there; now that it's under the logo in headerLeft, it should
-  // read the same natural direction as the title/logo above it, not force-align opposite them.
-  metaText: { color: "#d4d4d8", fontSize: fs(13), fontFamily: font.semiBold, marginTop: s(2) },
+  metaText: { color: "#d4d4d8", fontSize: fs(13), fontFamily: font.semiBold, textAlign: "right" },
   // More items land in this one line now (age rating, year, country, language, genres,
   // quality, rating) - wraps rather than overflowing the screen edge or squeezing the title
   // on a narrower device, and stays right-aligned on every wrapped line to match headerRight.

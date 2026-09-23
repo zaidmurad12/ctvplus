@@ -830,12 +830,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: s(16),
     paddingVertical: s(14),
     borderRadius: s(12),
-    backgroundColor: "rgba(255,255,255,0.03)",
+    backgroundColor: colors.surface,
   },
   navItemAccent: { width: s(3), height: s(18), borderRadius: 2, backgroundColor: "transparent" },
   navItemAccentActive: { backgroundColor: "rgba(255,255,255,0.5)" },
   navItemFocused: { backgroundColor: "#fff" },
-  navItemActive: { backgroundColor: "rgba(255,255,255,0.08)" },
+  navItemActive: { backgroundColor: colors.surfaceActive },
   // A soft round backdrop behind the icon itself (was a bare icon floating in the row) - gives
   // each tab a real anchor point instead of the label doing all the visual work, closer to how a
   // real TV settings app (Android TV Settings, Apple TV) treats its own nav icons.
@@ -845,9 +845,9 @@ const styles = StyleSheet.create({
     borderRadius: s(9),
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: colors.surface,
   },
-  navItemIconWrapActive: { backgroundColor: "rgba(255,255,255,0.12)" },
+  navItemIconWrapActive: { backgroundColor: colors.surfaceActive },
   navItemIconWrapFocused: { backgroundColor: "transparent" },
   navItemText: { flex: 1, color: colors.textMuted, fontSize: fs(13), fontFamily: font.bold },
   navItemTextActive: { color: "#fff" },
@@ -860,7 +860,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginVertical: s(20),
     marginRight: s(32),
-    backgroundColor: "rgba(255,255,255,0.025)",
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.06)",
     borderRadius: s(20),
@@ -868,7 +868,7 @@ const styles = StyleSheet.create({
   content: { padding: s(28), paddingBottom: s(48) },
   previewBox: {
     borderRadius: s(16),
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
     padding: s(20),
@@ -887,7 +887,7 @@ const styles = StyleSheet.create({
   // floating options directly on the black background - grouping via a bounded surface rather
   // than spacing alone is what makes a settings screen read as "designed" vs "a stack of rows".
   card: {
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
     borderRadius: s(16),
@@ -916,7 +916,7 @@ const styles = StyleSheet.create({
   settingsRowControl: { alignItems: "flex-end" },
   segmented: {
     flexDirection: "row",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: colors.surface,
     borderRadius: radius.pill,
     padding: s(4),
     gap: s(2),
@@ -996,7 +996,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.03)",
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.06)",
     borderRadius: s(16),

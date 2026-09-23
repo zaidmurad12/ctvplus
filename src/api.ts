@@ -17,7 +17,6 @@ import {
   type CinemanaSearchItem,
 } from "./providers/cinemana";
 import { searchCee, makeCeeId, fetchCeeEpisodes, fetchCeeInfo, fetchCeeVideos, type CeeSearchItem } from "./providers/cee";
-import type { SyncAnchor } from "./subtitleSync";
 import { qualityRank, qualityLabel } from "./quality";
 
 const NEW_API_BASE = "https://ctv-platform-backend-afcem6ospa-ww.a.run.app/api/v1";
@@ -96,13 +95,11 @@ interface SubtitleDto {
   format: string;
   url: string;
   isDefault: boolean;
-  // Sampled at several points across the runtime by the backend's own audio-sync analysis - see
-  // SyncAnchor's own comment in subtitleSync.ts. Preferred over defaultOffsetMs/defaultSpeed
-  // below whenever present (see VideoPlayer.tsx).
-  syncAnchors?: SyncAnchor[] | null;
-  // The legacy single-point/single-line fallback - see its own comment in schema.prisma. Still
-  // seeds subtitleOffsetMs/subtitleSpeed when syncAnchors is null/empty, or once the viewer has
-  // saved their own local override for this title.
+  // The manual offset/speed correction - the only sync mechanism this app has (the automatic
+  // multi-point audio-analysis system this replaced was removed entirely as dead code - nothing
+  // ever populated it after the analysis service and the on-device auto-sync button that would
+  // have triggered it were both already gone). Seeds subtitleOffsetMs/subtitleSpeed in
+  // VideoPlayer.tsx unless the viewer has saved their own local override for this exact title.
   defaultOffsetMs: number;
   defaultSpeed: number;
 }
@@ -550,7 +547,6 @@ function mapSubtitleTracks(subtitles: SubtitleDto[]): SubtitleTrack[] {
   return subtitles.map((s) => ({
     language: s.language,
     url: s.url,
-    syncAnchors: s.syncAnchors ?? null,
     defaultOffsetMs: s.defaultOffsetMs,
     defaultSpeed: s.defaultSpeed,
   }));
@@ -897,12 +893,8 @@ export async function fetchCinemanaMoviePlayback(rawCinemanaId: string, kind: "m
 export interface SubtitleTrack {
   language: string;
   url: string;
-  // See SubtitleDto's own comment - preferred over defaultOffsetMs/defaultSpeed below whenever
-  // present (see VideoPlayer.tsx's correctedSubtitleTime usage).
-  syncAnchors?: SyncAnchor[] | null;
-  // The server-computed single-point/single-line sync correction for this exact subtitle file,
-  // applied as the starting default when the viewer has no local override of their own and
-  // syncAnchors above is null/empty.
+  // The server-computed sync correction for this exact subtitle file, applied as the starting
+  // default when the viewer has no local override of their own.
   defaultOffsetMs: number;
   defaultSpeed: number;
 }
