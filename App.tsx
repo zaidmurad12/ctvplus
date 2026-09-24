@@ -116,7 +116,11 @@ export default function App() {
       setHomeWarm(false);
       return;
     }
-    const timer = setTimeout(() => setHomeWarm(true), 4000);
+    // Was 4000 - that landed Home's CPU-heavy remount right inside the stream's own startup
+    // buffering, reported as playback starting slowly and stuttering in its first seconds. Late
+    // enough now that the video is well past startup; an exit before it just falls back to the
+    // normal remount (covered by handleExitPlayer's own transition).
+    const timer = setTimeout(() => setHomeWarm(true), 20000);
     return () => clearTimeout(timer);
   }, [playing]);
   // Purely a delayed-appearance visual bridge for handleExitPlayer below - never shown outright
@@ -818,6 +822,7 @@ export default function App() {
                   onSelectMovie={setSelectedMovie}
                   onBack={closeMovieDetails}
                   isEpisodeWatched={isEpisodeWatched}
+                  playerActive={!!playing}
                 />
               </Suspense>
             </View>

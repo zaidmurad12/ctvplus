@@ -33,9 +33,13 @@ interface Props {
   onSelectMovie: (movie: Movie) => void;
   onBack: () => void;
   isEpisodeWatched: (movieId: string, seasonNumber: number, episodeNumber: number) => boolean;
+  // True while the video player is on screen - this screen stays mounted underneath it (see
+  // App.tsx's render tree), so without this the trailer WebView kept decoding a YouTube video,
+  // sound included, for the whole watch, competing with the real stream for CPU/decoder/bandwidth.
+  playerActive: boolean;
 }
 
-export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, lang, onToggleFavorite, onPlay, onSelectPerson, onSelectMovie, onBack, isEpisodeWatched }: Props) {
+export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, lang, onToggleFavorite, onPlay, onSelectPerson, onSelectMovie, onBack, isEpisodeWatched, playerActive }: Props) {
   // Home/Browse/Search only ever hand this screen the new backend's *summary* shape (no
   // titleAr/genres/cast/director yet - only its dedicated detail endpoint has those, see
   // fetchMovieDetail in api.ts). Shadowing the prop with local state of the same name means
@@ -124,6 +128,23 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   const [trailerReady, setTrailerReady] = useState(false);
   const [parts, setParts] = useState<Movie[]>([]);
   const trailerVideoId = youtubeVideoId(movie.trailerUrl);
+  // Declared up here (not next to playMovie) since the trailer's own gating below depends on it.
+  const [resolvingMovie, setResolvingMovie] = useState(false);
+  // The trailer never runs while a play is being resolved or the player is up - it used to keep
+  // playing (audibly) through the whole resolve and underneath the player, reported as playback
+  // starting slowly and stuttering with the trailer's sound still audible.
+  const trailerSuspended = playerActive || resolvingMovie || resolvingEpisodeId !== null;
+  const trailerWebViewRef = useRef<any>(null);
+  // Called synchronously from the play handlers, before any state update re-renders - silences
+  // the embed's global YouTube `player` (see the backend's youtube-embed page) through the still-
+  // mounted WebView, then unmounts it, so the sound stops the instant play is pressed even if the
+  // trailer hadn't started yet.
+  const stopTrailer = () => {
+    trailerWebViewRef.current?.injectJavaScript("try{player.mute();player.stopVideo();}catch(e){}true;");
+    setShowTrailer(false);
+    setTrailerReady(false);
+    setTrailerLoopCover(false);
+  };
 
   // The app previously had no way at all to look up a movie's other parts - it only ever had
   // the single Movie object the viewer tapped into, with nothing pointing at sibling entries
@@ -191,10 +212,13 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
 
   useEffect(() => {
     setShowTrailer(false);
-    if (!trailerVideoId) return;
+    // A restart later (e.g. back from the player) must start covered again, not reveal a WebView
+    // that hasn't painted a frame yet.
+    setTrailerReady(false);
+    if (!trailerVideoId || trailerSuspended) return;
     const timer = setTimeout(() => setShowTrailer(true), TRAILER_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [movie.id, trailerVideoId]);
+  }, [movie.id, trailerVideoId, trailerSuspended]);
 
   // The old version pointed the iframe straight at youtube.com/embed's own autoplay params
   // and just trusted it worked - WebView's onError only ever catches the *outer* local HTML
@@ -235,7 +259,6 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // Watch is shown as soon as hasPlayableStream says so (known from the summary already, see
   // api.ts), which can be before the detail fetch that actually resolves `servers` has
   // finished. Falls back to a fresh fetch in that race instead of silently doing nothing.
-  const [resolvingMovie, setResolvingMovie] = useState(false);
   // Which sources to play from, best first. A title the admin pinned to specific entries tries those first: a movie
   // opened from Search arrives with playbackSources already filled by the automatic title matching (see
   // searchMovies), and preferring that over the pin made a manual link silently lose to a wrong/empty automatic
@@ -253,6 +276,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   };
   const playMovie = async () => {
     if (resolvingMovie) return;
+    stopTrailer();
     if (movie.servers?.length) {
       setResolvingMovie(true);
       try {
@@ -356,6 +380,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // (Promise.all waits for whichever of the two takes longer).
   const playEpisode = async (ep: Episode) => {
     if (!ep.hasPlayableStream || resolvingEpisodeId) return;
+    stopTrailer();
     setResolvingEpisodeId(ep.id);
     try {
       const [{ servers, subtitles }] = await Promise.all([
@@ -437,7 +462,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // (same condition as canScroll itself).
   const scrollHintAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    if (!canScroll) return;
+    if (!canScroll || playerActive) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(scrollHintAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
@@ -446,7 +471,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     );
     loop.start();
     return () => loop.stop();
-  }, [canScroll, scrollHintAnim]);
+  }, [canScroll, playerActive, scrollHintAnim]);
 
   return (
     <ScrollView
@@ -470,7 +495,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
           resizeMode="cover"
           fadeDuration={0}
         />
-        {showTrailer && trailerVideoId && (
+        {showTrailer && trailerVideoId && !trailerSuspended && (
           // trailerUrl is always a YouTube watch link (never a direct video file - see
           // server.ts's own field description), so react-native-video can never play it;
           // this is a real player, just reached through YouTube's embeddable iframe instead.
@@ -486,6 +511,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
           // it a real, consistent origin to check instead.
           <>
             <WebView
+              ref={trailerWebViewRef}
               // mute:true is still required for autoplay to actually start at all (YouTube's own
               // autoplay policy - see VideoPlayer.tsx's identical fix for the full write-up);
               // unmuteOnPlay is what turns real sound on the instant it actually starts playing -
@@ -572,13 +598,18 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                 aspect-ratio-relative, not a fixed scaled unit like the full player's header).
                 Was 0.14/0.42 - covered noticeably more of the trailer than intended, reported as
                 too heavy; this keeps just enough solid band to still fully hide the overlay text
-                without the fade trailing on so long past it. */}
-            <LinearGradient
-              colors={["#000", "#000", "transparent"]}
-              locations={[0, 0.06, 0.24]}
-              style={StyleSheet.absoluteFill}
-              pointerEvents="none"
-            />
+                without the fade trailing on so long past it.
+                Only once the trailer is actually playing - rendered from the WebView's own mount,
+                this band sat over the still backdrop image for the whole load (up to 15s),
+                reported as a black layer on the backdrop before any trailer appeared. */}
+            {trailerReady && (
+              <LinearGradient
+                colors={["#000", "#000", "transparent"]}
+                locations={[0, 0.06, 0.24]}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
+            )}
           </>
         )}
         <LinearGradient
