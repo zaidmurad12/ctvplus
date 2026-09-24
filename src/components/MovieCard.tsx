@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, Text, Image, StyleSheet } from "react-native";
 import type { Movie } from "../api";
 import { posterUrl } from "../api";
@@ -30,12 +30,19 @@ interface Props {
   showImage?: boolean;
   hasTVPreferredFocus?: boolean;
   large?: boolean;
+  // Exact card width, overriding card/large - lets a grid size its cards to fill a row exactly
+  // (see BrowseScreen's CARD_WIDTH_FILL) instead of leaving the leftover width empty at the end.
+  width?: number;
 }
 
 const MovieCard = React.forwardRef<View, Props>(function MovieCard(
-  { movie, lang = "ar", onSelect, onFocusChange, nextFocusLeft, nextFocusRight, nextFocusUp, showImage = true, hasTVPreferredFocus, large },
+  { movie, lang = "ar", onSelect, onFocusChange, nextFocusLeft, nextFocusRight, nextFocusUp, showImage = true, hasTVPreferredFocus, large, width },
   ref
 ) {
+  const cardStyle = useMemo(
+    () => (width ? [styles.card, { width }] : large ? styles.cardLarge : styles.card),
+    [width, large]
+  );
   return (
     <Focusable
       ref={ref}
@@ -45,7 +52,7 @@ const MovieCard = React.forwardRef<View, Props>(function MovieCard(
       nextFocusRight={nextFocusRight}
       nextFocusUp={nextFocusUp}
       hasTVPreferredFocus={hasTVPreferredFocus}
-      style={large ? styles.cardLarge : styles.card}
+      style={cardStyle}
       // No scale-on-focus (was 1.045) - per explicit request, to cut the animation work this
       // fires on every single focus change while browsing a grid/rail. posterFrameFocused's own
       // white border (below) already carries the focus indicator on its own, same reasoning

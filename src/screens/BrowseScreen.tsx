@@ -33,10 +33,13 @@ const ROW_GAP = s(30);
 // A fixed column count left a wide dead strip on the right on any screen wider than that
 // assumed - filling the actual row width, whatever it is, is what makes the grid reach the
 // edge of the screen instead of stopping partway across.
-const NUM_COLUMNS = Math.max(
-  4,
-  Math.floor((Dimensions.get("window").width - GRID_START - GRID_END_PADDING) / CARD_TOTAL_WIDTH_LARGE)
-);
+const GRID_ROW_WIDTH = Dimensions.get("window").width - GRID_START - GRID_END_PADDING;
+const NUM_COLUMNS = Math.max(4, Math.floor(GRID_ROW_WIDTH / CARD_TOTAL_WIDTH_LARGE));
+// Rounding the column count down left up to almost a whole card's width empty at the end of
+// every row (reported as a big gap on the right, varying with screen and UI size). The cards now
+// share that leftover instead: each is widened just enough that the row ends exactly at the edge.
+// s(16) is the card's own horizontal margins (MovieCard's s(8) each side).
+const CARD_WIDTH_FILL = Math.floor(GRID_ROW_WIDTH / NUM_COLUMNS) - s(16);
 
 type SortKey = "newest" | "rating" | "views";
 // The backend's own sort enum (queryHelpers.ts's SORT_FIELD) doesn't share this screen's own
@@ -677,7 +680,7 @@ const Row = React.memo(function Row({
           nextFocusUp={nextFocusUp}
           hasTVPreferredFocus={rowIndex === 0 && colIndex === 0}
           showImage={revealImages}
-          large
+          width={CARD_WIDTH_FILL}
         />
       ))}
     </View>
