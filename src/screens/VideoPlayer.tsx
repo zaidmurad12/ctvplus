@@ -218,6 +218,25 @@ export default function VideoPlayerScreen({
   // the best quality this device can actually decode in hardware - see qualityOptions above. Stays
   // on 4K only when nothing else is on offer at all.
   const currentIs4K = qualityRank(servers[serverIndex]?.quality ?? "") >= 2160;
+  // Stable objects for <Video>'s source/bufferConfig props. Written inline, they were brand-new
+  // objects on every render of this (large) screen - several times a second from progress/subtitle
+  // updates, and on every remote key press - so react-native-video rebuilt its source and pushed it
+  // to the native player's setSrc() (new data-source factory, resume position cleared) each time,
+  // work that sat directly on the path of every control press. Now they only change when the link
+  // or its 4K-ness actually does.
+  const videoSource = React.useMemo(() => ({ uri: url }), [url]);
+  const videoBufferConfig = React.useMemo(
+    () => ({
+      minBufferMs: 15000,
+      maxBufferMs: 45000,
+      // 4K moves several times the data per second of 1080p - a bigger cushion before starting
+      // and after a stall keeps a brief throughput dip from turning into stutter.
+      bufferForPlaybackMs: currentIs4K ? 6000 : 2500,
+      bufferForPlaybackAfterRebufferMs: currentIs4K ? 12000 : 7000,
+      maxHeapAllocationPercent: 0.45,
+    }),
+    [currentIs4K]
+  );
   useEffect(() => {
     if (can4K || !currentIs4K) return;
     const fallback = qualityOptions[0];
@@ -1701,7 +1720,7 @@ export default function VideoPlayerScreen({
       <Video
         key={`${url}#${retryToken}`}
         ref={playerRef}
-        source={{ uri: url }}
+        source={videoSource}
         style={StyleSheet.absoluteFill}
         resizeMode="contain"
         paused={paused}
@@ -1813,15 +1832,7 @@ export default function VideoPlayerScreen({
         // real heap limit (memoryClass), so a heavy stream just buffers fewer seconds instead of
         // killing the app; a normal-bitrate one still gets the full time window below.
         bufferingStrategy={BufferingStrategyType.DEPENDING_ON_MEMORY}
-        bufferConfig={{
-          minBufferMs: 15000,
-          maxBufferMs: 45000,
-          // 4K moves several times the data per second of 1080p - a bigger cushion before starting
-          // and after a stall keeps a brief throughput dip from turning into stutter.
-          bufferForPlaybackMs: currentIs4K ? 6000 : 2500,
-          bufferForPlaybackAfterRebufferMs: currentIs4K ? 12000 : 7000,
-          maxHeapAllocationPercent: 0.45,
-        }}
+        bufferConfig={videoBufferConfig}
         // Was 1000 (once a second) - re-rendering the whole screen (seek bar, header,
         // everything) at whatever rate this fires is still only actually done once a second,
         // throttled inside onProgress itself (see lastProgressStateRef there), so raising the
