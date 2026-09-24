@@ -3050,7 +3050,8 @@ const styles = StyleSheet.create({
   headerLeft: { flex: 1 },
   headerRight: { alignItems: "flex-end", gap: s(6), maxWidth: "60%" },
   playerLogo: { marginBottom: s(4) },
-  title: { color: "#fff", fontSize: fs(18), fontFamily: font.extraBold },
+  // Stands in for a missing title logo (s(50) tall) - enlarged from fs(18), per request.
+  title: { color: "#fff", fontSize: fs(26), fontFamily: font.extraBold },
   metaText: { color: "#d4d4d8", fontSize: fs(13), fontFamily: font.semiBold, textAlign: "right" },
   // More items land in this one line now (age rating, year, country, language, genres,
   // quality, rating) - wraps rather than overflowing the screen edge or squeezing the title

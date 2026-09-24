@@ -366,7 +366,7 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
             {focusedMovie.logoUrl || focusedMovie.titleLogo ? (
               <LogoImage uri={posterUrl(focusedMovie.logoUrl || focusedMovie.titleLogo, "w780")} height={s(80)} maxWidth={s(340)} />
             ) : (
-              <Text style={styles.heroTitle}>{pickText(focusedMovie.titleAr, focusedMovie.titleEn, lang)}</Text>
+              <Text style={styles.heroTitle} numberOfLines={2}>{pickText(focusedMovie.titleAr, focusedMovie.titleEn, lang)}</Text>
             )}
             <View style={styles.heroMetaRow}>
               <Text style={styles.heroMetaLine}>{focusedMovie.type === "series" ? t("series", lang) : t("movies", lang)}</Text>
@@ -713,7 +713,8 @@ const styles = StyleSheet.create({
   heroDot: { width: s(8), height: s(8), borderRadius: s(4), backgroundColor: "rgba(255,255,255,0.3)" },
   heroDotActive: { width: s(24), backgroundColor: "#fff" },
   heroContent: { padding: s(32), paddingLeft: spacing.contentStart, gap: s(10) },
-  heroTitle: { color: "#fff", fontSize: fs(38), fontFamily: font.black, textShadowColor: "rgba(0,0,0,0.6)", textShadowOffset: { width: 0, height: 3 }, textShadowRadius: 10 },
+  // Enlarged (was fs(38)) - stands in for a missing title logo, per request.
+  heroTitle: { color: "#fff", fontSize: fs(44), maxWidth: s(620), fontFamily: font.black, textShadowColor: "rgba(0,0,0,0.6)", textShadowOffset: { width: 0, height: 3 }, textShadowRadius: 10 },
   // One line - type, year, duration, rating (with its IMDb badge).
   heroMetaRow: { flexDirection: "row", gap: s(10), alignItems: "center" },
   heroMetaLine: { color: colors.textSecondary, fontSize: fs(13), fontFamily: font.bold },
@@ -810,6 +811,7 @@ const styles = StyleSheet.create({
   // Always white (was textSecondary/white on focus) - unlike a plain poster row's caption text,
   // this now sits on the artwork itself, over a dark gradient built to keep it readable
   // regardless of focus, so dimming it unfocused had nothing left to actually contrast against.
-  recentTitle: { color: "#fff", fontSize: fs(16), fontFamily: font.bold },
+  // Stands in for a missing title logo (s(40) tall) - enlarged from fs(16), per request.
+  recentTitle: { color: "#fff", fontSize: fs(20), fontFamily: font.bold },
   recentMeta: { flex: 1, color: "rgba(255,255,255,0.75)", fontSize: fs(12), fontFamily: font.semiBold },
 });

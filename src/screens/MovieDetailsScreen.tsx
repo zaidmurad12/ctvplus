@@ -633,7 +633,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
           {movie.logoUrl || movie.titleLogo ? (
             <LogoImage uri={posterUrl(movie.logoUrl || movie.titleLogo, "w780")} height={s(95)} maxWidth={s(460)} style={styles.titleLogo} />
           ) : (
-            <Text style={styles.title}>{pickText(movie.titleAr, movie.titleEn, lang)}</Text>
+            <Text style={styles.title} numberOfLines={2}>{pickText(movie.titleAr, movie.titleEn, lang)}</Text>
           )}
 
           <View style={styles.metaRow}>
@@ -1224,7 +1224,9 @@ const styles = StyleSheet.create({
     gap: s(8),
   },
   titleLogo: { marginBottom: s(2) },
-  title: { color: "#fff", fontSize: fs(28), fontFamily: font.black },
+  // Stands in for a missing title logo - enlarged (was fs(28)) to hold its own against the s(95)
+  // logo it replaces, per request.
+  title: { color: "#fff", fontSize: fs(38), fontFamily: font.black, maxWidth: s(560) },
   metaRow: { flexDirection: "row", gap: s(12), flexWrap: "wrap", alignItems: "center" },
   ageBadge: { borderWidth: 1.5, borderColor: "rgba(255,255,255,0.5)", borderRadius: 4, paddingHorizontal: s(6), paddingVertical: s(1) },
   ageBadgeText: { color: "#fff", fontSize: fs(11), fontFamily: font.black },
