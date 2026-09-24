@@ -16,7 +16,7 @@ import {
 import { ChevronUp, ChevronDown } from "lucide-react-native";
 import type { Movie } from "../api";
 import { fetchMoviesPage } from "../api";
-import MovieCard, { CARD_TOTAL_WIDTH } from "../components/MovieCard";
+import MovieCard, { CARD_TOTAL_WIDTH_LARGE } from "../components/MovieCard";
 import Focusable from "../components/Focusable";
 import { colors, font } from "../theme";
 import { s, fs } from "../scale";
@@ -24,10 +24,10 @@ import { Lang, languageName, genreName } from "../i18n";
 import { useSidebarHomeHandle } from "../focusRefs";
 import { loadJson, saveJson, storageKeys } from "../storage";
 
-// Clearly past the sidebar's own 88px column - a smaller gap here previously still read as
-// the first-column card's focus-scale creeping under the sidebar's own (higher-zIndex)
-// overlay, looking like the card was clipped by it.
-const GRID_START = s(176);
+// Past the sidebar's own 88px column. Was s(176) (extra clearance for a card focus-scale that
+// crept under the sidebar) - reported as sitting too far from the sidebar; cards no longer scale
+// on focus (see MovieCard), so that clearance isn't needed.
+const GRID_START = s(120);
 const GRID_END_PADDING = s(24);
 const ROW_GAP = s(30);
 // A fixed column count left a wide dead strip on the right on any screen wider than that
@@ -35,7 +35,7 @@ const ROW_GAP = s(30);
 // edge of the screen instead of stopping partway across.
 const NUM_COLUMNS = Math.max(
   4,
-  Math.floor((Dimensions.get("window").width - GRID_START - GRID_END_PADDING) / CARD_TOTAL_WIDTH)
+  Math.floor((Dimensions.get("window").width - GRID_START - GRID_END_PADDING) / CARD_TOTAL_WIDTH_LARGE)
 );
 
 type SortKey = "newest" | "rating" | "views";
@@ -677,6 +677,7 @@ const Row = React.memo(function Row({
           nextFocusUp={nextFocusUp}
           hasTVPreferredFocus={rowIndex === 0 && colIndex === 0}
           showImage={revealImages}
+          large
         />
       ))}
     </View>

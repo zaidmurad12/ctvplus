@@ -12,6 +12,9 @@ const CARD_WIDTH = s(128);
 // Card width + its own horizontal margins - grids that need to know how many columns fit a
 // given row width (BrowseScreen, SearchScreen) import this instead of guessing/duplicating it.
 export const CARD_TOTAL_WIDTH = CARD_WIDTH + s(16);
+// A slightly bigger card for the full-page grids (Movies/Series, Library) - see the `large` prop.
+const CARD_WIDTH_LARGE = s(148);
+export const CARD_TOTAL_WIDTH_LARGE = CARD_WIDTH_LARGE + s(16);
 
 interface Props {
   movie: Movie;
@@ -26,10 +29,11 @@ interface Props {
   // so every other call site (grids, single cards) is unaffected.
   showImage?: boolean;
   hasTVPreferredFocus?: boolean;
+  large?: boolean;
 }
 
 const MovieCard = React.forwardRef<View, Props>(function MovieCard(
-  { movie, lang = "ar", onSelect, onFocusChange, nextFocusLeft, nextFocusRight, nextFocusUp, showImage = true, hasTVPreferredFocus },
+  { movie, lang = "ar", onSelect, onFocusChange, nextFocusLeft, nextFocusRight, nextFocusUp, showImage = true, hasTVPreferredFocus, large },
   ref
 ) {
   return (
@@ -41,7 +45,7 @@ const MovieCard = React.forwardRef<View, Props>(function MovieCard(
       nextFocusRight={nextFocusRight}
       nextFocusUp={nextFocusUp}
       hasTVPreferredFocus={hasTVPreferredFocus}
-      style={styles.card}
+      style={large ? styles.cardLarge : styles.card}
       // No scale-on-focus (was 1.045) - per explicit request, to cut the animation work this
       // fires on every single focus change while browsing a grid/rail. posterFrameFocused's own
       // white border (below) already carries the focus indicator on its own, same reasoning
@@ -94,6 +98,7 @@ const styles = StyleSheet.create({
   // the way CSS block margins do, so the *visible gap between* cards is unchanged (8+8=16,
   // same as the old marginRight: 16) - only the outer edges gained breathing room.
   card: { width: CARD_WIDTH, marginHorizontal: s(8) },
+  cardLarge: { width: CARD_WIDTH_LARGE, marginHorizontal: s(8) },
   posterFrame: {
     width: "100%",
     aspectRatio: 2 / 3,

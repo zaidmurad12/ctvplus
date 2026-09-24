@@ -525,9 +525,6 @@ export default function App() {
   // VideoPlayerScreen's own isEpisodeWatched prop is 2-arg (season/episode only - it already
   // knows which movie is playing) - this curries that in once, instead of a fresh arrow function
   // at the JSX call site defeating the stability isEpisodeWatched itself just gained above.
-  // A real still for SettingsScreen's subtitle preview - Home's first hero title, already loaded.
-  const previewSource = data?.heroMovies?.[0] ?? data?.hero;
-  const subtitlePreviewBackdrop = previewSource?.backdrop ? posterUrl(previewSource.backdrop, "w780") : undefined;
   const playingMovieId = playing?.movie.id;
   const isPlayingEpisodeWatched = useCallback(
     (seasonNumber: number, episodeNumber: number) =>
@@ -814,7 +811,6 @@ export default function App() {
                       // (hidden) through every play/exit cycle regardless of section, per this
                       // block's own "keep it warm" comment above.
                       active={section === "settings"}
-                      previewBackdrop={subtitlePreviewBackdrop}
                     />
                   </Suspense>
                 </View>

@@ -40,9 +40,6 @@ interface Props {
   // account for on its own is *this* screen's own back-handler push effect below - see its own
   // comment for why `active` has to gate it directly.
   active: boolean;
-  // A still from a real title (Home's first hero backdrop) for the subtitle preview to sit on,
-  // instead of a plain black box - shows how the chosen style reads over an actual picture.
-  previewBackdrop?: string;
 }
 
 // A handful of *named*, fixed focus targets (not a variable-length list, so useFocusClamp's
@@ -87,7 +84,7 @@ const SUBTITLE_KEYS = ["language", "font", "size", "color", "background"] as con
 // Two-pane layout (a fixed nav rail + a scrollable content panel) instead of pill tabs across
 // the top - closer to how an actual TV settings app (or System Preferences) is organized, and
 // gives the tab list room to grow past two entries without crowding a single row.
-export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, onChangeSubtitleSettings, uiScale, onChangeUiScale, onBack, active, previewBackdrop }: Props) {
+export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, onChangeSubtitleSettings, uiScale, onChangeUiScale, onBack, active }: Props) {
   const [tab, setTab] = useState<Tab>("system");
   const patch = (partial: Partial<SubtitleSettings>) => onChangeSubtitleSettings({ ...subtitleSettings, ...partial });
 
@@ -206,6 +203,9 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
               ref={system.setRef("update")}
               lang={lang}
               nextFocusUp={system.handleOf("uiSize")}
+              // Last row: down stays here (was unset, and Android's own nearest-neighbor search
+              // jumped out to the sidebar). Only LEFT leaves the panel.
+              nextFocusDown={system.handleOf("update")}
               nextFocusLeft={nav.handleOf("system")}
             />
           </ScrollView>
@@ -214,9 +214,7 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
             <View style={styles.previewBox}>
               <Text style={styles.previewLabel}>{t("subtitlePreview", lang)}</Text>
               <View style={styles.previewFrame}>
-                {!!previewBackdrop && (
-                  <Image source={{ uri: previewBackdrop }} style={StyleSheet.absoluteFill} resizeMode="cover" fadeDuration={0} />
-                )}
+                <Image source={SUBTITLE_PREVIEW_IMAGE} style={StyleSheet.absoluteFill} resizeMode="cover" fadeDuration={0} />
                 <Text
                   style={[
                     styles.previewText,
@@ -379,8 +377,8 @@ type UpdateState = "idle" | "checking" | "upToDate" | "available" | "downloading
 // risking for a background check nothing is currently waiting on.
 const UpdateRow = React.forwardRef<
   View,
-  { lang: Lang; nextFocusUp?: number; nextFocusLeft?: number }
->(function UpdateRow({ lang, nextFocusUp, nextFocusLeft }, ref) {
+  { lang: Lang; nextFocusUp?: number; nextFocusDown?: number; nextFocusLeft?: number }
+>(function UpdateRow({ lang, nextFocusUp, nextFocusDown, nextFocusLeft }, ref) {
   const [state, setState] = useState<UpdateState>("idle");
   const [info, setInfo] = useState<AppUpdateInfo | null>(null);
   const [progress, setProgress] = useState(0);
@@ -520,7 +518,7 @@ const UpdateRow = React.forwardRef<
       ref={ref}
       onPress={handlePress}
       nextFocusUp={nextFocusUp}
-      nextFocusDown={undefined}
+      nextFocusDown={nextFocusDown}
       nextFocusLeft={nextFocusLeft}
       scaleTo={1}
       focusRadius={s(14)}
@@ -821,6 +819,11 @@ const ColorSwatch = React.forwardRef<
   );
 });
 
+// A real movie still (bottom fade band cropped off, 960x450) behind the subtitle preview instead
+// of a plain black box - shows how the chosen style reads over an actual picture. Bundled, so it
+// shows offline too.
+const SUBTITLE_PREVIEW_IMAGE = require("../assets/subtitle-preview.jpg");
+
 const ROOT_PADDING_TOP = s(30);
 // Tall enough for the Cairo title's glyphs at any UI scale, so centering it never clips them.
 const PAGE_TITLE_ROW_H = fs(19) * 1.8;
@@ -900,7 +903,8 @@ const styles = StyleSheet.create({
   // Taller (was s(84)) now that it shows a real still, with the line near the bottom the way the
   // player places subtitles.
   previewFrame: {
-    height: s(170),
+    width: "100%",
+    aspectRatio: 960 / 450,
     borderRadius: s(10),
     backgroundColor: "#000",
     alignItems: "center",

@@ -2,7 +2,7 @@ import React, { useRef } from "react";
 import { View, Text, ScrollView, StyleSheet } from "react-native";
 import type { Movie } from "../api";
 import MovieCard from "../components/MovieCard";
-import { colors, font, spacing } from "../theme";
+import { colors, font, spacing, SIDEBAR_LOGO } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, t } from "../i18n";
 
@@ -37,7 +37,9 @@ export default function LibraryScreen({ lang, watchLater, history, onSelect }: P
 
   return (
     <ScrollView ref={scrollRef} style={styles.root} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} scrollsChildToFocus={false}>
-      <Text style={styles.pageTitle}>{t("library", lang)}</Text>
+      <View style={styles.pageTitleRow}>
+        <Text style={styles.pageTitle}>{t("library", lang)}</Text>
+      </View>
 
       <Rail
         title={t("favorites", lang)}
@@ -90,7 +92,7 @@ function Rail({
         <View style={styles.railClip}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railContent}>
             {items.map((movie) => (
-              <MovieCard key={movie.id} movie={movie} lang={lang} onSelect={onSelect} onFocusChange={(f) => f && onFocusChange()} />
+              <MovieCard key={movie.id} movie={movie} lang={lang} onSelect={onSelect} onFocusChange={(f) => f && onFocusChange()} large />
             ))}
           </ScrollView>
         </View>
@@ -99,12 +101,24 @@ function Rail({
   );
 }
 
+const CONTENT_PADDING_TOP = s(30);
+const PAGE_TITLE_ROW_H = fs(19) * 1.8;
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   // paddingTop lowered (was 44) - per explicit request, to match BrowseScreen's own headerRow
   // level (see its own comment) - keeps every sidebar-adjacent screen's title at the same height.
-  content: { paddingTop: s(30), paddingBottom: s(40) },
-  pageTitle: { color: "#fff", fontSize: fs(24), fontFamily: font.black, marginLeft: spacing.contentStart, marginBottom: s(28) },
+  content: { paddingTop: CONTENT_PADDING_TOP, paddingBottom: s(40) },
+  // Smaller (was fs(24), black) and centered on the sidebar logo's vertical center, per request -
+  // same placement as SettingsScreen's own title.
+  pageTitleRow: {
+    height: PAGE_TITLE_ROW_H,
+    marginTop: s(SIDEBAR_LOGO.top) + SIDEBAR_LOGO.height / 2 - PAGE_TITLE_ROW_H / 2 - CONTENT_PADDING_TOP,
+    marginLeft: spacing.contentStart,
+    marginBottom: s(20),
+    justifyContent: "center",
+  },
+  pageTitle: { color: "#fff", fontSize: fs(19), fontFamily: font.bold, includeFontPadding: false },
   railBlock: { marginBottom: s(30) },
   railTitleRow: { flexDirection: "row", alignItems: "center", gap: s(8), marginLeft: spacing.contentStart, marginBottom: s(10) },
   railTitleBar: { width: s(5), height: s(15), borderRadius: 3, backgroundColor: "#fff" },
