@@ -802,8 +802,9 @@ const styles = StyleSheet.create({
   // Same border width/vertical padding/radius as recentAgeBadge above (just filled white with a
   // matching white border, instead of outlined) - what actually keeps the two badges the same
   // height, not just an eyeballed match.
-  recentImdbBadge: { backgroundColor: "#fff", borderWidth: 1.5, borderColor: "#fff", borderRadius: 4, paddingHorizontal: s(6), paddingVertical: s(1) },
-  recentImdbBadgeText: { color: "#000", fontSize: fs(10), fontFamily: font.black },
+  // Smaller (was fs(10), padding s(6)/s(1), border 1.5) - read as oversized on the card, per request.
+  recentImdbBadge: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#fff", borderRadius: 3, paddingHorizontal: s(4), paddingVertical: 0 },
+  recentImdbBadgeText: { color: "#000", fontSize: fs(8), fontFamily: font.black },
   recentRating: { color: "#fff", fontSize: fs(12), fontFamily: font.black },
   // Pinned to the image's own bottom edge (was a plain panel below it) - sits over the gradient
   // above, so it needs no background of its own.
