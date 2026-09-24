@@ -77,6 +77,7 @@ function useHandleGroup<K extends string>(keys: readonly K[]) {
 
   return {
     setRef: (key: K) => setRefFns.current![key]!,
+    focus: (key: K) => (nodes.current[key] as unknown as { focus?: () => void } | null | undefined)?.focus?.(),
     handleOf: (key: K): number | undefined => {
       const node = nodes.current[key];
       return node ? findNodeHandle(node) ?? undefined : undefined;
@@ -131,6 +132,21 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
   // (a plain row of same-sized buttons at this call site, not its own reusable component) -
   // every swatch gets an explicit handle to its neighbor instead of only the first one.
   const swatchClamp = useFocusClamp(SUBTITLE_COLORS.length);
+  // RIGHT from the nav rail always lands on the open tab's first row (was left to Android's
+  // nearest-neighbor guess, which picked whichever row happened to sit level with the nav item).
+  const firstRowHandle = tab === "system" ? system.handleOf("lang") : subtitle.handleOf("language");
+
+  // Entering Settings always starts on the first tab with focus on it. This screen stays mounted
+  // (hidden) between visits, so the nav item's hasTVPreferredFocus only ever took effect on the
+  // very first one - later entries landed wherever Android's nearest-neighbor guess put focus
+  // coming from the sidebar (reported as starting on the second tab).
+  useEffect(() => {
+    if (!active) return;
+    setTab("system");
+    const timers = [60, 200, 450].map((ms) => setTimeout(() => nav.focus("system"), ms));
+    return () => timers.forEach(clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on entering (active -> true)
+  }, [active]);
 
   return (
     <View style={styles.root}>
@@ -148,6 +164,7 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
           nextFocusUp={nav.handleOf("system")}
           nextFocusDown={nav.handleOf("subtitles")}
           nextFocusLeft={homeHandle ?? undefined}
+          nextFocusRight={firstRowHandle}
         />
         <NavItem
           ref={nav.setRef("subtitles")}
@@ -158,6 +175,7 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
           nextFocusUp={nav.handleOf("system")}
           nextFocusDown={nav.handleOf("subtitles")}
           nextFocusLeft={homeHandle ?? undefined}
+          nextFocusRight={firstRowHandle}
         />
       </View>
 
@@ -331,8 +349,9 @@ const NavItem = React.forwardRef<
     nextFocusUp?: number;
     nextFocusDown?: number;
     nextFocusLeft?: number;
+    nextFocusRight?: number;
   }
->(function NavItem({ label, Icon, active, onPress, hasTVPreferredFocus, nextFocusUp, nextFocusDown, nextFocusLeft }, ref) {
+>(function NavItem({ label, Icon, active, onPress, hasTVPreferredFocus, nextFocusUp, nextFocusDown, nextFocusLeft, nextFocusRight }, ref) {
   return (
     <Focusable
       ref={ref}
@@ -341,6 +360,7 @@ const NavItem = React.forwardRef<
       nextFocusUp={nextFocusUp}
       nextFocusDown={nextFocusDown}
       nextFocusLeft={nextFocusLeft}
+      nextFocusRight={nextFocusRight}
       scaleTo={1.02}
       focusRadius={s(10)}
       clipFocusOverflow
@@ -656,7 +676,10 @@ const SegmentedControl = React.forwardRef(function SegmentedControl<T extends st
             else if (i === 0 && ref && "current" in ref) (ref as React.MutableRefObject<View | null>).current = node;
           }}
           onPress={() => onChange(opt.key)}
-          hasTVPreferredFocus={value === opt.key}
+          // No hasTVPreferredFocus here (was set on each control's selected option): every
+          // segmented control on the page asked for focus on mount, so the last one mounted won -
+          // opening the Subtitles tab landed on the font row instead of its first row, language.
+          // Where focus starts is decided by the nav rail (see its nextFocusRight).
           nextFocusUp={nextFocusUp}
           nextFocusDown={nextFocusDown}
           nextFocusLeft={i === 0 ? nextFocusLeft : optionHandleOf(i - 1)}
