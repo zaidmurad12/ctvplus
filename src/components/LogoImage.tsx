@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Image, View, ViewStyle } from "react-native";
+import { Image, StyleSheet, View, ViewStyle } from "react-native";
 
 interface Props {
   uri: string;
@@ -15,7 +15,13 @@ interface Props {
 // Fetching the real image dimensions once and sizing the box to the logo's own aspect ratio
 // (capped at maxWidth) removes that dead space entirely, so flex-start alignment actually
 // puts the logo at the edge.
-export default function LogoImage({ uri, height, maxWidth, style }: Props) {
+// The backend marks each logo URL with a `#dark`/`#light` fragment (see prisma/backfill-logo-tone.mjs
+// there). A near-black logo over this app's dark hero/details/player backgrounds is close to
+// unreadable, so a `#dark` one is drawn white instead. The fragment is stripped before loading.
+export default function LogoImage({ uri: markedUri, height, maxWidth, style }: Props) {
+  const hashAt = markedUri.indexOf("#");
+  const uri = hashAt >= 0 ? markedUri.slice(0, hashAt) : markedUri;
+  const isDark = hashAt >= 0 && markedUri.slice(hashAt + 1) === "dark";
   const [width, setWidth] = useState(maxWidth);
 
   useEffect(() => {
@@ -35,7 +41,11 @@ export default function LogoImage({ uri, height, maxWidth, style }: Props) {
 
   return (
     <View style={[{ alignSelf: "flex-start" }, style]}>
-      <Image source={{ uri }} style={{ width, height }} resizeMode="contain" fadeDuration={0} />
+      <Image source={{ uri }} style={[{ width, height }, isDark && styles.whiteTint]} resizeMode="contain" fadeDuration={0} />
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  whiteTint: { tintColor: "#fff" },
+});
