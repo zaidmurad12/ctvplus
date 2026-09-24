@@ -1,18 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, Dimensions, ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import type { Category, Movie } from "../api";
-import MovieCard, { CARD_TOTAL_WIDTH } from "../components/MovieCard";
-import { colors, font, spacing } from "../theme";
+import MovieCard from "../components/MovieCard";
+import { colors, font, SIDEBAR_LOGO } from "../theme";
+import { GRID_START, NUM_COLUMNS, CARD_WIDTH_FILL } from "../gridLayout";
+import { useSidebarHomeHandle } from "../focusRefs";
 import { s, fs } from "../scale";
 import { Lang, pickText } from "../i18n";
 import { pushBackHandler } from "../backStack";
 
-// Same full-width grid maths as PersonScreen/BrowseScreen: as many columns as the screen actually fits.
-const GRID_END_PADDING = s(24);
-const NUM_COLUMNS = Math.max(
-  4,
-  Math.floor((Dimensions.get("window").width - spacing.contentStart - GRID_END_PADDING) / CARD_TOTAL_WIDTH)
-);
+// Same grid as Movies/Series (gridLayout.ts): same column count and card size, filling the row.
 const ROW_GAP = s(26);
 // Only the rows near the focused one decode their poster (the grid itself keeps every row mounted so
 // D-pad navigation stays exact - see PersonScreen/BrowseScreen for why the scroll container is never virtualised).
@@ -38,6 +35,9 @@ export default function CategoryScreen({ category, lang, onSelectMovie, onBack }
   const [items, setItems] = useState<Movie[]>(category.items);
   const [loading, setLoading] = useState(!!category.loadAll);
   const [focusedRow, setFocusedRow] = useState(0);
+  // The sidebar stays visible next to this page now (see App.tsx) - LEFT from the first column
+  // goes to it, same as Movies/Series.
+  const homeHandle = useSidebarHomeHandle();
 
   useEffect(() => {
     if (!category.loadAll) return;
@@ -133,6 +133,7 @@ export default function CategoryScreen({ category, lang, onSelectMovie, onBack }
             onRowLayout={onRowLayout}
             revealImages={Math.abs(rowIndex - focusedRow) <= IMAGE_REVEAL_RADIUS}
             firstRow={rowIndex === 0}
+            homeHandle={homeHandle}
           />
         ))}
       </ScrollView>
@@ -149,6 +150,7 @@ const Row = React.memo(function Row({
   onRowLayout,
   revealImages,
   firstRow,
+  homeHandle,
 }: {
   items: Movie[];
   rowIndex: number;
@@ -158,6 +160,7 @@ const Row = React.memo(function Row({
   onRowLayout: (rowIndex: number, e: { nativeEvent: { layout: { y: number } } }) => void;
   revealImages: boolean;
   firstRow: boolean;
+  homeHandle: number | null;
 }) {
   return (
     <View style={styles.row} onLayout={(e) => onRowLayout(rowIndex, e)}>
@@ -170,25 +173,31 @@ const Row = React.memo(function Row({
           onFocusChange={(f) => onCardFocusChange(rowIndex, f)}
           showImage={revealImages}
           hasTVPreferredFocus={firstRow && i === 0}
+          width={CARD_WIDTH_FILL}
+          nextFocusLeft={i === 0 ? homeHandle ?? undefined : undefined}
         />
       ))}
     </View>
   );
 });
 
+const HEADER_H = s(64);
+
+// Laid out like Movies/Series: content starts at GRID_START (clear of the sidebar), header centered
+// on the sidebar logo, same title size.
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
+  root: { flex: 1, backgroundColor: colors.bg, paddingLeft: GRID_START },
   listContent: { paddingRight: s(24), paddingBottom: s(40) },
   header: {
     flexDirection: "row",
     alignItems: "center",
     gap: s(10),
-    paddingTop: s(48),
-    paddingLeft: spacing.contentStart,
-    marginBottom: s(20),
+    height: HEADER_H,
+    marginTop: s(SIDEBAR_LOGO.top) + SIDEBAR_LOGO.height / 2 - HEADER_H / 2,
+    marginBottom: s(10),
   },
-  titleBar: { width: s(5), height: s(24), borderRadius: 3, backgroundColor: "#fff" },
-  title: { color: "#fff", fontSize: fs(24), fontFamily: font.black },
+  titleBar: { width: s(5), height: s(20), borderRadius: 3, backgroundColor: "#fff" },
+  title: { color: "#fff", fontSize: fs(18), fontFamily: font.bold },
   count: { color: colors.textSecondary, fontSize: fs(13), fontFamily: font.bold, marginLeft: s(8) },
-  row: { flexDirection: "row", paddingLeft: spacing.contentStart, marginBottom: ROW_GAP },
+  row: { flexDirection: "row", marginBottom: ROW_GAP },
 });

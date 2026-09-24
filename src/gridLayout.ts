@@ -11,10 +11,16 @@ import { CARD_TOTAL_WIDTH_LARGE } from "./components/MovieCard";
 // on focus (see MovieCard), so that clearance isn't needed.
 export const GRID_START = s(120);
 export const GRID_END_PADDING = s(24);
-const GRID_ROW_WIDTH = Dimensions.get("window").width - GRID_START - GRID_END_PADDING;
-export const NUM_COLUMNS = Math.max(4, Math.floor(GRID_ROW_WIDTH / CARD_TOTAL_WIDTH_LARGE));
 // Rounding the column count down left up to almost a whole card's width empty at the end of
 // every row (reported as a big gap on the right, varying with screen and UI size). The cards now
 // share that leftover instead: each is widened just enough that the row ends exactly at the edge.
-// s(16) is the card's own horizontal margins (MovieCard's s(8) each side).
-export const CARD_WIDTH_FILL = Math.floor(GRID_ROW_WIDTH / NUM_COLUMNS) - s(16);
+// s(16) is the card's own horizontal margins (MovieCard's s(8) each side). For a grid whose
+// rows start at `start` from the screen's left edge.
+export function fillGrid(start: number): { columns: number; cardWidth: number } {
+  const rowWidth = Dimensions.get("window").width - start - GRID_END_PADDING;
+  const columns = Math.max(4, Math.floor(rowWidth / CARD_TOTAL_WIDTH_LARGE));
+  return { columns, cardWidth: Math.floor(rowWidth / columns) - s(16) };
+}
+const mainGrid = fillGrid(GRID_START);
+export const NUM_COLUMNS = mainGrid.columns;
+export const CARD_WIDTH_FILL = mainGrid.cardWidth;

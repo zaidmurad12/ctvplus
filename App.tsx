@@ -179,6 +179,9 @@ export default function App() {
   // the top. Wrapping Sidebar's onSelect (instead of handing it setSection directly) is what
   // makes every press of that specific icon reset scroll, without needing Home to ever remount.
   const handleSelectSection = (s: Section) => {
+    // The "View more" page sits in Home's place with the sidebar still visible - picking any
+    // sidebar section leaves it.
+    setSelectedCategory(null);
     setSection(s);
     if (s === "home") homeRef.current?.scrollToTop();
   };
@@ -736,13 +739,16 @@ export default function App() {
               genuinely expensive part to rebuild anyway - Library/Settings were already
               lightweight, per this same block's own original comment below, so excluding them
               from pre-warming costs nothing. */}
-          <View style={[StyleSheet.absoluteFill, (selectedPerson || selectedMovie || selectedCategory || !!playing) && styles.sectionHidden]}>
+          {/* A home row's "View more" page (selectedCategory) no longer hides this whole block - it
+              renders inside it (see just before this View's end), in Home's place, so the sidebar
+              stays on screen next to it like on every other section, per request. */}
+          <View style={[StyleSheet.absoluteFill, (selectedPerson || selectedMovie || !!playing) && styles.sectionHidden]}>
             {((!playing && !deferSections) || homeWarm) && (
               <>
                 <Suspense fallback={null}>
                   <Sidebar active={section} onSelect={handleSelectSection} />
                 </Suspense>
-                <View style={[StyleSheet.absoluteFill, section !== "home" && styles.sectionHidden]}>
+                <View style={[StyleSheet.absoluteFill, (section !== "home" || !!selectedCategory) && styles.sectionHidden]}>
                   <Suspense fallback={<ScreenLoader />}>
                     <HomeScreen
                       ref={homeRef}
@@ -816,15 +822,14 @@ export default function App() {
                 </View>
               </>
             )}
+            {selectedCategory && (
+              <View style={StyleSheet.absoluteFill}>
+                <Suspense fallback={<ScreenLoader />}>
+                  <CategoryScreen category={selectedCategory} lang={lang} onSelectMovie={setSelectedMovie} onBack={closeCategory} />
+                </Suspense>
+              </View>
+            )}
           </View>
-
-          {selectedCategory && (
-            <View style={StyleSheet.absoluteFill}>
-              <Suspense fallback={<ScreenLoader />}>
-                <CategoryScreen category={selectedCategory} lang={lang} onSelectMovie={setSelectedMovie} onBack={closeCategory} />
-              </Suspense>
-            </View>
-          )}
 
           {selectedMovie && (
             <View style={StyleSheet.absoluteFill}>

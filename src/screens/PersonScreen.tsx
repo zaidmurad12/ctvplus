@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Image, ScrollView, StyleSheet, Dimensions } from "react-native";
+import { View, Text, Image, ScrollView, StyleSheet } from "react-native";
 import type { Movie } from "../api";
 import { posterUrl, fetchByPerson } from "../api";
-import MovieCard, { CARD_TOTAL_WIDTH } from "../components/MovieCard";
+import MovieCard from "../components/MovieCard";
+import { fillGrid } from "../gridLayout";
 import Focusable from "../components/Focusable";
 import { colors, font, spacing } from "../theme";
 import { s, fs } from "../scale";
@@ -13,11 +14,8 @@ import { pushBackHandler } from "../backStack";
 // same fix, same reasoning as BrowseScreen's own NUM_COLUMNS: filling the actual row width,
 // whatever it is, is what makes the grid reach the edge of the screen instead of stopping partway
 // across, per explicit report that this filmography grid read as "cut off" rather than full width.
-const GRID_END_PADDING = s(24);
-const NUM_COLUMNS = Math.max(
-  4,
-  Math.floor((Dimensions.get("window").width - spacing.contentStart - GRID_END_PADDING) / CARD_TOTAL_WIDTH)
-);
+// Same card size as Movies/Series now, per request, sized to fill this grid's own row exactly.
+const { columns: NUM_COLUMNS, cardWidth: CARD_WIDTH } = fillGrid(spacing.contentStart);
 const ROW_GAP = s(26);
 
 export interface SelectedPerson {
@@ -298,7 +296,7 @@ const Row = React.memo(function Row({
   return (
     <View style={styles.row} onLayout={(e) => onRowLayout(rowIndex, e)}>
       {items.map((movie) => (
-        <MovieCard key={movie.id} movie={movie} lang={lang} onSelect={onSelect} onFocusChange={(f) => onCardFocusChange(rowIndex, f)} />
+        <MovieCard key={movie.id} movie={movie} lang={lang} onSelect={onSelect} onFocusChange={(f) => onCardFocusChange(rowIndex, f)} width={CARD_WIDTH} />
       ))}
     </View>
   );

@@ -86,8 +86,8 @@ android {
         // same-versionCode APK as "nothing to update" and silently keep the old app installed,
         // which was indistinguishable from "the fix didn't work" from the outside. Bump this on
         // every release build going forward so a reinstall is unambiguous.
-        versionCode 140
-        versionName "1.23.00-settings-focus"
+        versionCode 141
+        versionName "1.23.01-view-more"
     }
     signingConfigs {
         debug {
