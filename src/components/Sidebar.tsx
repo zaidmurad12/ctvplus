@@ -3,7 +3,7 @@ import { View, StyleSheet, findNodeHandle } from "react-native";
 import { Home, Search, Tv, Film, Bookmark, Settings } from "lucide-react-native";
 import Focusable from "./Focusable";
 import Logo from "./Logo";
-import { colors } from "../theme";
+import { colors, SIDEBAR_LOGO } from "../theme";
 import { s } from "../scale";
 import { registerSidebarHome } from "../focusRefs";
 
@@ -63,7 +63,7 @@ export default function Sidebar({ active, onSelect }: Props) {
   return (
     <View style={styles.root} pointerEvents="box-none">
       <View style={styles.logo}>
-        <Logo height={32} />
+        <Logo height={SIDEBAR_LOGO.height} />
       </View>
       <View style={styles.iconsWrap}>
         {ITEMS.map(({ section, Icon }, i) => (
@@ -123,7 +123,7 @@ const styles = StyleSheet.create({
   // else here, not run through s()) means its exact centered position shifts slightly relative to
   // scaled text as the UI-scale setting changes, so this may need one more nudge at a different
   // scale than the default (0.9) this was tuned against.
-  logo: { position: "absolute", top: s(40) },
+  logo: { position: "absolute", top: s(SIDEBAR_LOGO.top) },
   iconsWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: s(16) },
   btn: { width: s(44), height: s(44) },
   btnActiveInner: { backgroundColor: "rgba(38,38,38,0.9)" },

@@ -1070,7 +1070,10 @@ const EpisodeCard = React.memo(function EpisodeCard({
       nextFocusLeft={nextFocusLeft}
       nextFocusRight={nextFocusRight}
       onPress={handlePress}
-      scaleTo={1.03}
+      // No scale: scaling a card whose image is clipped to rounded corners showed the edges
+      // cropping while moving between episodes on some devices. The border alone marks focus.
+      scaleTo={1}
+      focusRadius={s(10)}
       onFocusChange={handleFocusChange}
     >
       {(focused: boolean) => (
@@ -1337,16 +1340,17 @@ const styles = StyleSheet.create({
   episodeList: { gap: s(16), marginTop: s(8), paddingVertical: s(14), paddingLeft: s(36), paddingRight: s(40) },
   emptySeasonBox: { marginTop: s(8), paddingVertical: s(28), paddingHorizontal: s(16), alignItems: "center" },
   emptySeasonText: { color: colors.textMuted, fontSize: fs(13), fontFamily: font.semiBold },
+  // The frame hugs the image now (was an s(8)-padded grey box around it, reported as the frame
+  // looking the wrong size). overflow:hidden is safe again since the card no longer scales.
   episodeCard: {
     width: s(240),
-    padding: s(8),
     borderRadius: s(10),
-    backgroundColor: colors.surface,
-    borderWidth: 2,
+    backgroundColor: "#000",
+    borderWidth: s(3),
     borderColor: "transparent",
-    gap: s(6),
+    overflow: "hidden",
   },
-  episodeCardFocused: { borderColor: "#fff", backgroundColor: colors.surfaceActive },
+  episodeCardFocused: { borderColor: "#fff" },
   // No overflow:hidden on this box anymore - it sits inside a card the focus scale transform
   // (Focusable's scaleTo) resizes as one unit, and clipping a *child* box that way (overflow:
   // hidden on a box whose own parent is being transform-scaled) rendered as the card visibly
@@ -1355,7 +1359,7 @@ const styles = StyleSheet.create({
   // now rounds its own corners directly (episodeThumb's own borderRadius) instead, which doesn't
   // need any ancestor clip to look right.
   episodeThumbBox: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000" },
-  episodeThumb: { width: "100%", height: "100%", borderRadius: s(6) },
+  episodeThumb: { width: "100%", height: "100%" },
   episodeNumberBadge: {
     position: "absolute",
     top: s(6),

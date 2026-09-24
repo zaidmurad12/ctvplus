@@ -92,7 +92,8 @@ const MIDSTREAM_RETRY_DELAY_MS = 2000;
 // How far the episode row's own dark scrim extends above its measured height (see its own
 // comment) - gives the fade-to-transparent room to finish above the season indicator instead of
 // still visibly fading right behind it.
-const EPISODE_SCRIM_EXTRA_TOP = s(50);
+// Raised from s(50) with the softer gradient below - the old short band read as a cut-off edge.
+const EPISODE_SCRIM_EXTRA_TOP = s(110);
 // Repeat delay for press-and-hold seeking - fast enough to read as continuous seeking, not
 // individual disconnected 10s jumps.
 const HOLD_SEEK_INTERVAL_MS = 350;
@@ -1955,8 +1956,10 @@ export default function VideoPlayerScreen({
           pointerEvents="none"
         >
           <LinearGradient
-            colors={["transparent", "rgba(5,5,7,0.85)", "rgba(5,5,7,0.95)", "rgba(5,5,7,0.98)"]}
-            locations={[0, 0.22, 0.55, 1]}
+            // A long, gradual fade (was solid 0.85 by 22% of the height) so the top edge blends
+            // into the video instead of reading as a cut-off dark block.
+            colors={["transparent", "rgba(5,5,7,0.35)", "rgba(5,5,7,0.75)", "rgba(5,5,7,0.92)"]}
+            locations={[0, 0.3, 0.6, 1]}
             style={StyleSheet.absoluteFill}
           />
         </Animated.View>

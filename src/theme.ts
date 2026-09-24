@@ -72,3 +72,8 @@ export const cardShadow = {
   shadowRadius: 10,
   elevation: 6,
 };
+
+// The sidebar's "ctv" logo badge, in raw (unscaled) units - top goes through s() at the use site,
+// height is used as-is (see Sidebar's own logo style comment). Shared so a screen title can sit
+// level with it (SettingsScreen's pageTitle). Height was 32 - reduced a little per request.
+export const SIDEBAR_LOGO = { top: 40, height: 28 };

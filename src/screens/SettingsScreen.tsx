@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, findNodeHandle, NativeEventEmitter, NativeModules, Linking, ToastAndroid, ActivityIndicator } from "react-native";
+import { View, Text, Image, ScrollView, StyleSheet, findNodeHandle, NativeEventEmitter, NativeModules, Linking, ToastAndroid, ActivityIndicator } from "react-native";
 import { Check, Settings as SettingsIcon, Captions, ChevronLeft, Download, RefreshCw } from "lucide-react-native";
 import Focusable from "../components/Focusable";
 import { useFocusClamp } from "../useFocusClamp";
-import { colors, font, focusShadowTight, radius, spacing } from "../theme";
+import { colors, font, focusShadowTight, radius, spacing, SIDEBAR_LOGO } from "../theme";
 import { s, fs, UI_SCALE_OPTIONS } from "../scale";
 import { Lang, t } from "../i18n";
 import { useSidebarHomeHandle } from "../focusRefs";
@@ -40,6 +40,9 @@ interface Props {
   // account for on its own is *this* screen's own back-handler push effect below - see its own
   // comment for why `active` has to gate it directly.
   active: boolean;
+  // A still from a real title (Home's first hero backdrop) for the subtitle preview to sit on,
+  // instead of a plain black box - shows how the chosen style reads over an actual picture.
+  previewBackdrop?: string;
 }
 
 // A handful of *named*, fixed focus targets (not a variable-length list, so useFocusClamp's
@@ -84,7 +87,7 @@ const SUBTITLE_KEYS = ["language", "font", "size", "color", "background"] as con
 // Two-pane layout (a fixed nav rail + a scrollable content panel) instead of pill tabs across
 // the top - closer to how an actual TV settings app (or System Preferences) is organized, and
 // gives the tab list room to grow past two entries without crowding a single row.
-export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, onChangeSubtitleSettings, uiScale, onChangeUiScale, onBack, active }: Props) {
+export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, onChangeSubtitleSettings, uiScale, onChangeUiScale, onBack, active, previewBackdrop }: Props) {
   const [tab, setTab] = useState<Tab>("system");
   const patch = (partial: Partial<SubtitleSettings>) => onChangeSubtitleSettings({ ...subtitleSettings, ...partial });
 
@@ -128,7 +131,9 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
   return (
     <View style={styles.root}>
       <View style={styles.nav}>
-        <Text style={styles.pageTitle}>{t("settings", lang)}</Text>
+        <View style={styles.pageTitleRow}>
+          <Text style={styles.pageTitle}>{t("settings", lang)}</Text>
+        </View>
         <NavItem
           ref={nav.setRef("system")}
           label={t("settingsTabSystem", lang)}
@@ -209,6 +214,9 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
             <View style={styles.previewBox}>
               <Text style={styles.previewLabel}>{t("subtitlePreview", lang)}</Text>
               <View style={styles.previewFrame}>
+                {!!previewBackdrop && (
+                  <Image source={{ uri: previewBackdrop }} style={StyleSheet.absoluteFill} resizeMode="cover" fadeDuration={0} />
+                )}
                 <Text
                   style={[
                     styles.previewText,
@@ -813,10 +821,14 @@ const ColorSwatch = React.forwardRef<
   );
 });
 
+const ROOT_PADDING_TOP = s(30);
+// Tall enough for the Cairo title's glyphs at any UI scale, so centering it never clips them.
+const PAGE_TITLE_ROW_H = fs(19) * 1.8;
+
 const styles = StyleSheet.create({
   // paddingTop lowered (was 40) - per explicit request, to match BrowseScreen's own headerRow
   // level (see its own comment) - keeps every sidebar-adjacent screen's title at the same height.
-  root: { flex: 1, flexDirection: "row", backgroundColor: colors.bg, paddingTop: s(30) },
+  root: { flex: 1, flexDirection: "row", backgroundColor: colors.bg, paddingTop: ROOT_PADDING_TOP },
   // Was 220 - with paddingLeft already eating spacing.contentStart (~94) to clear the sidebar,
   // that left barely ~110 of real width for icon+label+chevron combined, so "إعدادات النظام"/
   // "إعدادات الترجمة" (and their English equivalents) never actually fit and silently truncated
@@ -824,7 +836,15 @@ const styles = StyleSheet.create({
   // enough for the longer label ("Subtitle Settings"/"إعدادات الترجمة") to render on one full line
   // with room to spare, in either language.
   nav: { width: s(320), paddingLeft: spacing.contentStart, paddingRight: s(16), gap: s(8) },
-  pageTitle: { color: "#fff", fontSize: fs(19), fontFamily: font.bold, marginBottom: s(20) },
+  // Centered on the sidebar logo's vertical center (it used to sit above the logo, right under
+  // root's paddingTop): the row's middle lands on logo top + half the logo's height.
+  pageTitleRow: {
+    height: PAGE_TITLE_ROW_H,
+    marginTop: s(SIDEBAR_LOGO.top) + SIDEBAR_LOGO.height / 2 - PAGE_TITLE_ROW_H / 2 - ROOT_PADDING_TOP,
+    marginBottom: s(12),
+    justifyContent: "center",
+  },
+  pageTitle: { color: "#fff", fontSize: fs(19), fontFamily: font.bold, includeFontPadding: false },
   navItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -877,12 +897,16 @@ const styles = StyleSheet.create({
     marginBottom: s(24),
   },
   previewLabel: { color: colors.textMuted, fontSize: fs(12), fontFamily: font.bold, marginBottom: s(12) },
+  // Taller (was s(84)) now that it shows a real still, with the line near the bottom the way the
+  // player places subtitles.
   previewFrame: {
-    height: s(84),
+    height: s(170),
     borderRadius: s(10),
     backgroundColor: "#000",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-end",
+    paddingBottom: s(16),
+    overflow: "hidden",
   },
   // Square corners (was borderRadius 6) - same as the player's own subtitleText, per request.
   previewText: { textAlign: "center", paddingHorizontal: s(10), paddingVertical: s(4) },
