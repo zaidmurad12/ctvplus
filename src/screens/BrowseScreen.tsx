@@ -309,7 +309,14 @@ export default function BrowseScreen({ title, type, lang = "ar", emptyLabel, onS
       // A newer filter/sort/type change reset everything for a different request while this one
       // was still in flight - this response no longer belongs to what's on screen, discard it.
       if (epoch !== fetchEpochRef.current) return;
-      setItems((prev) => [...prev, ...data.items]);
+      // Skips anything an earlier page already delivered - offset paging over a sort with ties
+      // (same release date/rating) could hand the same title back on a later page, reported as
+      // "lots of duplicated titles." The backend now breaks ties by id too; this keeps the grid
+      // clean regardless.
+      setItems((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        return [...prev, ...data.items.filter((m) => !seen.has(m.id) && seen.add(m.id))];
+      });
       pageRef.current = isFirstFetch ? FIRST_PAGE_LIMIT / PAGE_LIMIT : pageRef.current + 1;
       hasMoreRef.current = data.hasMore;
     } catch (err) {
