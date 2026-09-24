@@ -1,4 +1,5 @@
 import type { Lang } from "./i18n";
+import { NativeModules } from "react-native";
 
 // Shared by streamSelect.ts (server ordering), VideoPlayer's quality picker, and api.ts (the
 // movie-summary "available resolution" badge) - kept in its own module instead of living in
@@ -28,3 +29,15 @@ export function qualityLabel(quality: string, lang: Lang = "en"): string {
 // play starts, falling back to whichever server pickBestServers ranked first when this exact
 // label isn't actually available for that title.
 export const DEFAULT_PREFERRED_QUALITY = "1080p";
+
+// Whether this device has a hardware decoder for 2160p (see VideoCapsModule.kt). Probed once per
+// app run and cached; resolves true when the native module is missing or the probe fails, so 4K
+// is only ever held back on a real "no".
+let can4KPromise: Promise<boolean> | null = null;
+export function canDecode4K(): Promise<boolean> {
+  if (!can4KPromise) {
+    const { VideoCaps } = NativeModules;
+    can4KPromise = VideoCaps?.canDecode4K ? VideoCaps.canDecode4K().catch(() => true) : Promise.resolve(true);
+  }
+  return can4KPromise!;
+}

@@ -19,6 +19,7 @@ class MainApplication : Application(), ReactApplication {
           add(KeyEventBridgePackage())
           add(AppRestartPackage())
           add(ApkUpdaterPackage())
+          add(VideoCapsPackage())
         },
     )
   }

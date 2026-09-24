@@ -17,8 +17,9 @@ import { useFocusClamp } from "../useFocusClamp";
 import { useProgressiveReveal } from "../useProgressiveReveal";
 import { pushBackHandler } from "../backStack";
 
-// Lowered from 10000, then 6000, then 4000 - still reported as too slow to start each time.
-const TRAILER_DELAY_MS = 1500;
+// Lowered from 10000, then 6000, then 4000, then 1500 - still reported as too slow to start each
+// time. Just enough to skip mounting a WebView for a screen the viewer is only passing through.
+const TRAILER_DELAY_MS = 400;
 // See playEpisode's own comment - a floor under how quickly the resolving spinner can disappear
 // again, so a cached/instant fetch still leaves it on screen long enough to actually be seen.
 const MIN_RESOLVE_MS = 450;

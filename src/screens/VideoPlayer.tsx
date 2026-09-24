@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, ActivityIndicator, StyleSheet, NativeEventEmitter, NativeModules, findNodeHandle, Animated } from "react-native";
+import { View, Text, ActivityIndicator, StyleSheet, NativeEventEmitter, NativeModules, findNodeHandle, Animated, ToastAndroid } from "react-native";
 import { WebView } from "react-native-webview";
 import LinearGradient from "react-native-linear-gradient";
 import Video, { BufferingStrategyType, OnLoadData, OnProgressData, VideoRef } from "react-native-video";
@@ -7,7 +7,7 @@ import { Play, Pause, ShieldAlert, Subtitles, Settings, ChevronLeft, ChevronRigh
 import EpisodeRow from "../components/EpisodeRow";
 import type { Movie, Season, Episode, StreamServer } from "../api";
 import { posterUrl, youtubeVideoId, youtubeEmbedUrl } from "../api";
-import { qualityRank, qualityLabel } from "../quality";
+import { qualityRank, qualityLabel, canDecode4K } from "../quality";
 import Focusable from "../components/Focusable";
 import LogoImage from "../components/LogoImage";
 import { font, colors, radius } from "../theme";
@@ -153,17 +153,31 @@ export default function VideoPlayerScreen({
   // instead of showing as separate, confusingly identical-looking options. Only one entry means
   // nothing to actually pick between, so the quality button itself stays hidden in that case (see
   // its own render site below).
+  // False only once the device has confirmed it has no hardware 4K decoder (see canDecode4K).
+  const [can4K, setCan4K] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    canDecode4K().then((ok) => {
+      if (!cancelled) setCan4K(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const qualityOptions = React.useMemo(() => {
     const seen = new Set<string>();
     const options: { serverIndex: number; label: string; rank: number }[] = [];
     servers.forEach((server, index) => {
       const label = qualityLabel(server.quality, lang);
       if (seen.has(label)) return;
+      // A device without a hardware 4K decoder plays 4K through a software one that can't keep
+      // up - reported as slow, choppy motion - so it isn't offered there at all.
+      if (!can4K && qualityRank(server.quality) >= 2160) return;
       seen.add(label);
       options.push({ serverIndex: index, label, rank: qualityRank(server.quality) });
     });
     return options.sort((a, b) => b.rank - a.rank);
-  }, [servers, lang]);
+  }, [servers, lang, can4K]);
   // Admin-entered per explicit request: a stream URL that's a YouTube link (rather than a direct
   // video file) plays through YouTube's own official embeddable player instead of react-native-
   // video, which has no way to play a YouTube page at all. See the YouTube-branch return below
@@ -199,6 +213,21 @@ export default function VideoPlayerScreen({
     midstreamRetryCountRef.current = 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playingKey]);
+  // Steps a 4K pick (the saved preferred quality, or the error fallback walking the list) down to
+  // the best quality this device can actually decode in hardware - see qualityOptions above. Stays
+  // on 4K only when nothing else is on offer at all.
+  const currentIs4K = qualityRank(servers[serverIndex]?.quality ?? "") >= 2160;
+  useEffect(() => {
+    if (can4K || !currentIs4K) return;
+    const fallback = qualityOptions[0];
+    if (!fallback) return;
+    setServerIndex(fallback.serverIndex);
+    ToastAndroid.show(
+      lang === "ar" ? `جهازك لا يدعم تشغيل 4K بسلاسة - تم التشغيل بدقة ${fallback.label}` : `This device can't play 4K smoothly - playing ${fallback.label} instead`,
+      ToastAndroid.LONG
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [can4K, currentIs4K, qualityOptions]);
   const hasEpisodesList = !!episode && !!movie.seasons?.length;
   const hasEpisodesListRef = useRef(hasEpisodesList);
   useEffect(() => {
@@ -1780,8 +1809,10 @@ export default function VideoPlayerScreen({
         bufferConfig={{
           minBufferMs: 15000,
           maxBufferMs: 45000,
-          bufferForPlaybackMs: 2500,
-          bufferForPlaybackAfterRebufferMs: 7000,
+          // 4K moves several times the data per second of 1080p - a bigger cushion before starting
+          // and after a stall keeps a brief throughput dip from turning into stutter.
+          bufferForPlaybackMs: currentIs4K ? 6000 : 2500,
+          bufferForPlaybackAfterRebufferMs: currentIs4K ? 12000 : 7000,
           maxHeapAllocationPercent: 0.45,
         }}
         // Was 1000 (once a second) - re-rendering the whole screen (seek bar, header,
@@ -2959,8 +2990,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     paddingHorizontal: s(10),
     paddingVertical: s(4),
-    borderRadius: 6,
-    overflow: "hidden",
+    // Square corners on the background box (was borderRadius 6), per request.
     textShadowColor: "rgba(0,0,0,0.9)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,

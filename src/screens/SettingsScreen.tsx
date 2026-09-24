@@ -220,7 +220,9 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
                     },
                   ]}
                 >
-                  {t("subtitlePreview", lang)}
+                  {/* Follows the chosen subtitle language, not the app's own UI language - picking
+                      English should show what an English subtitle actually looks like. */}
+                  {t("subtitlePreview", subtitleSettings.language ?? "ar")}
                 </Text>
               </View>
             </View>
@@ -882,7 +884,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  previewText: { textAlign: "center", paddingHorizontal: s(10), paddingVertical: s(4), borderRadius: 6, overflow: "hidden" },
+  // Square corners (was borderRadius 6) - same as the player's own subtitleText, per request.
+  previewText: { textAlign: "center", paddingHorizontal: s(10), paddingVertical: s(4) },
   // Each settings group now reads as its own card (subtle fill + hairline border) instead of
   // floating options directly on the black background - grouping via a bounded surface rather
   // than spacing alone is what makes a settings screen read as "designed" vs "a stack of rows".
@@ -1011,6 +1014,6 @@ const styles = StyleSheet.create({
   versionValueFocused: { color: "#000" },
   versionNotes: { color: colors.textFaint, fontSize: fs(11), fontFamily: font.semiBold, marginTop: s(4) },
   progressTrack: { height: s(4), borderRadius: 2, backgroundColor: "rgba(255,255,255,0.15)", marginTop: s(8), overflow: "hidden" },
-  progressFill: { height: "100%", borderRadius: 2, backgroundColor: "#4ade80" },
+  progressFill: { height: "100%", borderRadius: 2, backgroundColor: colors.accentRed },
   uiScaleNote: { color: colors.textFaint, fontSize: fs(11), fontFamily: font.semiBold, marginTop: -s(8), marginBottom: s(16) },
 });
