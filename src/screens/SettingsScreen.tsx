@@ -214,7 +214,7 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
             <View style={styles.previewBox}>
               <Text style={styles.previewLabel}>{t("subtitlePreview", lang)}</Text>
               <View style={styles.previewFrame}>
-                <Image source={SUBTITLE_PREVIEW_IMAGE} style={StyleSheet.absoluteFill} resizeMode="cover" fadeDuration={0} />
+                <Image source={SUBTITLE_PREVIEW_IMAGE} style={styles.previewImage} resizeMode="cover" fadeDuration={0} />
                 <Text
                   style={[
                     styles.previewText,
@@ -902,16 +902,19 @@ const styles = StyleSheet.create({
   previewLabel: { color: colors.textMuted, fontSize: fs(12), fontFamily: font.bold, marginBottom: s(12) },
   // Taller (was s(84)) now that it shows a real still, with the line near the bottom the way the
   // player places subtitles.
+  // A small strip again (the full-height picture was too big), showing only the image's bottom
+  // part - previewImage is sized to the whole picture and pinned to the bottom, so the rest is
+  // clipped off the top by overflow:hidden.
   previewFrame: {
-    width: "100%",
-    aspectRatio: 960 / 450,
+    height: s(100),
     borderRadius: s(10),
     backgroundColor: "#000",
     alignItems: "center",
     justifyContent: "flex-end",
-    paddingBottom: s(16),
+    paddingBottom: s(12),
     overflow: "hidden",
   },
+  previewImage: { position: "absolute", left: 0, right: 0, bottom: 0, width: "100%", aspectRatio: 960 / 450 },
   // Square corners (was borderRadius 6) - same as the player's own subtitleText, per request.
   previewText: { textAlign: "center", paddingHorizontal: s(10), paddingVertical: s(4) },
   // Each settings group now reads as its own card (subtle fill + hairline border) instead of
