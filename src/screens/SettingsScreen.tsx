@@ -51,7 +51,7 @@ interface Props {
 function useHandleGroup<K extends string>(keys: readonly K[]) {
   const nodes = useRef<Partial<Record<K, View | null>>>({});
   const [, setBump] = useState(0);
-  const triggeredRef = useRef(false);
+  const triggeredForRef = useRef<View | null>(null);
 
   const setRefFns = useRef<Partial<Record<K, (node: View | null) => void>> | null>(null);
   if (setRefFns.current === null) {
@@ -59,17 +59,16 @@ function useHandleGroup<K extends string>(keys: readonly K[]) {
     keys.forEach((key, i) => {
       fns[key] = (node: View | null) => {
         nodes.current[key] = node;
-        if (i !== keys.length - 1) return;
-        if (node && !triggeredRef.current) {
-          triggeredRef.current = true;
+        // One extra render whenever the group's last view is a *new* view - first mount, or a
+        // remount (switching between the System and Subtitles tabs rebuilds each tab's rows from
+        // scratch), so every nextFocus* picks up the new views' handles instead of pointing at
+        // gone ones (reported as DOWN from UI size jumping left instead of reaching the update
+        // row). Keyed on the view itself, never on a detach: an inline ref callback (the color
+        // swatches) is detached and re-attached to the *same* view on every render, and re-arming
+        // on that detach looped forever ("Maximum update depth exceeded", the subtitle tab crash).
+        if (i === keys.length - 1 && node && node !== triggeredForRef.current) {
+          triggeredForRef.current = node;
           setBump((b) => b + 1);
-        } else if (!node) {
-          // The group unmounted (switching between the System and Subtitles tabs rebuilds each
-          // tab's rows from scratch). Re-arm, so the remount forces another render with the new
-          // views' handles - otherwise every nextFocus* kept pointing at the old, gone views and
-          // Android fell back to its own guess (reported as DOWN from UI size jumping left
-          // instead of reaching the update row).
-          triggeredRef.current = false;
         }
       };
     });

@@ -18,7 +18,7 @@ import { View, findNodeHandle } from "react-native";
 export function useFocusClamp(count: number) {
   const itemRefs = useRef<Array<View | null>>([]);
   const [, setBump] = useState(0);
-  const triggeredRef = useRef(false);
+  const triggeredForRef = useRef<View | null>(null);
   // count can change across renders (a filtered/paginated row growing or shrinking) - captured in
   // a ref rather than a plain closure variable so the memoized api object below (built once, see
   // apiRef) can still read whatever the *current* count is instead of freezing the value it
@@ -28,17 +28,16 @@ export function useFocusClamp(count: number) {
 
   const setRefFns = useRef<Array<(node: View | null) => void> | null>(null);
   if (setRefFns.current === null || setRefFns.current.length !== count) {
-    triggeredRef.current = false;
+    triggeredForRef.current = null;
     setRefFns.current = Array.from({ length: count }, (_, i) => (node: View | null) => {
       itemRefs.current[i] = node;
-      if (i !== count - 1) return;
-      if (node && !triggeredRef.current) {
-        triggeredRef.current = true;
+      // One extra render whenever the row's last item is a *new* view (first mount, or a remount
+      // such as a Settings tab switch), so the handles point at live views. Keyed on the view,
+      // never on a detach: an inline ref callback is detached and re-attached to the same view on
+      // every render, and re-arming on that looped forever ("Maximum update depth exceeded").
+      if (i === count - 1 && node && node !== triggeredForRef.current) {
+        triggeredForRef.current = node;
         setBump((b) => b + 1);
-      } else if (!node) {
-        // The row unmounted (e.g. a Settings tab switch) - re-arm so its remount re-renders with
-        // the new views' handles instead of keeping ones pointing at views that no longer exist.
-        triggeredRef.current = false;
       }
     });
   }

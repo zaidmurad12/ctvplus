@@ -7,26 +7,51 @@ import { qualityRank } from "./quality";
 // reachability probe confirms are actually up. An unreachable 1080p server no longer wins over a
 // working 720p one just because of list order.
 
-const PROBE_TIMEOUT_MS = 4000;
+const PROBE_TIMEOUT_MS = 3000;
 
-/** A cheap reachability + rough-latency check - a 2-byte ranged GET, not a real download. */
-async function probeServer(server: StreamServer): Promise<{ server: StreamServer; latencyMs: number } | null> {
-  const startedAt = Date.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
-  try {
-    const res = await fetch(server.url, {
-      method: "GET",
-      headers: { Range: "bytes=0-1" },
-      signal: controller.signal,
-    });
-    if (!res.ok) return null;
-    return { server, latencyMs: Date.now() - startedAt };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
+/**
+ * A cheap reachability + rough-latency check: asks for 2 bytes and gives up the moment the server
+ * answers with its status line and headers - it never reads a body.
+ *
+ * This used to be a plain fetch(), which in React Native doesn't resolve until the *whole* response
+ * body has arrived - and plenty of video hosts ignore the Range header and answer 200 with the entire
+ * file. So every probe was really downloading the movie itself (one per quality, 4K included, all at
+ * once) until the timeout cut it off: playback couldn't start before that, and those downloads then
+ * competed with the real stream for bandwidth and memory - reported as slow starts, stutter right
+ * after starting, and sudden exits.
+ */
+function probeServer(server: StreamServer): Promise<{ server: StreamServer; latencyMs: number } | null> {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+    const finish = (result: { server: StreamServer; latencyMs: number } | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        xhr.abort();
+      } catch {
+        // Already finished/aborted - nothing to cancel.
+      }
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(null), PROBE_TIMEOUT_MS);
+    xhr.onreadystatechange = () => {
+      // HEADERS_RECEIVED (2) or later: the status is known - stop before any body is read.
+      if (xhr.readyState < 2) return;
+      const ok = xhr.status >= 200 && xhr.status < 400;
+      finish(ok ? { server, latencyMs: Date.now() - startedAt } : null);
+    };
+    xhr.onerror = () => finish(null);
+    try {
+      xhr.open("GET", server.url);
+      xhr.setRequestHeader("Range", "bytes=0-1");
+      xhr.send();
+    } catch {
+      finish(null);
+    }
+  });
 }
 
 /**
