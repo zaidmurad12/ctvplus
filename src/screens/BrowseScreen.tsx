@@ -18,7 +18,7 @@ import { fetchMoviesPage } from "../api";
 import MovieCard from "../components/MovieCard";
 import { GRID_START, NUM_COLUMNS, CARD_WIDTH_FILL } from "../gridLayout";
 import Focusable from "../components/Focusable";
-import { colors, font } from "../theme";
+import { colors, font, SIDEBAR_LOGO } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, languageName, genreName } from "../i18n";
 import { useSidebarHomeHandle } from "../focusRefs";
@@ -84,6 +84,8 @@ const ROW_SETTLE_MS = 300;
 // this screen; this only caps how many get mounted *in one go*, growing the same way pagination
 // already does as the viewer scrolls further).
 const INITIAL_ROWS = 24;
+// How much a pressed filter stepper's value + chevrons grow (see FilterStepperView).
+const ACTIVATED_SCALE = 1.35;
 const ROWS_PER_BATCH = 24;
 
 // See VideoPlayer.tsx's own identical helper (word-for-word, not shared only because the two
@@ -865,6 +867,12 @@ function FilterStepperView({
     }
     wasActivated.current = isActivated;
   }, [isActivated, upBounce, downBounce]);
+  // Only the pressed (activated) stepper's value + chevrons grow, per request - scaled rather than
+  // re-laid-out, so the header row and the grid under it never shift when it happens.
+  const grow = useRef(new Animated.Value(isActivated ? ACTIVATED_SCALE : 1)).current;
+  useEffect(() => {
+    Animated.spring(grow, { toValue: isActivated ? ACTIVATED_SCALE : 1, useNativeDriver: true, speed: 20, bounciness: 6 }).start();
+  }, [isActivated, grow]);
 
   const tint = isActive ? "#fff" : colors.textMuted;
 
@@ -873,31 +881,39 @@ function FilterStepperView({
       <Text style={styles.stepperCategoryLabel}>{label}</Text>
       {/* No background/border at all, in either state - per explicit request, focus reads purely
           through the value/chevrons turning white (they're gray otherwise), not a filled pill. */}
-      <View style={styles.stepperValueRow}>
+      <Animated.View style={[styles.stepperValueRow, { transform: [{ scale: grow }] }]}>
         <Animated.View style={{ transform: [{ translateY: upBounce.interpolate({ inputRange: [0, 1], outputRange: [0, -s(4)] }) }] }}>
-          <ChevronUp size={s(15)} color={tint} strokeWidth={2.5} />
+          <ChevronUp size={s(12)} color={tint} strokeWidth={2.5} />
         </Animated.View>
         <Text numberOfLines={1} style={[styles.stepperValue, isActive && styles.stepperValueFocused]}>
           {value}
         </Text>
         <Animated.View style={{ transform: [{ translateY: downBounce.interpolate({ inputRange: [0, 1], outputRange: [0, s(4)] }) }] }}>
-          <ChevronDown size={s(15)} color={tint} strokeWidth={2.5} />
+          <ChevronDown size={s(12)} color={tint} strokeWidth={2.5} />
         </Animated.View>
-      </View>
+      </Animated.View>
     </View>
   );
 }
 
+// Tall enough for a filter stepper (chevron, value, chevron) at rest.
+const HEADER_H = s(64);
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg, paddingLeft: GRID_START },
-  // Sits directly at the top of the page now - see this screen's own top comment on why the
-  // banner that used to live above it (with its own paddingTop pushing this row down under it)
-  // is gone. Lowered again to 30 (was 44, briefly 26, then back to 44) - per explicit follow-up
-  // request to raise this and the filter row to the sidebar's own logo level instead of lowering
-  // the logo any further (see Sidebar.tsx's own `top`) - applied identically to Library/Search/
-  // Settings too (see their own root/content padding) so all four sidebar-adjacent screens stay
-  // at the same level as each other, not just as the logo.
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: s(24), paddingTop: s(30), paddingRight: s(32), zIndex: 20 },
+  // A fixed-height row centered on the sidebar logo's own vertical center (was paddingTop s(30),
+  // which sat it a little below the logo), with a smaller gap under it (was s(24)) so the grid
+  // starts higher, per request.
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    height: HEADER_H,
+    marginTop: s(SIDEBAR_LOGO.top) + SIDEBAR_LOGO.height / 2 - HEADER_H / 2,
+    marginBottom: s(10),
+    paddingRight: s(32),
+    zIndex: 20,
+  },
   titleRow: { flexDirection: "row", alignItems: "center", gap: s(10) },
   titleBar: { width: s(5), height: s(20), borderRadius: 3, backgroundColor: "#fff" },
   title: { color: "#fff", fontSize: fs(18), fontFamily: font.bold },
@@ -908,8 +924,8 @@ const styles = StyleSheet.create({
   // applied per stepper purely from JS state (isActive/isActivated), not from each one owning its
   // own real focus.
   stepperRow: { flexDirection: "row", alignItems: "center", gap: s(8) },
-  // Enlarged (was fs(12)/fs(13), chevrons s(12)) - hard to read from across the room, per request.
-  stepperCategoryLabel: { color: colors.textMuted, fontSize: fs(15), fontFamily: font.bold },
+  // fs(13)/fs(14) at rest - the pressed stepper grows by ACTIVATED_SCALE (see FilterStepperView).
+  stepperCategoryLabel: { color: colors.textMuted, fontSize: fs(13), fontFamily: font.bold },
   // No flexDirection (defaults to column) - chevron above, value, chevron below, matching the
   // video player's own season indicator shape.
   stepperValueRow: {
@@ -921,7 +937,7 @@ const styles = StyleSheet.create({
   },
   // Gray by default, white on focus - the only focus indicator now (see FilterBar's own comment
   // on why there's no background/border at all here anymore).
-  stepperValue: { color: colors.textMuted, fontSize: fs(17), fontFamily: font.bold, textAlign: "center" },
+  stepperValue: { color: colors.textMuted, fontSize: fs(14), fontFamily: font.bold, textAlign: "center" },
   stepperValueFocused: { color: "#fff" },
   emptyText: { color: colors.textFaint, fontSize: fs(14), fontFamily: font.semiBold, marginTop: s(40) },
   loadingFooter: { marginVertical: s(24) },

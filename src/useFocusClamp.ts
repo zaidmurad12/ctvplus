@@ -31,9 +31,14 @@ export function useFocusClamp(count: number) {
     triggeredRef.current = false;
     setRefFns.current = Array.from({ length: count }, (_, i) => (node: View | null) => {
       itemRefs.current[i] = node;
-      if (i === count - 1 && node && !triggeredRef.current) {
+      if (i !== count - 1) return;
+      if (node && !triggeredRef.current) {
         triggeredRef.current = true;
         setBump((b) => b + 1);
+      } else if (!node) {
+        // The row unmounted (e.g. a Settings tab switch) - re-arm so its remount re-renders with
+        // the new views' handles instead of keeping ones pointing at views that no longer exist.
+        triggeredRef.current = false;
       }
     });
   }

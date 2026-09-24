@@ -59,9 +59,17 @@ function useHandleGroup<K extends string>(keys: readonly K[]) {
     keys.forEach((key, i) => {
       fns[key] = (node: View | null) => {
         nodes.current[key] = node;
-        if (i === keys.length - 1 && node && !triggeredRef.current) {
+        if (i !== keys.length - 1) return;
+        if (node && !triggeredRef.current) {
           triggeredRef.current = true;
           setBump((b) => b + 1);
+        } else if (!node) {
+          // The group unmounted (switching between the System and Subtitles tabs rebuilds each
+          // tab's rows from scratch). Re-arm, so the remount forces another render with the new
+          // views' handles - otherwise every nextFocus* kept pointing at the old, gone views and
+          // Android fell back to its own guess (reported as DOWN from UI size jumping left
+          // instead of reaching the update row).
+          triggeredRef.current = false;
         }
       };
     });
