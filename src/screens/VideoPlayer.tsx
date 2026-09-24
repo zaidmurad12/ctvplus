@@ -705,6 +705,7 @@ export default function VideoPlayerScreen({
     return () => {
       cancelled = true;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately keyed on this one field
   }, [subtitleTrack?.url]);
 
   useEffect(() => {
@@ -915,6 +916,7 @@ export default function VideoPlayerScreen({
       wake();
     }, 150);
     return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately keyed on this one field
   }, [loading]);
 
   // Holding rewind/forward repeats a seek every HOLD_SEEK_INTERVAL_MS for as long as it's held -
@@ -1060,6 +1062,7 @@ export default function VideoPlayerScreen({
       pendingSeekTargetRef.current = null;
       setHoldSeekPreview(null);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately keyed on this one field
   }, [progress?.currentTime]);
   // Same reconciliation as above, for YouTube's own polled ytCurrentTime instead of
   // react-native-video's onProgress - see startHoldSeek's own comment on why this branch turned
@@ -1393,6 +1396,9 @@ export default function VideoPlayerScreen({
           }}
           onError={() => setUnavailable(true)}
           onHttpError={() => setUnavailable(true)}
+          // Android kills the WebView's renderer process under memory pressure (common on TV
+          // boxes); without this the dead WebView just sat there as a frozen black screen.
+          onRenderProcessGone={() => setUnavailable(true)}
         />
         {loading && (
           <View style={styles.youtubeLoadingOverlay} pointerEvents="none">
@@ -3050,8 +3056,8 @@ const styles = StyleSheet.create({
   headerLeft: { flex: 1 },
   headerRight: { alignItems: "flex-end", gap: s(6), maxWidth: "60%" },
   playerLogo: { marginBottom: s(4) },
-  // Stands in for a missing title logo (s(50) tall) - enlarged from fs(18), per request.
-  title: { color: "#fff", fontSize: fs(26), fontFamily: font.extraBold },
+  // Stands in for a missing title logo (s(50) tall) - enlarged from fs(18), then fs(26), per request.
+  title: { color: "#fff", fontSize: fs(30), fontFamily: font.extraBold },
   metaText: { color: "#d4d4d8", fontSize: fs(13), fontFamily: font.semiBold, textAlign: "right" },
   // More items land in this one line now (age rating, year, country, language, genres,
   // quality, rating) - wraps rather than overflowing the screen edge or squeezing the title

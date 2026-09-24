@@ -552,6 +552,9 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
               scrollEnabled={false}
               onError={() => setShowTrailer(false)}
               onHttpError={() => setShowTrailer(false)}
+              // The renderer process dying (memory pressure on TV boxes) left a frozen black box
+              // over the backdrop - fall back to the plain backdrop instead.
+              onRenderProcessGone={() => setShowTrailer(false)}
               onMessage={(e) => {
                 const msg = e.nativeEvent.data;
                 if (msg === "playing") {
@@ -1224,9 +1227,9 @@ const styles = StyleSheet.create({
     gap: s(8),
   },
   titleLogo: { marginBottom: s(2) },
-  // Stands in for a missing title logo - enlarged (was fs(28)) to hold its own against the s(95)
+  // Stands in for a missing title logo - enlarged (was fs(28), then fs(38)) to hold its own against the s(95)
   // logo it replaces, per request.
-  title: { color: "#fff", fontSize: fs(38), fontFamily: font.black, maxWidth: s(560) },
+  title: { color: "#fff", fontSize: fs(44), fontFamily: font.black, maxWidth: s(600) },
   metaRow: { flexDirection: "row", gap: s(12), flexWrap: "wrap", alignItems: "center" },
   ageBadge: { borderWidth: 1.5, borderColor: "rgba(255,255,255,0.5)", borderRadius: 4, paddingHorizontal: s(6), paddingVertical: s(1) },
   ageBadgeText: { color: "#fff", fontSize: fs(11), fontFamily: font.black },

@@ -2,6 +2,7 @@ import React, { useRef } from "react";
 import { View, Text, ScrollView, StyleSheet } from "react-native";
 import type { Movie } from "../api";
 import MovieCard from "../components/MovieCard";
+import { CARD_WIDTH_FILL } from "../gridLayout";
 import { colors, font, spacing, SIDEBAR_LOGO } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, t } from "../i18n";
@@ -92,7 +93,7 @@ function Rail({
         <View style={styles.railClip}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railContent}>
             {items.map((movie) => (
-              <MovieCard key={movie.id} movie={movie} lang={lang} onSelect={onSelect} onFocusChange={(f) => f && onFocusChange()} large />
+              <MovieCard key={movie.id} movie={movie} lang={lang} onSelect={onSelect} onFocusChange={(f) => f && onFocusChange()} width={CARD_WIDTH_FILL} />
             ))}
           </ScrollView>
         </View>

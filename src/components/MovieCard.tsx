@@ -12,7 +12,8 @@ const CARD_WIDTH = s(128);
 // Card width + its own horizontal margins - grids that need to know how many columns fit a
 // given row width (BrowseScreen, SearchScreen) import this instead of guessing/duplicating it.
 export const CARD_TOTAL_WIDTH = CARD_WIDTH + s(16);
-// A slightly bigger card for the full-page grids (Movies/Series, Library) - see the `large` prop.
+// The smallest card the full-page grids (Movies/Series, Library) use - see gridLayout.ts, which
+// widens it further to fill each row exactly and passes the result in as `width`.
 const CARD_WIDTH_LARGE = s(148);
 export const CARD_TOTAL_WIDTH_LARGE = CARD_WIDTH_LARGE + s(16);
 
@@ -29,20 +30,18 @@ interface Props {
   // so every other call site (grids, single cards) is unaffected.
   showImage?: boolean;
   hasTVPreferredFocus?: boolean;
-  large?: boolean;
-  // Exact card width, overriding card/large - lets a grid size its cards to fill a row exactly
-  // (see BrowseScreen's CARD_WIDTH_FILL) instead of leaving the leftover width empty at the end.
+  // Exact card width - lets a grid size its cards to fill a row exactly (see gridLayout.ts)
+  // instead of leaving the leftover width empty at the end. These bigger cards also get bigger
+  // title/meta text, so the text doesn't look undersized next to the poster.
   width?: number;
 }
 
 const MovieCard = React.forwardRef<View, Props>(function MovieCard(
-  { movie, lang = "ar", onSelect, onFocusChange, nextFocusLeft, nextFocusRight, nextFocusUp, showImage = true, hasTVPreferredFocus, large, width },
+  { movie, lang = "ar", onSelect, onFocusChange, nextFocusLeft, nextFocusRight, nextFocusUp, showImage = true, hasTVPreferredFocus, width },
   ref
 ) {
-  const cardStyle = useMemo(
-    () => (width ? [styles.card, { width }] : large ? styles.cardLarge : styles.card),
-    [width, large]
-  );
+  const cardStyle = useMemo(() => (width ? [styles.card, { width }] : styles.card), [width]);
+  const big = !!width;
   return (
     <Focusable
       ref={ref}
@@ -79,16 +78,16 @@ const MovieCard = React.forwardRef<View, Props>(function MovieCard(
               )}
             </View>
           </View>
-          <Text numberOfLines={1} style={[styles.title, focused && styles.titleFocused]}>
+          <Text numberOfLines={1} style={[styles.title, big && styles.titleBig, focused && styles.titleFocused]}>
             {pickText(movie.titleAr, movie.titleEn, lang)}
           </Text>
           <View style={styles.metaRow}>
             <View style={styles.imdbBadge}>
-              <Text style={styles.imdbBadgeText}>IMDb</Text>
+              <Text style={[styles.imdbBadgeText, big && styles.imdbBadgeTextBig]}>IMDb</Text>
             </View>
-            <Text style={styles.rating}>{movie.rating}</Text>
-            <Text style={styles.dot}>•</Text>
-            <Text style={styles.year}>{movie.year}</Text>
+            <Text style={[styles.rating, big && styles.metaBig]}>{movie.rating}</Text>
+            <Text style={[styles.dot, big && styles.metaBig]}>•</Text>
+            <Text style={[styles.year, big && styles.metaBig]}>{movie.year}</Text>
           </View>
         </>
       )}
@@ -105,7 +104,6 @@ const styles = StyleSheet.create({
   // the way CSS block margins do, so the *visible gap between* cards is unchanged (8+8=16,
   // same as the old marginRight: 16) - only the outer edges gained breathing room.
   card: { width: CARD_WIDTH, marginHorizontal: s(8) },
-  cardLarge: { width: CARD_WIDTH_LARGE, marginHorizontal: s(8) },
   posterFrame: {
     width: "100%",
     aspectRatio: 2 / 3,
@@ -145,10 +143,13 @@ const styles = StyleSheet.create({
   partBadgeText: { color: "#fff", fontSize: fs(12), fontFamily: font.black, letterSpacing: 0.2 },
   title: { color: colors.textSecondary, fontSize: fs(13), fontFamily: font.semiBold, marginTop: s(8) },
   titleFocused: { color: "#fff" },
+  titleBig: { fontSize: fs(16) },
+  metaBig: { fontSize: fs(13) },
   metaRow: { flexDirection: "row", gap: s(6), marginTop: s(4), alignItems: "center" },
   // paddingVertical: 1 previously made this read as tall/bulky relative to its own text.
   imdbBadge: { backgroundColor: colors.imdbYellow, borderRadius: 3, paddingHorizontal: s(4), paddingVertical: 0 },
   imdbBadgeText: { color: "#000", fontSize: fs(8), fontFamily: font.black, letterSpacing: 0.2, lineHeight: fs(11) },
+  imdbBadgeTextBig: { fontSize: fs(10), lineHeight: fs(13) },
   rating: { color: "#fff", fontSize: fs(11), fontFamily: font.black },
   dot: { color: colors.border, fontSize: fs(11) },
   year: { color: colors.textMuted, fontSize: fs(11), fontFamily: font.bold },

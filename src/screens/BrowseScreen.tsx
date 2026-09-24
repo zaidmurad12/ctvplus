@@ -7,7 +7,6 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   ActivityIndicator,
-  Dimensions,
   NativeEventEmitter,
   NativeModules,
   StyleSheet,
@@ -16,7 +15,8 @@ import {
 import { ChevronUp, ChevronDown } from "lucide-react-native";
 import type { Movie } from "../api";
 import { fetchMoviesPage } from "../api";
-import MovieCard, { CARD_TOTAL_WIDTH_LARGE } from "../components/MovieCard";
+import MovieCard from "../components/MovieCard";
+import { GRID_START, NUM_COLUMNS, CARD_WIDTH_FILL } from "../gridLayout";
 import Focusable from "../components/Focusable";
 import { colors, font } from "../theme";
 import { s, fs } from "../scale";
@@ -24,22 +24,7 @@ import { Lang, languageName, genreName } from "../i18n";
 import { useSidebarHomeHandle } from "../focusRefs";
 import { loadJson, saveJson, storageKeys } from "../storage";
 
-// Past the sidebar's own 88px column. Was s(176) (extra clearance for a card focus-scale that
-// crept under the sidebar) - reported as sitting too far from the sidebar; cards no longer scale
-// on focus (see MovieCard), so that clearance isn't needed.
-const GRID_START = s(120);
-const GRID_END_PADDING = s(24);
 const ROW_GAP = s(30);
-// A fixed column count left a wide dead strip on the right on any screen wider than that
-// assumed - filling the actual row width, whatever it is, is what makes the grid reach the
-// edge of the screen instead of stopping partway across.
-const GRID_ROW_WIDTH = Dimensions.get("window").width - GRID_START - GRID_END_PADDING;
-const NUM_COLUMNS = Math.max(4, Math.floor(GRID_ROW_WIDTH / CARD_TOTAL_WIDTH_LARGE));
-// Rounding the column count down left up to almost a whole card's width empty at the end of
-// every row (reported as a big gap on the right, varying with screen and UI size). The cards now
-// share that leftover instead: each is widened just enough that the row ends exactly at the edge.
-// s(16) is the card's own horizontal margins (MovieCard's s(8) each side).
-const CARD_WIDTH_FILL = Math.floor(GRID_ROW_WIDTH / NUM_COLUMNS) - s(16);
 
 type SortKey = "newest" | "rating" | "views";
 // The backend's own sort enum (queryHelpers.ts's SORT_FIELD) doesn't share this screen's own
@@ -890,13 +875,13 @@ function FilterStepperView({
           through the value/chevrons turning white (they're gray otherwise), not a filled pill. */}
       <View style={styles.stepperValueRow}>
         <Animated.View style={{ transform: [{ translateY: upBounce.interpolate({ inputRange: [0, 1], outputRange: [0, -s(4)] }) }] }}>
-          <ChevronUp size={s(12)} color={tint} strokeWidth={2.5} />
+          <ChevronUp size={s(15)} color={tint} strokeWidth={2.5} />
         </Animated.View>
         <Text numberOfLines={1} style={[styles.stepperValue, isActive && styles.stepperValueFocused]}>
           {value}
         </Text>
         <Animated.View style={{ transform: [{ translateY: downBounce.interpolate({ inputRange: [0, 1], outputRange: [0, s(4)] }) }] }}>
-          <ChevronDown size={s(12)} color={tint} strokeWidth={2.5} />
+          <ChevronDown size={s(15)} color={tint} strokeWidth={2.5} />
         </Animated.View>
       </View>
     </View>
@@ -923,7 +908,8 @@ const styles = StyleSheet.create({
   // applied per stepper purely from JS state (isActive/isActivated), not from each one owning its
   // own real focus.
   stepperRow: { flexDirection: "row", alignItems: "center", gap: s(8) },
-  stepperCategoryLabel: { color: colors.textMuted, fontSize: fs(12), fontFamily: font.bold },
+  // Enlarged (was fs(12)/fs(13), chevrons s(12)) - hard to read from across the room, per request.
+  stepperCategoryLabel: { color: colors.textMuted, fontSize: fs(15), fontFamily: font.bold },
   // No flexDirection (defaults to column) - chevron above, value, chevron below, matching the
   // video player's own season indicator shape.
   stepperValueRow: {
@@ -935,7 +921,7 @@ const styles = StyleSheet.create({
   },
   // Gray by default, white on focus - the only focus indicator now (see FilterBar's own comment
   // on why there's no background/border at all here anymore).
-  stepperValue: { color: colors.textMuted, fontSize: fs(13), fontFamily: font.bold, textAlign: "center" },
+  stepperValue: { color: colors.textMuted, fontSize: fs(17), fontFamily: font.bold, textAlign: "center" },
   stepperValueFocused: { color: "#fff" },
   emptyText: { color: colors.textFaint, fontSize: fs(14), fontFamily: font.semiBold, marginTop: s(40) },
   loadingFooter: { marginVertical: s(24) },

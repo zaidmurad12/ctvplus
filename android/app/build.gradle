@@ -86,8 +86,8 @@ android {
         // same-versionCode APK as "nothing to update" and silently keep the old app installed,
         // which was indistinguishable from "the fix didn't work" from the outside. Bump this on
         // every release build going forward so a reinstall is unambiguous.
-        versionCode 135
-        versionName "1.22.95-sub-preview"
+        versionCode 136
+        versionName "1.22.96-stability"
     }
     signingConfigs {
         debug {
