@@ -111,18 +111,42 @@ export default function App() {
   // Home/Sidebar can quietly rebuild in the background, hidden, well ahead of when exiting would
   // otherwise need to build them from scratch.
   const [homeWarm, setHomeWarm] = useState(false);
+  // True for a short while right after a player exit. The screen revealed on exit is always the
+  // movie's details screen (still mounted underneath the player), but every hidden section
+  // (Sidebar/Home/Library/Settings) used to remount in that same commit - reported as exiting a
+  // movie still being slow. Holding them back until the details screen is already on screen moves
+  // that cost off the exit itself.
+  const [deferSections, setDeferSections] = useState(false);
+  const wasPlayingRef = useRef(false);
   useEffect(() => {
-    if (!playing) {
-      setHomeWarm(false);
+    if (playing) {
+      wasPlayingRef.current = true;
       return;
     }
+    if (!wasPlayingRef.current) return;
+    wasPlayingRef.current = false;
+    setDeferSections(true);
+    const timer = setTimeout(() => setDeferSections(false), 2500);
+    return () => clearTimeout(timer);
+  }, [playing]);
+  // Closing the details screen needs Home right away - no point holding it back any longer then.
+  useEffect(() => {
+    if (!selectedMovie) setDeferSections(false);
+  }, [selectedMovie]);
+  // Reset at the *start* of playback now, not at exit - resetting on exit unmounted a Home that had
+  // already been rebuilt in the background (while deferSections above held the remount back),
+  // throwing that work away right when it was about to pay off.
+  const isPlaying = !!playing;
+  useEffect(() => {
+    if (!isPlaying) return;
+    setHomeWarm(false);
     // Was 4000 - that landed Home's CPU-heavy remount right inside the stream's own startup
     // buffering, reported as playback starting slowly and stuttering in its first seconds. Late
     // enough now that the video is well past startup; an exit before it just falls back to the
     // normal remount (covered by handleExitPlayer's own transition).
     const timer = setTimeout(() => setHomeWarm(true), 20000);
     return () => clearTimeout(timer);
-  }, [playing]);
+  }, [isPlaying]);
   // Purely a delayed-appearance visual bridge for handleExitPlayer below - never shown outright
   // the instant the player exits.
   const [exitTransition, setExitTransition] = useState(false);
@@ -713,7 +737,7 @@ export default function App() {
               lightweight, per this same block's own original comment below, so excluding them
               from pre-warming costs nothing. */}
           <View style={[StyleSheet.absoluteFill, (selectedPerson || selectedMovie || selectedCategory || !!playing) && styles.sectionHidden]}>
-            {(!playing || homeWarm) && (
+            {((!playing && !deferSections) || homeWarm) && (
               <>
                 <Suspense fallback={null}>
                   <Sidebar active={section} onSelect={handleSelectSection} />
@@ -733,7 +757,7 @@ export default function App() {
                 </View>
               </>
             )}
-            {!playing && (
+            {!playing && !deferSections && (
               <>
                 {section === "movies" && (
                   <View style={StyleSheet.absoluteFill}>

@@ -113,6 +113,9 @@ interface MovieDetailDto extends MovieSummaryDto {
   streams: StreamDto[];
   subtitles: SubtitleDto[];
   trailerUrl?: string | null;
+  // TMDB original_title - for an Arabic-language movie this is its Arabic name (see
+  // calculateMatchScore), even when titleAr is empty.
+  originalTitle?: string | null;
 }
 
 interface SearchResultItemDto {
@@ -176,6 +179,7 @@ interface ShowDetailDto extends ShowSummaryDto {
   creator?: CastMemberDto | null;
   country?: string | null;
   seasons: SeasonSummaryDto[];
+  originalTitle?: string | null;
 }
 
 interface PersonCreditDto {
@@ -272,6 +276,10 @@ export function normalizeTitle(value?: string | null): string {
     .replace(/[إأآ]/g, "ا")
     .replace(/ى/g, "ي")
     .replace(/ة/g, "ه")
+    // Arabic-Indic (٠-٩) and Persian (۰-۹) digits as plain 0-9 - TMDB's "6 شهور" and a source's
+    // "٦ شهور" are the same title.
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
     .replace(/[^\p{L}\p{N}]+/gu, "")
     .trim();
 }
@@ -315,7 +323,12 @@ export function calculateMatchScore(tmdbMovie: Movie, cinemanaItem: CinemanaSear
   const cinemanaEnglish = normalizeTitle(cinemanaItem.en_title);
   const cinemanaArabic = normalizeTitle(cinemanaItem.ar_title);
   const englishExact = (!!tmdbEnglish && tmdbEnglish === cinemanaEnglish) || (!!tmdbOriginalEnglish && tmdbOriginalEnglish === cinemanaEnglish);
-  const arabicExact = !!tmdbArabic && tmdbArabic === cinemanaArabic;
+  // An Arabic-language work's TMDB *original* title is its Arabic name, and TMDB never lists a
+  // separate Arabic translation for it - so titleAr is often empty for exactly these works, which
+  // left them matching only on a transliterated English name no source uses. Sources also often
+  // put the Arabic name in en_title too.
+  const tmdbArabicOriginal = /[؀-ۿ]/.test(tmdbMovie.originalTitle ?? "") ? tmdbOriginalEnglish : "";
+  const arabicExact = [tmdbArabic, tmdbArabicOriginal].some((title) => !!title && (title === cinemanaArabic || title === cinemanaEnglish));
   const fuzzy = Math.max(
     titleSimilarity(tmdbEnglish, cinemanaEnglish),
     titleSimilarity(tmdbOriginalEnglish, cinemanaEnglish),
@@ -585,6 +598,9 @@ function mapDetail(m: MovieDetailDto): Movie {
     // found and stored it, was silently discarded before ever reaching this mapper.
     trailerUrl: m.trailerUrl ?? undefined,
     sourceLinks: m.sourceLinks,
+    // Was dropped here, so a movie was never searched for (or matched) by its original title -
+    // the only Arabic name on file for many Arabic-language movies.
+    originalTitle: m.originalTitle ?? undefined,
   };
 }
 
@@ -705,7 +721,7 @@ export async function fetchShowDetail(id: string, playback?: PlaybackMapping, pl
     const catalogShow = await apiGet<ShowDetailDto>(`/shows/${id}`);
     const pinned = catalogShow.data.sourceLinks?.length;
     if (pinned || !sources.length) {
-      const show = { ...mapShowSummary(catalogShow.data), sourceLinks: catalogShow.data.sourceLinks };
+      const show = { ...mapShowSummary(catalogShow.data), sourceLinks: catalogShow.data.sourceLinks, originalTitle: catalogShow.data.originalTitle ?? undefined };
       const matches = await Promise.all([findCinemanaMatch(show), findCeeMatch(show)]);
       sources = matches.filter((candidate): candidate is PlaybackMapping => !!candidate);
     }

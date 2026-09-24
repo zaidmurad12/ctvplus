@@ -136,6 +136,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // starting slowly and stuttering with the trailer's sound still audible.
   const trailerSuspended = playerActive || resolvingMovie || resolvingEpisodeId !== null;
   const trailerWebViewRef = useRef<any>(null);
+  const returnedFromPlayerRef = useRef(false);
   // Called synchronously from the play handlers, before any state update re-renders - silences
   // the embed's global YouTube `player` (see the backend's youtube-embed page) through the still-
   // mounted WebView, then unmounts it, so the sound stops the instant play is pressed even if the
@@ -216,10 +217,17 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     // A restart later (e.g. back from the player) must start covered again, not reveal a WebView
     // that hasn't painted a frame yet.
     setTrailerReady(false);
-    if (!trailerVideoId || trailerSuspended) return;
-    const timer = setTimeout(() => setShowTrailer(true), TRAILER_DELAY_MS);
+    if (!trailerVideoId || trailerSuspended) {
+      if (playerActive) returnedFromPlayerRef.current = true;
+      return;
+    }
+    // Coming back from the player, a WebView booting up right away competed with the exit itself
+    // (the player's own teardown, Home rebuilding in the background) - wait until that settles.
+    const delay = returnedFromPlayerRef.current ? 3000 : TRAILER_DELAY_MS;
+    returnedFromPlayerRef.current = false;
+    const timer = setTimeout(() => setShowTrailer(true), delay);
     return () => clearTimeout(timer);
-  }, [movie.id, trailerVideoId, trailerSuspended]);
+  }, [movie.id, trailerVideoId, trailerSuspended, playerActive]);
 
   // The old version pointed the iframe straight at youtube.com/embed's own autoplay params
   // and just trusted it worked - WebView's onError only ever catches the *outer* local HTML
