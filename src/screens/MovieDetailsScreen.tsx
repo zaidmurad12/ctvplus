@@ -206,6 +206,10 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // the embed's global YouTube `player` (see the backend's youtube-embed page) through the still-
   // mounted WebView, then unmounts it, so the sound stops the instant play is pressed even if the
   // trailer hadn't started yet.
+  const closingRef = useRef(false);
+  useEffect(() => {
+    closingRef.current = false;
+  }, [movie.id]);
   const stopTrailer = () => {
     trailerWebViewRef.current?.injectJavaScript("try{player.mute();player.stopVideo();}catch(e){}true;");
     setShowTrailer(false);
@@ -280,7 +284,17 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // on native listener registration order.
   useEffect(() => {
     return pushBackHandler(() => {
-      onBack();
+      // The trailer's WebView is torn down first, while this page is still showing, and the page
+      // closes a moment later - destroying a WebView mid-video in the same step as revealing Home
+      // held Home back.
+      if (closingRef.current) return true;
+      if (trailerWebViewRef.current) {
+        closingRef.current = true;
+        stopTrailer();
+        setTimeout(onBack, 120);
+      } else {
+        onBack();
+      }
       return true;
     }, "MovieDetailsScreen");
   }, [onBack]);
@@ -691,7 +705,12 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
               // "playing" confirms real video is actually decoding, so neither flash is ever seen.
               // Same 16:9 top-pinned box as the still image (styles.heroBackdrop) - filling the whole hero
               // instead made the picture visibly change size the moment the trailer started.
-              style={[styles.heroBackdrop, { backgroundColor: "#000" }]}
+              // Laid out at half size and scaled up 2x: the WebView's hardware layer (needed for
+              // its video to play at all on the test TV) is redrawn on every video frame, and at
+              // full screen size that made moving around this page heavy - films all have a
+              // trailer, series none, which is why series pages felt fast. The trailer streams at
+              // 360p anyway, so a half-resolution layer loses nothing visible.
+              style={styles.trailerWebView}
               allowsInlineMediaPlayback
               mediaPlaybackRequiresUserAction={false}
               javaScriptEnabled
@@ -1426,6 +1445,16 @@ const styles = StyleSheet.create({
   heroSeries: { height: HERO_HEIGHT_SERIES },
   posterSeries: { width: POSTER_W_SERIES, height: POSTER_H_SERIES },
   infoColSeries: { right: POSTER_W_SERIES + s(28) + s(48) },
+  trailerWebView: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: SCREEN_W / 2,
+    height: (SCREEN_W / 2) * (9 / 16),
+    backgroundColor: "#000",
+    transformOrigin: "top left",
+    transform: [{ scale: 2 }],
+  },
   heroBackdrop: { position: "absolute", top: 0, left: 0, right: 0, width: "100%", aspectRatio: 16 / 9 },
   // Poster on the end side, text starting right after the sidebar - matches the app's own
   // left-to-right content flow (sidebar, then content) instead of mirroring the RTL web

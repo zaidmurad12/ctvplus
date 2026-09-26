@@ -233,10 +233,8 @@ export default function App() {
   const sectionsCovered = !!selectedMovie || !!selectedPerson;
   const sectionFocusLast = useRef<FocusScope["last"]["current"]>(null);
   const sectionFocusFallback = useRef<FocusScope["fallback"]["current"]>(null);
-  const sectionScope = useMemo<FocusScope>(
-    () => ({ blocked: sectionsCovered, last: sectionFocusLast, fallback: sectionFocusFallback }),
-    [sectionsCovered]
-  );
+  const sectionScope = useMemo<FocusScope>(() => ({ blocked: false, last: sectionFocusLast, fallback: sectionFocusFallback }), []);
+  sectionScope.blocked = sectionsCovered;
   // Blocks focus natively for the whole covered block (see KeyEventBridge.setFocusBlocked - Home's
   // horizontal rows can't be made unfocusable from JS), and on the way back unblocks it and focuses
   // the card the viewer left from in one step. Re-applied when playback ends, since the block's

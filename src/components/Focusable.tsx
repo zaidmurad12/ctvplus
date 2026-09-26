@@ -8,9 +8,11 @@ const TRANSPARENT_RIPPLE = { color: "transparent" };
 
 // A section kept mounted (views and all) underneath another screen - Home under a title's details
 // page - instead of display:none, which with the new architecture deletes every native view in it
-// and rebuilt them all on the way back (seconds of black screen on a TV). While `blocked`, nothing
-// in it can take focus, so the D-pad can't wander into the hidden section; `last` remembers the
-// item that had focus there, so focus can be put back on it on return (see restoreScopeFocus).
+// and rebuilt them all on the way back (seconds of black screen on a TV). Focus is kept out of it
+// natively (App's KeyEventBridge.setFocusBlocked); this scope only tracks it. The object is stable
+// and `blocked` a plain field updated in place, so covering/uncovering re-renders none of the
+// section's (hundreds of) Focusables - that alone was a noticeable part of going back to Home.
+// `last` remembers the item that had focus there, so focus is put back on it on return.
 export interface FocusScope {
   blocked: boolean;
   last: { current: React.RefObject<View | null> | null };
@@ -174,7 +176,6 @@ const Focusable = React.forwardRef<View, Props>(function Focusable(
       onFocus={handleFocus}
       onBlur={handleBlur}
       {...rest}
-      focusable={blocked ? false : rest.focusable}
       hasTVPreferredFocus={everBlockedRef.current ? false : rest.hasTVPreferredFocus}
     >
       <Animated.View style={[style, { transform: [{ scale }] }]}>
