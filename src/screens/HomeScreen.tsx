@@ -814,6 +814,7 @@ const styles = StyleSheet.create({
   // this now sits on the artwork itself, over a dark gradient built to keep it readable
   // regardless of focus, so dimming it unfocused had nothing left to actually contrast against.
   // Stands in for a missing title logo (s(40) tall) - enlarged from fs(16), then 20, then 22, per request.
-  recentTitle: { color: "#fff", fontSize: fs(30), fontFamily: font.black, textTransform: "uppercase" },
+  // Nudged down (per request) - its line box sat it visibly higher than a logo in the same spot.
+  recentTitle: { color: "#fff", fontSize: fs(30), fontFamily: font.black, textTransform: "uppercase", marginBottom: -s(8) },
   recentMeta: { flex: 1, color: "rgba(255,255,255,0.75)", fontSize: fs(12), fontFamily: font.semiBold },
 });

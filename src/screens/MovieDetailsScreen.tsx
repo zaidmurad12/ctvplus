@@ -240,6 +240,9 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // so this tracks *which of the two* we last scrolled to and only moves when that actually
   // changes - immune to both animation timing and to re-firing for no reason.
   const lastScrollTarget = useRef<"top" | "bottom" | null>(null);
+  // The "Scroll down" hint goes away for good once the viewer has been down there once (per title).
+  const [scrolledDown, setScrolledDown] = useState(false);
+  useEffect(() => setScrolledDown(false), [movie.id]);
   // The episode title/story under the cards stays hidden while focus is up on the hero's buttons:
   // it fades in once an episode card is focused, stays while moving on down to the cast, and fades
   // out again on the way back up. An Animated value, not state - toggling it re-renders nothing.
@@ -260,6 +263,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     if (!isSeries && parts.length === 0) return;
     if (lastScrollTarget.current === "bottom") return;
     lastScrollTarget.current = "bottom";
+    setScrolledDown(true);
     scrollRef.current?.scrollToEnd({ animated: true });
   };
 
@@ -542,7 +546,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // (same condition as canScroll itself).
   const scrollHintAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    if (!canScroll || playerActive) return;
+    if (!canScroll || playerActive || scrolledDown) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(scrollHintAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
@@ -551,7 +555,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     );
     loop.start();
     return () => loop.stop();
-  }, [canScroll, playerActive, scrollHintAnim]);
+  }, [canScroll, playerActive, scrolledDown, scrollHintAnim]);
 
   const castBlock = (
     <>
@@ -837,6 +841,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
             </View>
             <Text style={styles.factRating}>{movie.rating}</Text>
             <Text style={styles.factMeta}>{movie.year}</Text>
+            {isSeries && <Text style={styles.factMeta}>{seasonCountLabel(movie.seasons!.length, lang)}</Text>}
           </View>
 
           <View style={styles.buttonsRow}>
@@ -913,7 +918,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
 
         {/* Centered across the whole hero, not tucked beside a button - reads as a page-level
             "there's more below" cue rather than something tied to Favorite specifically. */}
-        {canScroll && (
+        {canScroll && !scrolledDown && (
           <Animated.View
             style={[
               styles.scrollHint,
@@ -1229,6 +1234,13 @@ function seasonLabel(season: Season, lang: Lang): string {
   if (name && !GENERIC_SEASON_NAME.test(name) && !/^\d+$/.test(name)) return name;
   if (season.number === 0) return lang === "ar" ? "حلقات خاصة" : "Specials";
   return `${lang === "ar" ? "موسم" : "Season"} ${season.number}`;
+}
+
+function seasonCountLabel(n: number, lang: Lang): string {
+  if (lang !== "ar") return `${n} ${n === 1 ? "Season" : "Seasons"}`;
+  if (n === 1) return "موسم واحد";
+  if (n === 2) return "موسمان";
+  return n <= 10 ? `${n} مواسم` : `${n} موسماً`;
 }
 
 function SeasonStepper({

@@ -530,6 +530,13 @@ export default function VideoPlayerScreen({
   // whole screen (seek bar, time labels) stays throttled to roughly once a second through this,
   // even though onProgress itself now fires much more often.
   const lastProgressStateRef = useRef(0);
+  // With the controls hidden nothing on screen shows the position, so the whole-screen re-render
+  // drops from once a second to once every 5s; the latest position is pushed the moment the
+  // controls come back, so the seek bar is never stale when seen.
+  const latestProgressRef = useRef<OnProgressData | null>(null);
+  useEffect(() => {
+    if (controlsVisible && latestProgressRef.current) setProgress(latestProgressRef.current);
+  }, [controlsVisible]);
   // Subtitle cue lookup runs on every onProgress tick (not gated behind the throttle above) -
   // see currentCue's own comment for why cue timing specifically needed the tighter interval.
   const [cueText, setCueText] = useState<string | null>(null);
@@ -622,21 +629,49 @@ export default function VideoPlayerScreen({
   // which episode was pressed and closing only once `resolvingEpisodeId` (set by App.tsx's
   // selectEpisodeInPlayer, which enforces its own floor - see MIN_RESOLVE_MS there) actually
   // clears again is what lets the spinner show for real before the row goes away.
+  // Now kept open even past that: the row stays up, with a spinner on the picked card, until the
+  // new episode's video has actually loaded (onLoad) - it used to close as soon as the stream was
+  // resolved, leaving a blank loading screen, and the OK-key path closed it before anything at all.
   const pendingEpisodeSelectRef = useRef<string | null>(null);
+  const [pendingEpisodeId, setPendingEpisodeId] = useState<string | null>(null);
+  const clearPendingEpisode = () => {
+    pendingEpisodeSelectRef.current = null;
+    setPendingEpisodeId(null);
+  };
   // True once the current video has played to its end (see handleEnded).
   const endedRef = useRef(false);
   useEffect(() => {
     endedRef.current = false;
   }, [playingKey]);
   useEffect(() => {
-    if (pendingEpisodeSelectRef.current && resolvingEpisodeId == null) {
-      pendingEpisodeSelectRef.current = null;
-      closeEpisodeRow();
+    // Resolving finished but the player didn't move to the picked episode - it failed (or was
+    // refused): drop the spinner, leave the row open.
+    if (pendingEpisodeSelectRef.current && resolvingEpisodeId == null && playingKey !== pendingEpisodeSelectRef.current) {
+      clearPendingEpisode();
     }
-  }, [resolvingEpisodeId]);
+  }, [resolvingEpisodeId, playingKey]);
+  useEffect(() => {
+    if (!pendingEpisodeId) return;
+    // A load that never reports back doesn't leave the spinner up forever.
+    const timer = setTimeout(() => {
+      if (pendingEpisodeSelectRef.current === pendingEpisodeId) {
+        clearPendingEpisode();
+        closeEpisodeRow();
+      }
+    }, 25000);
+    return () => clearTimeout(timer);
+  }, [pendingEpisodeId]);
   // The onNavKey listener below subscribes once ([] deps, same reasoning as activeControlRef
   // etc.) - keeps it calling whatever the *latest* open/close actually is instead of the stale one
   // closed over at that one-time subscription.
+  const selectEpisodeFromRow = (ep: Episode, season: Season) => {
+    if (!ep.hasPlayableStream || pendingEpisodeSelectRef.current) return;
+    pendingEpisodeSelectRef.current = ep.id;
+    setPendingEpisodeId(ep.id);
+    onSelectEpisode?.(ep, season);
+  };
+  const selectEpisodeFromRowRef = useRef(selectEpisodeFromRow);
+  selectEpisodeFromRowRef.current = selectEpisodeFromRow;
   const openEpisodeRowRef = useRef(openEpisodeRow);
   const closeEpisodeRowRef = useRef(closeEpisodeRow);
   const onSelectEpisodeRef = useRef(onSelectEpisode);
@@ -812,9 +847,8 @@ export default function VideoPlayerScreen({
   const handleEpisodeRowSelect = React.useCallback(
     (ep: Episode) => {
       if (!ep.hasPlayableStream || !episodeRowSeason) return;
-      pendingEpisodeSelectRef.current = ep.id;
       wake();
-      onSelectEpisode?.(ep, episodeRowSeason);
+      selectEpisodeFromRowRef.current(ep, episodeRowSeason);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [onSelectEpisode, episodeRowSeason]
@@ -1282,8 +1316,7 @@ export default function VideoPlayerScreen({
         const targetSeason = (movie.seasons ?? []).find((sn) => sn.number === episodeRowSeasonNumberRef.current);
         const targetEpisode = targetSeason?.episodes[episodeRowIndexRef.current];
         if (targetSeason && targetEpisode && targetEpisode.hasPlayableStream) {
-          closeEpisodeRowRef.current();
-          onSelectEpisodeRef.current?.(targetEpisode, targetSeason);
+          selectEpisodeFromRowRef.current(targetEpisode, targetSeason);
         }
         return;
       }
@@ -1796,7 +1829,8 @@ export default function VideoPlayerScreen({
           // hardware. onProgress now fires much more often than that purely so the subtitle cue
           // lookup right below can run at the tighter interval, without also dragging the rest
           // of the screen along with it on every tick.
-          if (now - lastProgressStateRef.current >= 1000) {
+          latestProgressRef.current = data;
+          if (now - lastProgressStateRef.current >= (controlsVisible ? 1000 : 5000)) {
             lastProgressStateRef.current = now;
             setProgress(data);
           }
@@ -1819,6 +1853,10 @@ export default function VideoPlayerScreen({
         onLoadStart={() => setLoading(true)}
         onLoad={(data: OnLoadData) => {
           setLoading(false);
+          if (pendingEpisodeSelectRef.current && pendingEpisodeSelectRef.current === playingKey) {
+            clearPendingEpisode();
+            closeEpisodeRow();
+          }
           hasEverPlayedRef.current = true;
           // A stall that needed a retry has now genuinely recovered - back to a full retry
           // budget for the *next* one, rather than a stall an hour into a movie being limited by
@@ -2191,7 +2229,7 @@ export default function VideoPlayerScreen({
           activeIndex={episodeRowIndex}
           hidden={barsHidden}
           currentEpisodeId={episode?.id}
-          resolvingEpisodeId={resolvingEpisodeId ?? null}
+          resolvingEpisodeId={resolvingEpisodeId ?? pendingEpisodeId}
           isEpisodeWatched={handleEpisodeRowWatched}
           lang={lang}
           onHeightChange={setEpisodeRowHeight}
@@ -3166,7 +3204,6 @@ const styles = StyleSheet.create({
   // Track thickens and the fill glows a bit brighter while the bar itself has focus - the only
   // visual cue (besides the bigger thumb below) that D-pad input lands here now that it's a
   // real control, not just a display.
-  seekTrackFocused: { height: s(28) },
   seekTrackBg: { position: "absolute", left: 0, right: 0, height: s(4), borderRadius: 2, backgroundColor: "rgba(255,255,255,0.25)" },
   seekTrackFill: { position: "absolute", left: 0, height: s(4), borderRadius: 2, backgroundColor: "#fff" },
   seekTrackFillFocused: { height: s(6), shadowColor: "#fff", shadowOpacity: 0.6, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } },
@@ -3345,7 +3382,6 @@ const styles = StyleSheet.create({
     borderRadius: s(7),
     backgroundColor: "#fff",
   },
-  sizeSliderThumbFocused: { width: s(18), height: s(18), borderRadius: s(9), marginTop: -s(9), marginLeft: -s(9) },
   // A read-only version of the same track/thumb shape for the delay row (see StepSlider's own
   // comment on why this one isn't itself interactive), plus a center tick marking "0".
   // Centered as one compact group, not stretched to the panel's own edges - the two buttons
