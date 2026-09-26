@@ -235,7 +235,9 @@ export default function VideoPlayerScreen({
       maxBufferMs: 30000,
       // 4K moves several times the data per second of 1080p - a bigger cushion before starting
       // and after a stall keeps a brief throughput dip from turning into stutter.
-      bufferForPlaybackMs: currentIs4K ? 6000 : 2500,
+      // Was 2500 for non-4K: playback now starts once 1.5s is buffered (ExoPlayer keeps filling to
+      // minBufferMs right after) - a faster start that only affects the first second.
+      bufferForPlaybackMs: currentIs4K ? 6000 : 1500,
       bufferForPlaybackAfterRebufferMs: currentIs4K ? 12000 : 7000,
       maxHeapAllocationPercent: 0.2,
     }),

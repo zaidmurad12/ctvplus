@@ -22,7 +22,7 @@ import { pushBackHandler } from "../backStack";
 const TRAILER_DELAY_MS = 400;
 // See playEpisode's own comment - a floor under how quickly the resolving spinner can disappear
 // again, so a cached/instant fetch still leaves it on screen long enough to actually be seen.
-const MIN_RESOLVE_MS = 450;
+const MIN_RESOLVE_MS = 200;
 
 interface Props {
   movie: Movie;
@@ -154,6 +154,15 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   const versionLabel = (v: SourceVersion) =>
     v.dubbed ? (lang === "ar" ? "مدبلج عربي" : "Arabic dub") : lang === "ar" ? "مترجم" : "Subtitled";
 
+  // Opening another part of the same work replaces this whole screen. The trailer is stopped and
+  // torn down first, and the new part opens a moment later - opening it straight away left the old
+  // trailer's WebView still alive while the new screen (with its own images and trailer) loaded,
+  // a memory spike reported as the app closing when a part was opened while a trailer played.
+  const openPart = (part: Movie) => {
+    stopTrailer();
+    setTimeout(() => onSelectMovie(part), 250);
+  };
+
   const isSeries = movie.type === "series" && (movie.seasons?.length ?? 0) > 0;
   const [activeSeason, setActiveSeason] = useState<Season | undefined>(movie.seasons?.[0]);
   // The initial `movie` prop is only ever a summary (no seasons yet) - seasons only arrive once
@@ -221,7 +230,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // re-fires this on every single left/right press, not just the first one entering that row,
   // so this tracks *which of the two* we last scrolled to and only moves when that actually
   // changes - immune to both animation timing and to re-firing for no reason.
-  const lastScrollTarget = useRef<"top" | "bottom" | "episodes" | null>(null);
+  const lastScrollTarget = useRef<"top" | "bottom" | null>(null);
   const scrollToTop = () => {
     if (lastScrollTarget.current === "top") return;
     lastScrollTarget.current = "top";
@@ -462,21 +471,9 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   const playEpisodeRef = useRef(playEpisode);
   playEpisodeRef.current = playEpisode;
   const stablePlayEpisode = useCallback((ep: Episode) => playEpisodeRef.current(ep), []);
-  // A series' episodes now sit above the cast (see castBlock), so focusing them scrolls to the start
-  // of the seasons block instead of the page's end - scrolling to the end would push the episode
-  // cards themselves up and off screen to reveal the cast below them.
-  const bodyYRef = useRef(0);
-  const seasonsYRef = useRef<number | null>(null);
-  const scrollToEpisodes = () => {
-    if (lastScrollTarget.current === "episodes") return;
-    lastScrollTarget.current = "episodes";
-    const y = seasonsYRef.current;
-    if (y == null) scrollRef.current?.scrollToEnd({ animated: true });
-    else scrollRef.current?.scrollTo({ y: Math.max(0, bodyYRef.current + y - s(16)), animated: true });
-  };
-  const scrollToEpisodesRef = useRef(scrollToEpisodes);
-  scrollToEpisodesRef.current = scrollToEpisodes;
-  const stableScrollToEpisodes = useCallback(() => scrollToEpisodesRef.current(), []);
+  const scrollToBottomRef = useRef(scrollToBottom);
+  scrollToBottomRef.current = scrollToBottom;
+  const stableScrollToBottom = useCallback(() => scrollToBottomRef.current(), []);
 
   // Director/writer used to be fetched and stored on every import (directorPhotoUrl/
   // writerPhotoUrl) but never actually rendered anywhere in this app - added to the front of
@@ -540,7 +537,6 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     return () => loop.stop();
   }, [canScroll, playerActive, scrollHintAnim]);
 
-  const isSeriesType = movie.type === "series";
   const castBlock = (
     <>
     {detailLoading && !crewAndCast.length ? (
@@ -751,8 +747,10 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                 reported as a black layer on the backdrop before any trailer appeared. */}
             {trailerReady && (
               <LinearGradient
-                colors={["#000", "#000", "transparent"]}
-                locations={[0, 0.06, 0.24]}
+                // Lighter (was solid black to 6%, fading out by 24%): the preview-mode zoom already
+                // crops YouTube's title/channel bar out of view (see youtubeEmbedUrl's preview).
+                colors={["rgba(0,0,0,0.5)", "transparent"]}
+                locations={[0, 0.14]}
                 style={StyleSheet.absoluteFill}
                 pointerEvents="none"
               />
@@ -859,7 +857,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                 label={
                   switchingVersion
                     ? lang === "ar" ? "جارٍ التحميل..." : "Loading..."
-                    : `${lang === "ar" ? "النسخة" : "Version"}: ${versionLabel(versions[versionIndex])}`
+                    : versionLabel(versions[versionIndex])
                 }
                 Icon={Languages}
                 onPress={switchVersion}
@@ -888,8 +886,8 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
         )}
       </View>
 
-      <View style={styles.body} onLayout={(e) => (bodyYRef.current = e.nativeEvent.layout.y)}>
-        {!isSeriesType && castBlock}
+      <View style={styles.body}>
+        {movie.type !== "series" && castBlock}
 
         {/* Below cast, not above it - per explicit request. */}
         {parts.length > 0 && (
@@ -909,7 +907,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                     movie={p}
                     lang={lang}
                     showImage={i < visiblePartsImages}
-                    onSelect={onSelectMovie}
+                    onSelect={openPart}
                     onFocusChange={(f) => f && scrollToBottom()}
                   />
                 ))}
@@ -919,7 +917,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
         )}
 
         {isSeries && (
-          <View style={styles.seasons} onLayout={(e) => (seasonsYRef.current = e.nativeEvent.layout.y)}>
+          <View style={styles.seasons}>
             <ScrollView ref={seasonScrollRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasonRow}>
               {movie.seasons!.map((item, i) => (
                 <Focusable
@@ -931,7 +929,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                   scaleTo={1.04}
                   onFocusChange={(f) => {
                     if (!f) return;
-                    scrollToEpisodes();
+                    scrollToBottom();
                     // See the episode row's own identical fix just below for why this can't rely
                     // on Android's own auto-scroll alone for the boundary chips.
                     if (i === 0) seasonScrollRef.current?.scrollTo({ x: 0, animated: true });
@@ -986,16 +984,15 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                   scrollRef={episodeScrollRef}
                   visibleImages={visibleEpisodeImages}
                   onPlayEpisode={stablePlayEpisode}
-                  onFocusScroll={stableScrollToEpisodes}
+                  onFocusScroll={stableScrollToBottom}
                   isEpisodeWatched={isEpisodeWatched}
                 />
               )
             )}
           </View>
         )}
-        {/* A series shows its episodes first (where the cast used to be) and the cast last, at the
-            end of the page after the episode's title and description - per request. */}
-        {isSeriesType && castBlock}
+        {/* A series: cast last, just above the bottom of the screen, under the episodes. */}
+        {movie.type === "series" && castBlock}
       </View>
     </ScrollView>
   );
@@ -1071,6 +1068,28 @@ const EpisodeRail = React.memo(function EpisodeRail({
 
   return (
     <>
+      {/* Above the episode cards now (was below them), per request - the cards themselves then show
+          in full, with the cast further down near the bottom of the screen. Fixed height, so moving
+          between episodes with shorter or longer descriptions doesn't make the cards jump. */}
+      {!!shownEpisode && (
+        <View style={styles.episodeInfoBlock}>
+          {/* Season number now sits right beside the year, per explicit request - one combined
+              fact line instead of the year standing alone with nothing to place it in the show. */}
+          {(!!seasonYear || !!season.number) && (
+            <Text style={styles.episodeInfoYear}>
+              {[seasonYear, lang === "ar" ? `الموسم ${season.number}` : `Season ${season.number}`].filter(Boolean).join(" • ")}
+            </Text>
+          )}
+          <Text numberOfLines={1} style={styles.episodeInfoTitle}>
+            {pickText(shownEpisode.titleAr, shownEpisode.titleEn, lang)}
+          </Text>
+          {!!(shownEpisode.storyAr || shownEpisode.storyEn) && (
+            <Text numberOfLines={2} style={styles.episodeInfoStory}>
+              {pickText(shownEpisode.storyAr, shownEpisode.storyEn, lang)}
+            </Text>
+          )}
+        </View>
+      )}
       <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.episodeList}>
         {season.episodes.slice(0, renderCount).map((ep, i) => (
           <EpisodeCard
@@ -1090,25 +1109,6 @@ const EpisodeRail = React.memo(function EpisodeRail({
           />
         ))}
       </ScrollView>
-      {!!shownEpisode && (
-        <View style={styles.episodeInfoBlock}>
-          {/* Season number now sits right beside the year, per explicit request - one combined
-              fact line instead of the year standing alone with nothing to place it in the show. */}
-          {(!!seasonYear || !!season.number) && (
-            <Text style={styles.episodeInfoYear}>
-              {[seasonYear, lang === "ar" ? `الموسم ${season.number}` : `Season ${season.number}`].filter(Boolean).join(" • ")}
-            </Text>
-          )}
-          <Text numberOfLines={1} style={styles.episodeInfoTitle}>
-            {pickText(shownEpisode.titleAr, shownEpisode.titleEn, lang)}
-          </Text>
-          {!!(shownEpisode.storyAr || shownEpisode.storyEn) && (
-            <Text numberOfLines={3} style={styles.episodeInfoStory}>
-              {pickText(shownEpisode.storyAr, shownEpisode.storyEn, lang)}
-            </Text>
-          )}
-        </View>
-      )}
     </>
   );
 });
@@ -1277,8 +1277,9 @@ const styles = StyleSheet.create({
   // CAST_BLOCK_ESTIMATE above so the hero still shrinks to leave exactly this much room, not
   // more (which would force a needless scroll) or less (which would crowd the bottom edge).
   content: { paddingBottom: s(40) },
-  // Raised again - the episode row was still reading as flush against the bottom edge at 110.
-  seriesContent: { paddingBottom: s(150) },
+  // The cast is the last thing on a series page now (it used to be the episode row, which needed a
+  // big s(150) cushion to not sit flush against the bottom edge) - only a small margin below it.
+  seriesContent: { paddingBottom: s(28) },
   hero: { height: HERO_HEIGHT, position: "relative", overflow: "hidden" },
   heroBackdrop: { position: "absolute", top: 0, left: 0, right: 0, width: "100%", aspectRatio: 16 / 9 },
   // Poster on the end side, text starting right after the sidebar - matches the app's own
@@ -1493,7 +1494,7 @@ const styles = StyleSheet.create({
   // One shared block below the whole row instead of per-card text - see focusedEpisodeId's own
   // comment. Bigger type than the old per-card title/story now that it's not competing for space
   // inside a small card.
-  episodeInfoBlock: { marginTop: s(4), maxWidth: CAST_MAX_WIDTH, gap: s(6) },
+  episodeInfoBlock: { height: s(104), maxWidth: CAST_MAX_WIDTH, gap: s(6), overflow: "hidden" },
   episodeInfoYear: { color: colors.textMuted, fontSize: fs(12), fontFamily: font.bold },
   // Both bumped slightly (was 16/13) per explicit request - easier to read at a glance from the
   // couch without the title/description reading as an afterthought next to the episode cards.

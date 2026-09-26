@@ -49,11 +49,13 @@ class CrashInfoModule(private val reactContext: ReactApplicationContext) :
         for (info in am.getHistoricalProcessExitReasons(reactContext.packageName, 0, 5)) {
           if (info.timestamp <= lastReported) continue
           newest = maxOf(newest, info.timestamp)
-          // A normal exit (the user backing out, the update installer replacing the app) isn't
-          // a problem worth reporting.
-          if (info.reason == ApplicationExitInfo.REASON_EXIT_SELF ||
-              info.reason == ApplicationExitInfo.REASON_USER_REQUESTED ||
-              info.reason == ApplicationExitInfo.REASON_PACKAGE_UPDATED) continue
+          // Only the app's own main process - the trailer WebView's isolated renderer processes
+          // come and go on their own ("isolated not needed") and are just noise. Only an update
+          // install is skipped: USER_REQUESTED used to be skipped too, as "normal", but TV memory
+          // managers stop apps exactly that way (a force-stop) - which hid a real mid-browsing
+          // exit from these reports.
+          if (info.processName != reactContext.packageName) continue
+          if (info.reason == ApplicationExitInfo.REASON_PACKAGE_UPDATED) continue
           val entry = Arguments.createMap()
           entry.putString("reason", reasonName(info.reason))
           entry.putDouble("timestamp", info.timestamp.toDouble())
@@ -134,6 +136,10 @@ class CrashInfoModule(private val reactContext: ReactApplicationContext) :
     ApplicationExitInfo.REASON_PERMISSION_CHANGE -> "PERMISSION_CHANGE"
     ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "DEPENDENCY_DIED"
     ApplicationExitInfo.REASON_OTHER -> "OTHER"
+    ApplicationExitInfo.REASON_EXIT_SELF -> "EXIT_SELF"
+    ApplicationExitInfo.REASON_USER_REQUESTED -> "USER_REQUESTED"
+    ApplicationExitInfo.REASON_USER_STOPPED -> "USER_STOPPED"
+    ApplicationExitInfo.REASON_FREEZER -> "FREEZER"
     else -> "UNKNOWN($reason)"
   }
 

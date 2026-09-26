@@ -7,7 +7,9 @@ import { qualityRank } from "./quality";
 // reachability probe confirms are actually up. An unreachable 1080p server no longer wins over a
 // working 720p one just because of list order.
 
-const PROBE_TIMEOUT_MS = 3000;
+// A link that hasn't answered with its headers in 2s isn't dropped - it just goes after the ones
+// that did (see pickBestServers) - so this only bounds how long the start of playback waits.
+const PROBE_TIMEOUT_MS = 2000;
 
 /**
  * A cheap reachability + rough-latency check: asks for 2 bytes and gives up the moment the server

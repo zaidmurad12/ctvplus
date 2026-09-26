@@ -413,6 +413,11 @@ function isArabicOnlyEntry(item: { en_title?: string; ar_title?: string }): bool
 
 const versionCache = new Map<string, SourceVersion[]>();
 
+// Wording sources add to a version's title ("... مدبلج", "(مترجم)") - not part of the work's name.
+function stripVersionWords(title: string): string {
+  return title.replace(/\(?\s*(مدبلج(ة)?|مترجم(ة)?|بالعربي(ة)?|النسخة المدبلجة)\s*\)?/g, " ").trim();
+}
+
 export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]> {
   // An admin-pinned title plays exactly what was pinned - never second-guessed here.
   if (movie.sourceLinks?.length) return [];
@@ -429,21 +434,38 @@ export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]>
   const baseQueries = [...new Set([movie.titleEn, movie.originalTitle, movie.titleAr].filter((t): t is string => !!t?.trim()))];
   const first = await search(baseQueries);
   const best = matchTmdbWithCinemana(movie, first.cin) ?? matchTmdbWithCinemana(movie, first.cee);
-  const key = workRefKey(best?.imdbUrlRef);
-  if (!best || !key) {
+  if (!best) {
     versionCache.set(movie.id, []);
     return [];
   }
+  const key = workRefKey(best.imdbUrlRef);
   // The dubbed entry is often titled differently (only in Arabic) - also search by every title
   // the matched entry itself carries.
-  const extraQueries = [best.ar_title, best.en_title, (best as { other_title?: string }).other_title]
+  // Dubbed films are commonly filed as "<Arabic title> مدبلج" too.
+  const arabicTitle = movie.titleAr?.trim() || (ARABIC_SCRIPT.test(best.ar_title ?? "") ? best.ar_title?.trim() : "");
+  const extraQueries = [best.ar_title, best.en_title, (best as { other_title?: string }).other_title, arabicTitle ? `${arabicTitle} مدبلج` : ""]
     .map((t) => t?.trim())
     .filter((t): t is string => !!t && !baseQueries.includes(t));
   const more = extraQueries.length ? await search([...new Set(extraQueries)]) : { cin: [], cee: [] };
   const groups = new Map<string, SourceVersion>();
+  // Two ways an entry counts as a version of this work: it carries the same external reference, or
+  // - for the many dubbed entries that carry none (common for films) - it's titled only in Arabic,
+  // with the same Arabic title once dub/sub wording is set aside, and the same year (+/-1). An
+  // entry carrying a *different* reference is never grouped in.
+  const wantedArabic = normalizeTitle(stripVersionWords(arabicTitle || ""));
+  const year = movie.year ?? cinemanaNumber(best.year);
+  const belongs = (item: CinemanaSearchItem) => {
+    if (String(item.nb) === String(best.nb)) return true;
+    const itemKey = workRefKey(item.imdbUrlRef);
+    if (key && itemKey === key) return true;
+    if (itemKey) return false;
+    const itemYear = cinemanaNumber(item.year);
+    if (!year || !itemYear || Math.abs(itemYear - year) > 1) return false;
+    return !!wantedArabic && isArabicOnlyEntry(item) && normalizeTitle(stripVersionWords(item.ar_title || item.en_title || "")) === wantedArabic;
+  };
   const add = (items: CinemanaSearchItem[], provider: "cinemana" | "cee") => {
     for (const item of items) {
-      if (item.nb == null || workRefKey(item.imdbUrlRef) !== key) continue;
+      if (item.nb == null || !belongs(item)) continue;
       const nb = String(item.nb);
       let group = groups.get(nb);
       if (!group) {

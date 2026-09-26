@@ -78,7 +78,7 @@ const MAX_WATCHED_EPISODES = 2000;
 // See selectEpisodeInPlayer's own comment (same floor as MovieDetailsScreen's playEpisode) - a
 // cached/instant fetchEpisodePlayback could otherwise resolve before the resolving spinner ever
 // actually paints.
-const MIN_RESOLVE_MS = 450;
+const MIN_RESOLVE_MS = 200;
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("splash");
