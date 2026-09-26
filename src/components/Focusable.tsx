@@ -1,10 +1,39 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useContext, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, PressableProps, StyleSheet, View, ViewStyle } from "react-native";
 
 // Module-level constant, not a fresh object literal per render - every Focusable instance in the
 // app (there can easily be 100+ simultaneously mounted across Home's rails) shares this exact
 // same reference, one fewer small allocation per instance per render.
 const TRANSPARENT_RIPPLE = { color: "transparent" };
+
+// A section kept mounted (views and all) underneath another screen - Home under a title's details
+// page - instead of display:none, which with the new architecture deletes every native view in it
+// and rebuilt them all on the way back (seconds of black screen on a TV). While `blocked`, nothing
+// in it can take focus, so the D-pad can't wander into the hidden section; `last` remembers the
+// item that had focus there, so focus can be put back on it on return (see restoreScopeFocus).
+export interface FocusScope {
+  blocked: boolean;
+  last: { current: React.RefObject<View | null> | null };
+  // The section's initial-focus item (hasTVPreferredFocus - Home's first card), used when the
+  // remembered item is gone (the section was rebuilt while covered, after playback).
+  fallback: { current: React.RefObject<View | null> | null };
+}
+export const FocusScopeContext = React.createContext<FocusScope | null>(null);
+
+export function restoreScopeFocus(scope: FocusScope): () => void {
+  let attempt = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const tryFocus = () => {
+    attempt += 1;
+    const target = scope.last.current?.current ?? scope.fallback.current?.current;
+    (target as any)?.focus?.();
+    if (attempt < 4) timer = setTimeout(tryFocus, attempt * 120);
+  };
+  timer = setTimeout(tryFocus, 30);
+  return () => {
+    if (timer) clearTimeout(timer);
+  };
+}
 
 interface Props extends Omit<PressableProps, "children"> {
   scaleTo?: number;
@@ -44,6 +73,23 @@ const Focusable = React.forwardRef<View, Props>(function Focusable(
   { scaleTo = 1.06, children, style, focusRadius, clipFocusOverflow, onFocus, onBlur, onFocusChange, ...rest },
   ref
 ) {
+  const scope = useContext(FocusScopeContext);
+  const blocked = !!scope?.blocked;
+  const ownRef = useRef<View | null>(null);
+  // Once covered, never asks for initial focus again: flipping hasTVPreferredFocus back on when
+  // the cover lifts would make Android jump focus to it (Home's first card) instead of the card
+  // the viewer left from - restoreScopeFocus handles the return instead.
+  const everBlockedRef = useRef(false);
+  if (blocked) everBlockedRef.current = true;
+  if (scope && rest.hasTVPreferredFocus) scope.fallback.current = ownRef;
+  const setRef = useCallback(
+    (node: View | null) => {
+      ownRef.current = node;
+      if (typeof ref === "function") ref(node);
+      else if (ref) ref.current = node;
+    },
+    [ref]
+  );
   const scale = useRef(new Animated.Value(1)).current;
   const [focused, setFocused] = useState(false);
 
@@ -77,9 +123,10 @@ const Focusable = React.forwardRef<View, Props>(function Focusable(
   const handleFocus = useCallback(
     (e: any) => {
       animateTo(scaleTo, true);
+      if (scope && !scope.blocked) scope.last.current = ownRef;
       onFocus?.(e);
     },
-    [animateTo, scaleTo, onFocus]
+    [animateTo, scaleTo, onFocus, scope]
   );
   const handleBlur = useCallback(
     (e: any) => {
@@ -103,7 +150,7 @@ const Focusable = React.forwardRef<View, Props>(function Focusable(
 
   return (
     <Pressable
-      ref={ref as any}
+      ref={setRef as any}
       // Android draws *something* focus-related on this exact native view with square corners
       // regardless of the rounded look every call site's own `focused && ...` child style paints
       // on top - reported as still visible at the edges on a real device even after three
@@ -127,6 +174,8 @@ const Focusable = React.forwardRef<View, Props>(function Focusable(
       onFocus={handleFocus}
       onBlur={handleBlur}
       {...rest}
+      focusable={blocked ? false : rest.focusable}
+      hasTVPreferredFocus={everBlockedRef.current ? false : rest.hasTVPreferredFocus}
     >
       <Animated.View style={[style, { transform: [{ scale }] }]}>
         {typeof children === "function" ? children(focused) : children}

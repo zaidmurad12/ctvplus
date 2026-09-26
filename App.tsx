@@ -13,6 +13,7 @@ import { DEFAULT_PREFERRED_QUALITY } from "./src/quality";
 import { hasStoredValue, loadJson, saveJson, storageKeys } from "./src/storage";
 import { DEFAULT_UI_SCALE, getUIScale, setUIScale, suggestInitialUIScale } from "./src/scale";
 import { dispatchBack, pushBackHandler } from "./src/backStack";
+import { FocusScopeContext, restoreScopeFocus, type FocusScope } from "./src/components/Focusable";
 
 // Every screen (and Sidebar) is lazy-loaded, not statically imported - each one's own
 // `StyleSheet.create({...})` calls s()/fs() (see scale.ts) at the moment that module is first
@@ -199,6 +200,21 @@ export default function App() {
       setSelectedMovie(null);
     }
   }, []);
+  // The sections (Sidebar/Home/...) stay mounted and only covered while a details/artist page is
+  // open - see FocusScope in Focusable.tsx. Back from it, focus goes back to the card it left from.
+  const sectionsCovered = !!selectedMovie || !!selectedPerson;
+  const sectionFocusLast = useRef<FocusScope["last"]["current"]>(null);
+  const sectionFocusFallback = useRef<FocusScope["fallback"]["current"]>(null);
+  const sectionScope = useMemo<FocusScope>(
+    () => ({ blocked: sectionsCovered, last: sectionFocusLast, fallback: sectionFocusFallback }),
+    [sectionsCovered]
+  );
+  const wasCoveredRef = useRef(false);
+  useEffect(() => {
+    const wasCovered = wasCoveredRef.current;
+    wasCoveredRef.current = sectionsCovered;
+    if (wasCovered && !sectionsCovered) return restoreScopeFocus(sectionScope);
+  }, [sectionsCovered, sectionScope]);
   // Leaving the details/artist screens entirely (back to a section) forgets any pending returns.
   useEffect(() => {
     if (!selectedMovie && !selectedPerson) personReturnStack.current = [];
@@ -747,7 +763,14 @@ export default function App() {
           {/* A home row's "View more" page (selectedCategory) no longer hides this whole block - it
               renders inside it (see just before this View's end), in Home's place, so the sidebar
               stays on screen next to it like on every other section, per request. */}
-          <View style={[StyleSheet.absoluteFill, (selectedPerson || selectedMovie || !!playing) && styles.sectionHidden]}>
+          {/* Under a details/artist page the sections are only covered (see sectionScope), not
+              display:none - that deleted all of Home's native views and rebuilt them on the way
+              back, seconds of black screen. During playback they're unmounted anyway. */}
+          <FocusScopeContext.Provider value={sectionScope}>
+          <View
+            style={[StyleSheet.absoluteFill, !!playing ? styles.sectionHidden : sectionsCovered && styles.sectionCovered]}
+            pointerEvents={sectionsCovered ? "none" : "auto"}
+          >
             {/* Home/Sidebar stay unmounted for the whole playback (they used to be rebuilt in the
                 background 20s in, "homeWarm", to make the exit faster). Their images and views
                 were a real share of the memory the TV's own memory killer ended the app at,
@@ -840,6 +863,7 @@ export default function App() {
               </View>
             )}
           </View>
+          </FocusScopeContext.Provider>
 
           {selectedMovie && (
             <View style={StyleSheet.absoluteFill}>
@@ -947,6 +971,7 @@ function ScreenLoader() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
   sectionHidden: { display: "none" },
+  sectionCovered: { opacity: 0 },
   loaderWrap: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000" },
   // See handleExitPlayer's own comment - deliberately no backgroundColor at all here.
   exitTransitionOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: 10 },
