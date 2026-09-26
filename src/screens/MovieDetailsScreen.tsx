@@ -74,7 +74,17 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
         // run here instead just to decide whether the Watch button should exist at all. Stays
         // hidden (the state above already started false) rather than flashing on and then off,
         // matching the fix already in place for a series briefly showing this same button.
-        const [cinemanaMatch, ceeMatch] = await Promise.all([findCinemanaMatch(full), findCeeMatch(full)]);
+        // The button shows as soon as either source matches - it used to wait for both, so a work
+        // only one source carries (most Arabic ones) waited on the other source's whole search,
+        // retries and spelling variants included, before the button appeared at all.
+        const cinemanaLookup = findCinemanaMatch(full);
+        const ceeLookup = findCeeMatch(full);
+        const markIfFound = (match: unknown) => {
+          if (match && !cancelled) setHasPlaybackSource(true);
+        };
+        cinemanaLookup.then(markIfFound, () => {});
+        ceeLookup.then(markIfFound, () => {});
+        const [cinemanaMatch, ceeMatch] = await Promise.all([cinemanaLookup, ceeLookup]);
         if (cancelled) return;
         setHasPlaybackSource(!!(cinemanaMatch || ceeMatch));
         // Nothing is stored in the catalog any more, so the resolution badge has to come from the

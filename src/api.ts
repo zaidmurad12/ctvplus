@@ -186,6 +186,7 @@ interface PersonCreditDto {
   id: string;
   type: "movie" | "show";
   title: string;
+  titleAr?: string | null;
   poster?: string | null;
   rating?: number | null;
   releaseDate?: string | null;
@@ -360,6 +361,20 @@ export function matchTmdbWithCinemana(tmdbMovie: Movie, candidates: CinemanaSear
 // Other spellings of a title, tried only when the plain titles found nothing: the sources' search
 // sometimes answers one spelling and not another - capitals vs not, a subtitle after a colon, a
 // space before or after (confirmed by hand: a title that found nothing matched once re-cased).
+// Arabic spellings the sources file differently: Arabic-Indic digits (١٨ -> 18), diacritics and
+// tatweel dropped, alef forms (أ إ آ -> ا), and final ى/ة.
+function arabicSearchForm(title: string): string {
+  if (!ARABIC_SCRIPT.test(title)) return title;
+  return title
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[ً-ْٰـ]/g, "")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى(?=\s|$)/g, "ي")
+    .replace(/ة(?=\s|$)/g, "ه")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function titleVariants(titles: string[]): string[] {
   const variants = new Set<string>();
   for (const title of titles) {
@@ -378,14 +393,17 @@ function titleVariants(titles: string[]): string[] {
 // Searches a source by the title's own spellings first; only if that matches nothing, by
 // titleVariants too. A single failed search no longer fails the whole lookup.
 async function searchAndMatch(movie: Movie, search: (query: string) => Promise<CinemanaSearchItem[]>): Promise<CinemanaSearchItem | null> {
-  const titles = [...new Set([movie.titleEn, movie.originalTitle, movie.titleAr].filter((t): t is string => !!t?.trim()).map((t) => t.trim()))];
+  const arabicWork = movie.language === "ar" || ARABIC_SCRIPT.test(movie.originalTitle ?? "");
+  // An Arabic work is filed on the sources under its Arabic name first - searched first here too.
+  const ordered = arabicWork ? [movie.titleAr, movie.originalTitle, movie.titleEn] : [movie.titleEn, movie.originalTitle, movie.titleAr];
+  const titles = [...new Set(ordered.filter((t): t is string => !!t?.trim()).map((t) => t.trim()))];
   const run = async (queries: string[]) => {
     const groups = await Promise.all(queries.map((query) => search(query).catch(() => [] as CinemanaSearchItem[])));
     return matchTmdbWithCinemana(movie, groups.flat());
   };
   const first = await run(titles);
   if (first) return first;
-  const variants = titleVariants(titles);
+  const variants = titleVariants(titles.map(arabicSearchForm).concat(titles));
   return variants.length ? run(variants) : null;
 }
 
@@ -1527,7 +1545,7 @@ export async function fetchByPerson(personId: string): Promise<Movie[]> {
   const { data } = await apiGet<PersonDetailDto>(`/people/${personId}`);
   return data.filmography.map((c) => ({
     id: c.id,
-    titleAr: c.title,
+    titleAr: c.titleAr?.trim() || c.title,
     titleEn: c.title,
     poster: c.poster ?? undefined,
     rating: c.rating ?? undefined,
