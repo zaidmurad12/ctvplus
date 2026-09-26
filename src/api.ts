@@ -426,9 +426,17 @@ function stripVersionWords(title: string): string {
   return title.replace(/\(?\s*(مدبلج(ة)?|مترجم(ة)?|بالعربي(ة)?|النسخة المدبلجة)\s*\)?/g, " ").trim();
 }
 
+// Arabic dubs on the sources are essentially animation (films and series) and Turkish works - per
+// request, every other title skips the version lookup entirely, sparing its source searches.
+function mayHaveArabicDub(movie: Movie): boolean {
+  if (movie.genres?.some((g) => /animation|anime|رسوم|انمي|أنمي/i.test(g))) return true;
+  return movie.language === "tr" || /turk|تركي/i.test(movie.country ?? "");
+}
+
 export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]> {
   // An admin-pinned title plays exactly what was pinned - never second-guessed here.
   if (movie.sourceLinks?.length) return [];
+  if (!mayHaveArabicDub(movie)) return [];
   const cached = versionCache.get(movie.id);
   if (cached) return cached;
   const type = movie.type === "series" ? "series" : "movie";
