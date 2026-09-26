@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Image, ScrollView, StyleSheet, Dimensions, ActivityIndicator, Animated, ToastAndroid } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import { WebView } from "react-native-webview";
-import { Play, Bookmark, Users, Check, ChevronDown } from "lucide-react-native";
-import type { Movie, Season, Episode, StreamServer, SubtitleTrack } from "../api";
-import { posterUrl, youtubeVideoId, youtubeEmbedUrl, fetchCollection, fetchMovieDetail, fetchShowDetail, fetchEpisodePlayback, fetchCinemanaMoviePlayback, fetchCeeMoviePlayback, findCinemanaMatch, findCeeMatch, bestQualityLabel } from "../api";
+import { Play, Bookmark, Users, Check, ChevronDown, Languages } from "lucide-react-native";
+import type { Movie, Season, Episode, StreamServer, SubtitleTrack, SourceVersion } from "../api";
+import { findSourceVersions, posterUrl, youtubeVideoId, youtubeEmbedUrl, fetchCollection, fetchMovieDetail, fetchShowDetail, fetchEpisodePlayback, fetchCinemanaMoviePlayback, fetchCeeMoviePlayback, findCinemanaMatch, findCeeMatch, bestQualityLabel } from "../api";
 import { pickBestServers } from "../streamSelect";
 import Focusable from "../components/Focusable";
 import MovieCard from "../components/MovieCard";
@@ -108,6 +108,52 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     };
   }, [initialMovie]);
 
+  // Language versions of this work on the sources (see findSourceVersions) - e.g. the original with
+  // subtitles and an Arabic dub. Looked up once the detail has loaded; the button to switch only
+  // shows when there's more than one.
+  const [versions, setVersions] = useState<SourceVersion[]>([]);
+  const [versionIndex, setVersionIndex] = useState(0);
+  const [switchingVersion, setSwitchingVersion] = useState(false);
+  useEffect(() => {
+    setVersions([]);
+    setVersionIndex(0);
+    if (detailLoading) return;
+    let cancelled = false;
+    findSourceVersions(movie)
+      .then((found) => {
+        if (!cancelled) setVersions(found);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per title, after its detail loads
+  }, [movie.id, detailLoading]);
+  const switchVersion = async () => {
+    if (versions.length < 2 || switchingVersion) return;
+    const nextIndex = (versionIndex + 1) % versions.length;
+    const version = versions[nextIndex];
+    setVersionIndex(nextIndex);
+    if (movie.type !== "series") {
+      // Plays from this version's own source entries (sourcesFor prefers playbackSources) - the
+      // catalog's own servers, if any, belong to no particular version, so they're dropped.
+      setMovie((prev) => ({ ...prev, playbackSources: version.sources, servers: undefined }));
+      return;
+    }
+    setSwitchingVersion(true);
+    try {
+      const full = await fetchShowDetail(movie.id, undefined, version.sources);
+      setMovie((prev) => ({ ...prev, ...full, playbackSources: version.sources }));
+      setActiveSeason(full.seasons?.[0]);
+    } catch (err) {
+      console.error("[MovieDetailsScreen] switching version failed:", err);
+    } finally {
+      setSwitchingVersion(false);
+    }
+  };
+  const versionLabel = (v: SourceVersion) =>
+    v.dubbed ? (lang === "ar" ? "مدبلج عربي" : "Arabic dub") : lang === "ar" ? "مترجم" : "Subtitled";
+
   const isSeries = movie.type === "series" && (movie.seasons?.length ?? 0) > 0;
   const [activeSeason, setActiveSeason] = useState<Season | undefined>(movie.seasons?.[0]);
   // The initial `movie` prop is only ever a summary (no seasons yet) - seasons only arrive once
@@ -175,7 +221,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // re-fires this on every single left/right press, not just the first one entering that row,
   // so this tracks *which of the two* we last scrolled to and only moves when that actually
   // changes - immune to both animation timing and to re-firing for no reason.
-  const lastScrollTarget = useRef<"top" | "bottom" | null>(null);
+  const lastScrollTarget = useRef<"top" | "bottom" | "episodes" | null>(null);
   const scrollToTop = () => {
     if (lastScrollTarget.current === "top") return;
     lastScrollTarget.current = "top";
@@ -416,9 +462,21 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   const playEpisodeRef = useRef(playEpisode);
   playEpisodeRef.current = playEpisode;
   const stablePlayEpisode = useCallback((ep: Episode) => playEpisodeRef.current(ep), []);
-  const scrollToBottomRef = useRef(scrollToBottom);
-  scrollToBottomRef.current = scrollToBottom;
-  const stableScrollToBottom = useCallback(() => scrollToBottomRef.current(), []);
+  // A series' episodes now sit above the cast (see castBlock), so focusing them scrolls to the start
+  // of the seasons block instead of the page's end - scrolling to the end would push the episode
+  // cards themselves up and off screen to reveal the cast below them.
+  const bodyYRef = useRef(0);
+  const seasonsYRef = useRef<number | null>(null);
+  const scrollToEpisodes = () => {
+    if (lastScrollTarget.current === "episodes") return;
+    lastScrollTarget.current = "episodes";
+    const y = seasonsYRef.current;
+    if (y == null) scrollRef.current?.scrollToEnd({ animated: true });
+    else scrollRef.current?.scrollTo({ y: Math.max(0, bodyYRef.current + y - s(16)), animated: true });
+  };
+  const scrollToEpisodesRef = useRef(scrollToEpisodes);
+  scrollToEpisodesRef.current = scrollToEpisodes;
+  const stableScrollToEpisodes = useCallback(() => scrollToEpisodesRef.current(), []);
 
   // Director/writer used to be fetched and stored on every import (directorPhotoUrl/
   // writerPhotoUrl) but never actually rendered anywhere in this app - added to the front of
@@ -482,6 +540,83 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     return () => loop.stop();
   }, [canScroll, playerActive, scrollHintAnim]);
 
+  const isSeriesType = movie.type === "series";
+  const castBlock = (
+    <>
+    {detailLoading && !crewAndCast.length ? (
+      <>
+        <View style={styles.divider} />
+        <View style={styles.castSection}>
+          <View style={styles.sectionLabelRow}>
+            <Users size={s(16)} color={colors.textMuted} />
+            <Text style={styles.sectionLabel}>{lang === "ar" ? "طاقم وصناع العمل" : "Cast & Crew"}</Text>
+          </View>
+          <View style={[styles.castRow, styles.castSkeletonRow]} pointerEvents="none">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <View key={i} style={styles.castSkeletonItem}>
+                <View style={styles.castSkeletonAvatar} />
+                <View style={styles.castSkeletonLine} />
+              </View>
+            ))}
+          </View>
+        </View>
+      </>
+    ) : null}
+    {!!crewAndCast.length && (
+      <>
+        <View style={styles.divider} />
+        <View style={styles.castSection}>
+          <View style={styles.sectionLabelRow}>
+            <Users size={s(16)} color={colors.textMuted} />
+            <Text style={styles.sectionLabel}>{lang === "ar" ? "طاقم وصناع العمل" : "Cast & Crew"}</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.castRow}>
+            {crewAndCast.map((c, i) => (
+              <Focusable
+                key={`${c.name}-${i}`}
+                ref={castClamp.setRef(i)}
+                nextFocusLeft={i === 0 ? castClamp.clampLeft() : undefined}
+                nextFocusRight={i === castCount - 1 ? castClamp.clampRight() : undefined}
+                scaleTo={1.06}
+                onPress={() =>
+                  onSelectPerson({
+                    id: c.id,
+                    name: c.name,
+                    role: c.role,
+                    photoUrl: c.photoUrl,
+                    birthday: c.birthday,
+                    deathday: c.deathday,
+                    placeOfBirth: c.placeOfBirth,
+                    biography: c.biography,
+                    biographyAr: c.biographyAr,
+                  })
+                }
+                onFocusChange={(f) => f && scrollToBottom()}
+              >
+                {(focused: boolean) => (
+                  <View style={styles.castItem}>
+                    <View style={[styles.castAvatar, focused && styles.castAvatarFocused, focused && focusShadowTight]}>
+                      {c.photoUrl && i < visibleCastImages ? (
+                        <Image source={{ uri: posterUrl(c.photoUrl, "w185") }} style={styles.castAvatarImg} fadeDuration={0} />
+                      ) : (
+                        <View style={styles.castAvatarPlaceholder}>
+                          <Text style={styles.castAvatarInitial}>{c.name?.[0] ?? "?"}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text numberOfLines={1} style={styles.castName}>{c.name}</Text>
+                    {!!c.role && <Text numberOfLines={1} style={styles.castRole}>{c.role}</Text>}
+                  </View>
+                )}
+              </Focusable>
+            ))}
+          </ScrollView>
+        </View>
+      </>
+    )}
+    </>
+  );
+
   return (
     <ScrollView
       ref={scrollRef}
@@ -525,7 +660,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
               // autoplay policy - see VideoPlayer.tsx's identical fix for the full write-up);
               // unmuteOnPlay is what turns real sound on the instant it actually starts playing -
               // per explicit request, this preview is no longer silent.
-              source={{ uri: youtubeEmbedUrl(trailerVideoId, { autoplay: true, mute: true, loop: true, unmuteOnPlay: true }) }}
+              source={{ uri: youtubeEmbedUrl(trailerVideoId, { autoplay: true, mute: true, loop: true, unmuteOnPlay: true, preview: true }) }}
               // Explicit background color - the native Android WebView otherwise paints its own
               // default white surface for the brief gap before this page's own content (background
               // :#000 in its own CSS included) actually arrives and paints over it. A prior attempt
@@ -719,6 +854,18 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
               hasTVPreferredFocus={movie.type === "series" || !hasPlaybackSource}
               onFocusChange={(f) => f && scrollToTop()}
             />
+            {versions.length > 1 && (
+              <DetailButton
+                label={
+                  switchingVersion
+                    ? lang === "ar" ? "جارٍ التحميل..." : "Loading..."
+                    : `${lang === "ar" ? "النسخة" : "Version"}: ${versionLabel(versions[versionIndex])}`
+                }
+                Icon={Languages}
+                onPress={switchVersion}
+                onFocusChange={(f) => f && scrollToTop()}
+              />
+            )}
           </View>
         </View>
 
@@ -741,78 +888,8 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
         )}
       </View>
 
-      <View style={styles.body}>
-        {detailLoading && !crewAndCast.length ? (
-          <>
-            <View style={styles.divider} />
-            <View style={styles.castSection}>
-              <View style={styles.sectionLabelRow}>
-                <Users size={s(16)} color={colors.textMuted} />
-                <Text style={styles.sectionLabel}>{lang === "ar" ? "طاقم وصناع العمل" : "Cast & Crew"}</Text>
-              </View>
-              <View style={[styles.castRow, styles.castSkeletonRow]} pointerEvents="none">
-                {[0, 1, 2, 3, 4].map((i) => (
-                  <View key={i} style={styles.castSkeletonItem}>
-                    <View style={styles.castSkeletonAvatar} />
-                    <View style={styles.castSkeletonLine} />
-                  </View>
-                ))}
-              </View>
-            </View>
-          </>
-        ) : null}
-        {!!crewAndCast.length && (
-          <>
-            <View style={styles.divider} />
-            <View style={styles.castSection}>
-              <View style={styles.sectionLabelRow}>
-                <Users size={s(16)} color={colors.textMuted} />
-                <Text style={styles.sectionLabel}>{lang === "ar" ? "طاقم وصناع العمل" : "Cast & Crew"}</Text>
-              </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.castRow}>
-                {crewAndCast.map((c, i) => (
-                  <Focusable
-                    key={`${c.name}-${i}`}
-                    ref={castClamp.setRef(i)}
-                    nextFocusLeft={i === 0 ? castClamp.clampLeft() : undefined}
-                    nextFocusRight={i === castCount - 1 ? castClamp.clampRight() : undefined}
-                    scaleTo={1.06}
-                    onPress={() =>
-                      onSelectPerson({
-                        id: c.id,
-                        name: c.name,
-                        role: c.role,
-                        photoUrl: c.photoUrl,
-                        birthday: c.birthday,
-                        deathday: c.deathday,
-                        placeOfBirth: c.placeOfBirth,
-                        biography: c.biography,
-                        biographyAr: c.biographyAr,
-                      })
-                    }
-                    onFocusChange={(f) => f && scrollToBottom()}
-                  >
-                    {(focused: boolean) => (
-                      <View style={styles.castItem}>
-                        <View style={[styles.castAvatar, focused && styles.castAvatarFocused, focused && focusShadowTight]}>
-                          {c.photoUrl && i < visibleCastImages ? (
-                            <Image source={{ uri: posterUrl(c.photoUrl, "w185") }} style={styles.castAvatarImg} fadeDuration={0} />
-                          ) : (
-                            <View style={styles.castAvatarPlaceholder}>
-                              <Text style={styles.castAvatarInitial}>{c.name?.[0] ?? "?"}</Text>
-                            </View>
-                          )}
-                        </View>
-                        <Text numberOfLines={1} style={styles.castName}>{c.name}</Text>
-                        {!!c.role && <Text numberOfLines={1} style={styles.castRole}>{c.role}</Text>}
-                      </View>
-                    )}
-                  </Focusable>
-                ))}
-              </ScrollView>
-            </View>
-          </>
-        )}
+      <View style={styles.body} onLayout={(e) => (bodyYRef.current = e.nativeEvent.layout.y)}>
+        {!isSeriesType && castBlock}
 
         {/* Below cast, not above it - per explicit request. */}
         {parts.length > 0 && (
@@ -842,7 +919,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
         )}
 
         {isSeries && (
-          <View style={styles.seasons}>
+          <View style={styles.seasons} onLayout={(e) => (seasonsYRef.current = e.nativeEvent.layout.y)}>
             <ScrollView ref={seasonScrollRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasonRow}>
               {movie.seasons!.map((item, i) => (
                 <Focusable
@@ -854,7 +931,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                   scaleTo={1.04}
                   onFocusChange={(f) => {
                     if (!f) return;
-                    scrollToBottom();
+                    scrollToEpisodes();
                     // See the episode row's own identical fix just below for why this can't rely
                     // on Android's own auto-scroll alone for the boundary chips.
                     if (i === 0) seasonScrollRef.current?.scrollTo({ x: 0, animated: true });
@@ -909,13 +986,16 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                   scrollRef={episodeScrollRef}
                   visibleImages={visibleEpisodeImages}
                   onPlayEpisode={stablePlayEpisode}
-                  onFocusScroll={stableScrollToBottom}
+                  onFocusScroll={stableScrollToEpisodes}
                   isEpisodeWatched={isEpisodeWatched}
                 />
               )
             )}
           </View>
         )}
+        {/* A series shows its episodes first (where the cast used to be) and the cast last, at the
+            end of the page after the episode's title and description - per request. */}
+        {isSeriesType && castBlock}
       </View>
     </ScrollView>
   );

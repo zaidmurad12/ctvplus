@@ -41,7 +41,52 @@ export function parseVtt(raw: string): SubtitleCue[] {
       .trim();
     if (text) cues.push({ start, end, text });
   }
-  return cues;
+  return fixRtlPunctuation(cues);
+}
+
+// Many Arabic subtitle files were typed for players that lay every line out left-to-right, so the
+// sentence-ending punctuation was typed at the *start* of the line (".شكرًا", "،)في غياب (دانكن") to
+// land on the left - the end of an Arabic sentence - in such a player. This app renders Arabic lines
+// right-to-left (see isRtlText in VideoPlayer), where that same text shows the full stop, comma and
+// closing bracket at the sentence's start instead - reported as reversed brackets and punctuation.
+// Such a file is recognized by its Arabic lines mostly *starting* with punctuation and rarely ending
+// with it (e.g. 1077 vs 1 in a real file); only then is each such line's leading run moved to its
+// end, in reverse order (",)" -> "),"), a bracket there always becoming the closing one. Correctly
+// written files are left untouched. Quotes and
+// dialogue dashes are never moved - they're balanced or belong at the start either way.
+const RTL_CHAR = /[֐-ࣿ]/;
+const LEADING_PUNCT = /^[\s.,!?؟،؛:;…()[\]]+/;
+const ENDING_PUNCT = /[.,!?؟،؛:;…]$/;
+
+function fixRtlPunctuation(cues: SubtitleCue[]): SubtitleCue[] {
+  let startsWith = 0;
+  let endsWith = 0;
+  for (const cue of cues) {
+    for (const line of cue.text.split("\n")) {
+      if (!RTL_CHAR.test(line)) continue;
+      const lead = LEADING_PUNCT.exec(line)?.[0] ?? "";
+      if (lead.trim()) startsWith++;
+      if (ENDING_PUNCT.test(line.trimEnd())) endsWith++;
+    }
+  }
+  if (startsWith < 3 || startsWith <= endsWith * 2) return cues;
+  return cues.map((cue) => ({
+    ...cue,
+    text: cue.text
+      .split("\n")
+      .map((line) => {
+        if (!RTL_CHAR.test(line)) return line;
+        const lead = LEADING_PUNCT.exec(line)?.[0] ?? "";
+        const run = lead.replace(/\s+/g, "");
+        const rest = line.slice(lead.length).trim();
+        if (!run || !rest) return line;
+        // A bracket typed at the start of such a line is the one that closes the sentence (the file's
+        // "..(لمرافقة (دانكن" means "لمرافقة (دانكن).."), so at the end it's always the closing one.
+        const moved = [...run].reverse().map((ch) => (ch === "(" ? ")" : ch === "[" ? "]" : ch));
+        return rest + moved.join("");
+      })
+      .join("\n"),
+  }));
 }
 
 // Was a linear .find() over the WHOLE array from the start every single call - fine for a few

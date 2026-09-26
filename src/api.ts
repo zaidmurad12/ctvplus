@@ -376,6 +376,97 @@ export async function findCinemanaMatch(movie: Movie): Promise<PlaybackMapping |
   }
 }
 
+// --- Language versions (e.g. an anime both subtitled and Arabic-dubbed) --------------------------
+
+// One work can exist on the sources as several entries - the original with subtitles, and an
+// Arabic dub filed under its Arabic title - which matching alone silently picks between (reported:
+// One Piece from Home played subtitled, the same show found through an Arabic search played dubbed).
+// Entries that are versions of the same work share its external reference (IMDb, MyAnimeList,
+// elCinema) - that, not the title, is what groups them here.
+export interface SourceVersion {
+  key: string;
+  dubbed: boolean;
+  title: string;
+  sources: PlaybackMapping[];
+}
+
+function workRefKey(ref?: string | null): string {
+  const value = (ref ?? "").trim().toLowerCase();
+  if (!value) return "";
+  const imdb = extractImdbId(value);
+  if (imdb) return `imdb:${imdb}`;
+  const mal = /myanimelist\.net\/anime\/(\d+)/.exec(value);
+  if (mal) return `mal:${mal[1]}`;
+  const elc = /elcinema\.com\/work\/(\d+)/.exec(value);
+  if (elc) return `elc:${elc[1]}`;
+  return "";
+}
+
+const ARABIC_SCRIPT = /[؀-ۿ]/;
+const LATIN_LETTER = /[a-z]/i;
+// An entry titled only in Arabic script (no Latin title at all) is the Arabic-dubbed release -
+// the originals keep their Latin title in en_title.
+function isArabicOnlyEntry(item: { en_title?: string; ar_title?: string }): boolean {
+  const titles = [item.en_title, item.ar_title].filter((t): t is string => !!t?.trim());
+  return titles.length > 0 && titles.every((t) => ARABIC_SCRIPT.test(t) && !LATIN_LETTER.test(t));
+}
+
+const versionCache = new Map<string, SourceVersion[]>();
+
+export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]> {
+  // An admin-pinned title plays exactly what was pinned - never second-guessed here.
+  if (movie.sourceLinks?.length) return [];
+  const cached = versionCache.get(movie.id);
+  if (cached) return cached;
+  const type = movie.type === "series" ? "series" : "movie";
+  const search = async (queries: string[]) => {
+    const [cin, cee] = await Promise.all([
+      Promise.all(queries.map((q) => searchCinemana(q, type).catch(() => [] as CinemanaSearchItem[]))),
+      Promise.all(queries.map((q) => searchCee(q, type).catch(() => [] as CeeSearchItem[]))),
+    ]);
+    return { cin: cin.flat(), cee: cee.flat() as CinemanaSearchItem[] };
+  };
+  const baseQueries = [...new Set([movie.titleEn, movie.originalTitle, movie.titleAr].filter((t): t is string => !!t?.trim()))];
+  const first = await search(baseQueries);
+  const best = matchTmdbWithCinemana(movie, first.cin) ?? matchTmdbWithCinemana(movie, first.cee);
+  const key = workRefKey(best?.imdbUrlRef);
+  if (!best || !key) {
+    versionCache.set(movie.id, []);
+    return [];
+  }
+  // The dubbed entry is often titled differently (only in Arabic) - also search by every title
+  // the matched entry itself carries.
+  const extraQueries = [best.ar_title, best.en_title, (best as { other_title?: string }).other_title]
+    .map((t) => t?.trim())
+    .filter((t): t is string => !!t && !baseQueries.includes(t));
+  const more = extraQueries.length ? await search([...new Set(extraQueries)]) : { cin: [], cee: [] };
+  const groups = new Map<string, SourceVersion>();
+  const add = (items: CinemanaSearchItem[], provider: "cinemana" | "cee") => {
+    for (const item of items) {
+      if (item.nb == null || workRefKey(item.imdbUrlRef) !== key) continue;
+      const nb = String(item.nb);
+      let group = groups.get(nb);
+      if (!group) {
+        group = { key: nb, dubbed: isArabicOnlyEntry(item), title: (item.ar_title || item.en_title || "").trim(), sources: [] };
+        groups.set(nb, group);
+      }
+      if (group.sources.some((source) => source.provider === provider)) continue;
+      group.sources.push(
+        provider === "cee"
+          ? { provider: "cee", ceeId: makeCeeId(nb), available: true }
+          : { provider: "cinemana", cinemanaId: makeCinemanaId(nb), available: true }
+      );
+    }
+  };
+  add([...first.cin, ...more.cin], "cinemana");
+  add([...first.cee, ...more.cee], "cee");
+  const bestNb = String(best.nb);
+  const versions = [...groups.values()].sort((a, b) => (a.key === bestNb ? -1 : b.key === bestNb ? 1 : 0));
+  const result = versions.length > 1 ? versions : [];
+  versionCache.set(movie.id, result);
+  return result;
+}
+
 export async function findCeeMatch(movie: Movie): Promise<PlaybackMapping | null> {
   const linked = movie.sourceLinks?.find((link) => link.source === "cee");
   if (linked) return { provider: "cee", ceeId: makeCeeId(linked.nb), kind: linked.kind, available: true };
@@ -1046,6 +1137,9 @@ export function youtubeEmbedUrl(
     // comment. Defaults to solid black, right for the full-screen player, which has nothing of
     // its own behind the WebView to show through anyway.
     transparentBg?: boolean;
+    // A details-screen background trailer: small rendition, YouTube's overlays cropped out, no
+    // time polling - see the backend's youtube-embed preview mode.
+    preview?: boolean;
   } = {}
 ): string {
   const params = new URLSearchParams({ v: videoId });
@@ -1055,6 +1149,7 @@ export function youtubeEmbedUrl(
   if (opts.loop) params.set("loop", "1");
   if (opts.unmuteOnPlay) params.set("unmuteOnPlay", "1");
   if (opts.transparentBg) params.set("bg", "transparent");
+  if (opts.preview) params.set("preview", "1");
   return `${API_BASE}/youtube-embed?${params.toString()}`;
 }
 

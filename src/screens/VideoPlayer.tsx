@@ -621,6 +621,11 @@ export default function VideoPlayerScreen({
   // selectEpisodeInPlayer, which enforces its own floor - see MIN_RESOLVE_MS there) actually
   // clears again is what lets the spinner show for real before the row goes away.
   const pendingEpisodeSelectRef = useRef<string | null>(null);
+  // True once the current video has played to its end (see handleEnded).
+  const endedRef = useRef(false);
+  useEffect(() => {
+    endedRef.current = false;
+  }, [playingKey]);
   useEffect(() => {
     if (pendingEpisodeSelectRef.current && resolvingEpisodeId == null) {
       pendingEpisodeSelectRef.current = null;
@@ -769,7 +774,7 @@ export default function VideoPlayerScreen({
       // instant real content finally showed - reported as "make the bar show while loading, to
       // hide YouTube's marks." And while explicitly paused (ytPausedRef, YouTube-sourced only) -
       // per explicit request, pausing shouldn't eventually hide the only way back to resuming.
-      if (pendingEpisodeSelectRef.current || ytBufferingRef.current || loadingRef.current || (youtubeIdRef.current && ytPausedRef.current)) {
+      if (endedRef.current || pendingEpisodeSelectRef.current || ytBufferingRef.current || loadingRef.current || (youtubeIdRef.current && ytPausedRef.current)) {
         armHideTimer();
         return;
       }
@@ -888,6 +893,60 @@ export default function VideoPlayerScreen({
   useEffect(() => {
     youtubeIdRef.current = youtubeId;
   }, [youtubeId]);
+
+  // End of playback, per request: an episode moves straight on to the next one (the next in its
+  // season, else the first playable one of the next season), the same way picking it from the
+  // episode row does; a film - or a series' last episode - stops with the control bar shown and
+  // kept up (see armHideTimer), focus on play/pause, where pressing play starts it over.
+  const handleEnded = () => {
+    const seasons = movie.seasons ?? [];
+    if (episode && season) {
+      const seasonIdx = seasons.findIndex((sn) => sn.number === season.number);
+      const current = seasons[seasonIdx];
+      const epIdx = current ? current.episodes.findIndex((ep) => ep.id === episode.id) : -1;
+      let next: { episode: Episode; season: Season } | null = null;
+      if (current && epIdx >= 0) {
+        const inSeason = current.episodes.slice(epIdx + 1).find((ep) => ep.hasPlayableStream);
+        if (inSeason) next = { episode: inSeason, season: current };
+      }
+      if (!next && seasonIdx >= 0) {
+        for (const later of seasons.slice(seasonIdx + 1)) {
+          const first = later.episodes.find((ep) => ep.hasPlayableStream);
+          if (first) {
+            next = { episode: first, season: later };
+            break;
+          }
+        }
+      }
+      if (next) {
+        pendingEpisodeSelectRef.current = next.episode.id;
+        wake();
+        ToastAndroid.show(lang === "ar" ? `الحلقة التالية: ${next.episode.number}` : `Next episode: ${next.episode.number}`, ToastAndroid.SHORT);
+        onSelectEpisodeRef.current?.(next.episode, next.season);
+        return;
+      }
+    }
+    endedRef.current = true;
+    if (youtubeIdRef.current) setYtPaused(true);
+    else setPaused(true);
+    setActiveControl("playPause");
+    (playPauseRef.current as any)?.focus?.();
+    wake();
+  };
+  // Pressing play after the end starts over instead of doing nothing at the last frame.
+  const restartIfEnded = (): boolean => {
+    if (!endedRef.current) return false;
+    endedRef.current = false;
+    if (youtubeIdRef.current) {
+      setYtPaused(false);
+      ytCommand("player.seekTo(0, true); player.playVideo()");
+    } else {
+      playerRef.current?.seek(0);
+      setPaused(false);
+    }
+    wake();
+    return true;
+  };
 
   // Falls through to the same "not available" screen every other exhausted server already shows
   // if the video never actually reaches PLAYING within a generous window - reported as "the
@@ -1252,6 +1311,7 @@ export default function VideoPlayerScreen({
       // (setPaused, read by <Video>'s own paused prop); a separate listener toggled ytPaused
       // instead, duplicating everything else this handler already does (activeControl, focus,
       // wake()) for no reason other than which state variable actually needed flipping.
+      if (restartIfEnded()) return;
       if (youtubeIdRef.current) {
         const next = !ytPausedRef.current;
         setYtPaused(next);
@@ -1399,6 +1459,8 @@ export default function VideoPlayerScreen({
                 const stateCode = Number(msg.slice("diag:state:".length));
                 ytBufferingRef.current = stateCode === 3;
                 if (ytBufferingRef.current) wake();
+                // 0 = YT.PlayerState.ENDED - same end-of-video handling as native playback.
+                if (stateCode === 0) handleEnded();
               }
               return;
             }
@@ -1567,25 +1629,7 @@ export default function VideoPlayerScreen({
             this mirrors. */}
         {!!ytCueText && (
           <View style={styles.subtitleWrap} pointerEvents="none">
-            <Text
-              style={[
-                styles.subtitleText,
-                {
-                  fontFamily: subtitleFontFamily(subtitleSettings.font),
-                  fontSize: subtitleFontSize(subtitleSettings.size),
-                  color: subtitleSettings.color,
-                  backgroundColor: subtitleSettings.background ? "rgba(0,0,0,0.6)" : "transparent",
-                  // Checked against the cue's own text, not the app's current UI language - see
-                  // isRtlText's own comment. Left unset (falls back to "auto", which lets Android
-                  // silently guess wrong) reads correctly per-word but can flip punctuation like
-                  // "-"/"؟" to the wrong visual side within the line - reported exactly as
-                  // "reversed marks in some subtitles."
-                  writingDirection: isRtlText(ytCueText) ? "rtl" : "ltr",
-                },
-              ]}
-            >
-              {ytCueText}
-            </Text>
+            <SubtitleLines text={ytCueText} settings={subtitleSettings} />
           </View>
         )}
         {/* This app's own bar (was YouTube's, per explicit request) - fades with the same
@@ -1789,6 +1833,7 @@ export default function VideoPlayerScreen({
           }
         }}
         onBuffer={({ isBuffering }) => setLoading(isBuffering)}
+        onEnd={handleEnded}
         // Used to just log and clear the spinner, leaving a plain black screen with no
         // explanation for however long the viewer waited before giving up themselves - this now
         // actually falls through to the next server in the (already best-first, see
@@ -1876,22 +1921,7 @@ export default function VideoPlayerScreen({
 
       {!!currentCue && (
         <View style={styles.subtitleWrap} pointerEvents="none">
-          <Text
-            style={[
-              styles.subtitleText,
-              {
-                fontFamily: subtitleFontFamily(subtitleSettings.font),
-                fontSize: subtitleFontSize(subtitleSettings.size),
-                color: subtitleSettings.color,
-                backgroundColor: subtitleSettings.background ? "rgba(0,0,0,0.6)" : "transparent",
-                // See the identical fix (and its own fuller comment) on the YouTube branch's own
-                // subtitle Text above.
-                writingDirection: isRtlText(currentCue) ? "rtl" : "ltr",
-              },
-            ]}
-          >
-            {currentCue}
-          </Text>
+          <SubtitleLines text={currentCue} settings={subtitleSettings} />
         </View>
       )}
 
@@ -2057,6 +2087,7 @@ export default function VideoPlayerScreen({
                 wake();
                 return;
               }
+              if (restartIfEnded()) return;
               setPaused((p) => !p);
               wake();
             }}
@@ -2863,6 +2894,33 @@ const PanelSectionHeader = React.forwardRef<
 // itself is the one focused (see the reactive flag-sync effect in VideoPlayerScreen), so the bar
 // being focusable is both what makes seeking reachable at all and, via its own nextFocusUp/Down,
 // the resting place OK/up/down land on to get there.
+// One Text per subtitle line, so each line gets its own background box (was one Text for the whole
+// cue, whose background drew a single big box around both lines of a two-line subtitle). Direction
+// is checked against the cue's own text, not the app's UI language - see isRtlText's own comment:
+// left on "auto", Android can put punctuation like "-"/"؟" on the wrong side within a line.
+const SubtitleLines = React.memo(function SubtitleLines({ text, settings }: { text: string; settings: SubtitleSettings }) {
+  const rtl = isRtlText(text);
+  const lineStyle = [
+    styles.subtitleText,
+    {
+      fontFamily: subtitleFontFamily(settings.font),
+      fontSize: subtitleFontSize(settings.size),
+      color: settings.color,
+      backgroundColor: settings.background ? "rgba(0,0,0,0.6)" : "transparent",
+      writingDirection: rtl ? ("rtl" as const) : ("ltr" as const),
+    },
+  ];
+  return (
+    <>
+      {text.split("\n").map((line, i) => (
+        <Text key={i} style={lineStyle}>
+          {line}
+        </Text>
+      ))}
+    </>
+  );
+});
+
 // A small looping opacity pulse under the play/pause button - the sole discoverability cue for
 // the episode row now that there's no persistent button (see EpisodeRow.tsx's own comment on why
 // that was rejected). Only ever rendered while the row hasn't been opened yet this session.

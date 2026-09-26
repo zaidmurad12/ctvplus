@@ -178,7 +178,34 @@ export default function App() {
   // fully isolated repro of the underlying timing.
   const closePerson = useCallback(() => setSelectedPerson(null), []);
   const closeCategory = useCallback(() => setSelectedCategory(null), []);
-  const closeMovieDetails = useCallback(() => setSelectedMovie(null), []);
+  // A work opened from an artist page remembers that page: back from it returns to the artist
+  // page (over the work it was opened from), per request - it used to drop the artist page and go
+  // straight back to wherever the first work was opened from.
+  const personReturnStack = useRef<{ person: SelectedPerson; movie: Movie | null }[]>([]);
+  const selectedPersonRef = useRef<SelectedPerson | null>(null);
+  selectedPersonRef.current = selectedPerson;
+  const selectedMovieRef = useRef<Movie | null>(null);
+  selectedMovieRef.current = selectedMovie;
+  const openMovieFromPerson = useCallback((movie: Movie) => {
+    if (selectedPersonRef.current) {
+      personReturnStack.current.push({ person: selectedPersonRef.current, movie: selectedMovieRef.current });
+    }
+    setSelectedPerson(null);
+    setSelectedMovie(movie);
+  }, []);
+  const closeMovieDetails = useCallback(() => {
+    const back = personReturnStack.current.pop();
+    if (back) {
+      setSelectedMovie(back.movie);
+      setSelectedPerson(back.person);
+    } else {
+      setSelectedMovie(null);
+    }
+  }, []);
+  // Leaving the details/artist screens entirely (back to a section) forgets any pending returns.
+  useEffect(() => {
+    if (!selectedMovie && !selectedPerson) personReturnStack.current = [];
+  }, [selectedMovie, selectedPerson]);
 
   // dataReady (not `data` itself) is what the splash's own AutoAdvance below actually waits on -
   // see its own comment for why the wait belongs here, on the branded splash (which already has
@@ -460,14 +487,14 @@ export default function App() {
       if (selectedPerson) {
         setSelectedPerson(null);
       } else if (selectedMovie) {
-        setSelectedMovie(null);
+        closeMovieDetails();
       } else {
         setSelectedCategory(null);
       }
       return true;
     }, "App:fallback");
     return unsubscribe;
-  }, [screen, selectedPerson, selectedMovie, selectedCategory]);
+  }, [screen, selectedPerson, selectedMovie, selectedCategory, closeMovieDetails]);
 
   const isWatchLater = (id: string) => watchLater.some((f) => f.id === id);
   // useCallback with an empty dependency array - safe (and stable forever) because this only ever
@@ -836,7 +863,9 @@ export default function App() {
                   onSelectMovie={setSelectedMovie}
                   onBack={closeMovieDetails}
                   isEpisodeWatched={isEpisodeWatched}
-                  playerActive={!!playing}
+                  // Also while an artist page is open on top of it - its trailer used to keep
+                  // playing (with sound) underneath the artist page.
+                  playerActive={!!playing || !!selectedPerson}
                 />
               </Suspense>
             </View>
@@ -848,10 +877,7 @@ export default function App() {
                 <PersonScreen
                   person={selectedPerson}
                   lang={lang}
-                  onSelectMovie={(m) => {
-                    setSelectedPerson(null);
-                    setSelectedMovie(m);
-                  }}
+                  onSelectMovie={openMovieFromPerson}
                   onBack={closePerson}
                 />
               </Suspense>
