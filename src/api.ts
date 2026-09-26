@@ -484,7 +484,13 @@ export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]>
   add([...first.cee, ...more.cee], "cee");
   const bestNb = String(best.nb);
   const versions = [...groups.values()].sort((a, b) => (a.key === bestNb ? -1 : b.key === bestNb ? 1 : 0));
-  const result = versions.length > 1 ? versions : [];
+  // Only a real language choice is offered: one subtitled and one Arabic-dubbed version. Several
+  // entries of the same kind (e.g. two uploads of the subtitled original) used to show the button
+  // too, switching between two "مترجم" versions - reported as the button doing nothing on films,
+  // and as showing on titles that have no dub at all.
+  const subtitled = versions.find((v) => !v.dubbed);
+  const dubbed = versions.find((v) => v.dubbed);
+  const result = subtitled && dubbed ? (versions[0] === dubbed ? [dubbed, subtitled] : [subtitled, dubbed]) : [];
   versionCache.set(movie.id, result);
   return result;
 }
