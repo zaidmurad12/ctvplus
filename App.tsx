@@ -1,5 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, BackHandler, Image, NativeModules, StatusBar, Text, ToastAndroid, View, StyleSheet } from "react-native";
+import { ActivityIndicator, AppState, BackHandler, Image, NativeModules, findNodeHandle, StatusBar, Text, ToastAndroid, View, StyleSheet } from "react-native";
 import type { SelectedPerson } from "./src/screens/PersonScreen";
 import type { Category } from "./src/api";
 import type { HomeScreenHandle } from "./src/screens/HomeScreen";
@@ -13,7 +13,7 @@ import { DEFAULT_PREFERRED_QUALITY } from "./src/quality";
 import { hasStoredValue, loadJson, saveJson, storageKeys } from "./src/storage";
 import { DEFAULT_UI_SCALE, getUIScale, setUIScale, suggestInitialUIScale } from "./src/scale";
 import { dispatchBack, pushBackHandler } from "./src/backStack";
-import { FocusScopeContext, restoreScopeFocus, type FocusScope } from "./src/components/Focusable";
+import { FocusScopeContext, type FocusScope } from "./src/components/Focusable";
 
 // Every screen (and Sidebar) is lazy-loaded, not statically imported - each one's own
 // `StyleSheet.create({...})` calls s()/fs() (see scale.ts) at the moment that module is first
@@ -191,14 +191,42 @@ export default function App() {
     setSelectedPerson(null);
     setSelectedMovie(movie);
   }, []);
+  // Right after a player exit the sections aren't built yet (deferSections). Going back to Home
+  // then used to close the details page first and build Home after it - five seconds of black
+  // screen on the TV. Now Home is built first, still under the details page, and the page closes
+  // once it's there.
+  const deferSectionsRef = useRef(deferSections);
+  deferSectionsRef.current = deferSections;
+  const pendingUncoverRef = useRef<(() => void) | null>(null);
+  const [uncoverRequest, setUncoverRequest] = useState(0);
+  const whenSectionsReady = useCallback((action: () => void) => {
+    if (!deferSectionsRef.current) {
+      action();
+      return;
+    }
+    if (pendingUncoverRef.current) return;
+    pendingUncoverRef.current = action;
+    setDeferSections(false);
+    setUncoverRequest((n) => n + 1);
+  }, []);
+  useEffect(() => {
+    const action = pendingUncoverRef.current;
+    if (!action || deferSections) return;
+    const timer = setTimeout(() => {
+      pendingUncoverRef.current = null;
+      action();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [uncoverRequest, deferSections]);
   const closeMovieDetails = useCallback(() => {
     const back = personReturnStack.current.pop();
     if (back) {
       setSelectedMovie(back.movie);
       setSelectedPerson(back.person);
     } else {
-      setSelectedMovie(null);
+      whenSectionsReady(() => setSelectedMovie(null));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- whenSectionsReady is stable
   }, []);
   // The sections (Sidebar/Home/...) stay mounted and only covered while a details/artist page is
   // open - see FocusScope in Focusable.tsx. Back from it, focus goes back to the card it left from.
@@ -209,12 +237,26 @@ export default function App() {
     () => ({ blocked: sectionsCovered, last: sectionFocusLast, fallback: sectionFocusFallback }),
     [sectionsCovered]
   );
+  // Blocks focus natively for the whole covered block (see KeyEventBridge.setFocusBlocked - Home's
+  // horizontal rows can't be made unfocusable from JS), and on the way back unblocks it and focuses
+  // the card the viewer left from in one step. Re-applied when playback ends, since the block's
+  // native view is recreated then.
+  const sectionsViewRef = useRef<any>(null);
   const wasCoveredRef = useRef(false);
   useEffect(() => {
     const wasCovered = wasCoveredRef.current;
     wasCoveredRef.current = sectionsCovered;
-    if (wasCovered && !sectionsCovered) return restoreScopeFocus(sectionScope);
-  }, [sectionsCovered, sectionScope]);
+    const tag = findNodeHandle(sectionsViewRef.current);
+    if (tag == null) return;
+    if (sectionsCovered) {
+      NativeModules.KeyEventBridge?.setFocusBlocked(tag, true, -1);
+      return;
+    }
+    if (!wasCovered) return;
+    const target = sectionFocusLast.current?.current ?? sectionFocusFallback.current?.current;
+    const targetTag = target ? findNodeHandle(target) : null;
+    NativeModules.KeyEventBridge?.setFocusBlocked(tag, false, targetTag ?? -1);
+  }, [sectionsCovered, playing]);
   // Leaving the details/artist screens entirely (back to a section) forgets any pending returns.
   useEffect(() => {
     if (!selectedMovie && !selectedPerson) personReturnStack.current = [];
@@ -768,6 +810,8 @@ export default function App() {
               back, seconds of black screen. During playback they're unmounted anyway. */}
           <FocusScopeContext.Provider value={sectionScope}>
           <View
+            ref={sectionsViewRef}
+            collapsable={false}
             style={[StyleSheet.absoluteFill, !!playing ? styles.sectionHidden : sectionsCovered && styles.sectionCovered]}
             pointerEvents={sectionsCovered ? "none" : "auto"}
           >

@@ -4,6 +4,9 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.UiThreadUtil
+import com.facebook.react.uimanager.UIManagerHelper
+import android.view.ViewGroup
 import com.facebook.react.modules.core.DeviceEventManagerModule
 
 /**
@@ -139,6 +142,27 @@ class KeyEventBridgeModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun setLeftRightSeekActive(active: Boolean) {
     leftRightSeekActive = active
+  }
+
+  /**
+   * Blocks (or re-allows) focus for everything inside one view - the app's sections (Sidebar/Home)
+   * kept mounted but covered under a details page. React Native can make its own buttons
+   * unfocusable, but not a horizontal ScrollView (Android makes those focusable themselves), so
+   * the D-pad could still land on Home's invisible rows - control lost, then the app sent to the
+   * background. When unblocking, focusTag (if not -1) is focused right after, in the same step.
+   */
+  @ReactMethod
+  fun setFocusBlocked(tag: Int, blocked: Boolean, focusTag: Int) {
+    UiThreadUtil.runOnUiThread {
+      try {
+        val manager = UIManagerHelper.getUIManagerForReactTag(reactApplicationContext, tag) ?: return@runOnUiThread
+        val group = manager.resolveView(tag) as? ViewGroup ?: return@runOnUiThread
+        group.descendantFocusability =
+            if (blocked) ViewGroup.FOCUS_BLOCK_DESCENDANTS else ViewGroup.FOCUS_BEFORE_DESCENDANTS
+        if (!blocked && focusTag != -1) manager.resolveView(focusTag)?.requestFocus()
+      } catch (_: Exception) {
+      }
+    }
   }
 
   @ReactMethod

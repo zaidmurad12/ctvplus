@@ -112,16 +112,6 @@ function formatTime(totalSeconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-// The total duration side specifically - hours and minutes only, no seconds, since a movie's
-// overall length was never meaningfully precise to the second the way the *current playback
-// position* on the other side of the bar actually is.
-function formatDuration(totalSeconds: number): string {
-  if (!isFinite(totalSeconds) || totalSeconds < 0) return "0:00";
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}` : `0:${String(m).padStart(2, "0")}`;
-}
-
 export default function VideoPlayerScreen({
   servers,
   movie,
@@ -3029,7 +3019,7 @@ const FocusableSeekBar = React.forwardRef<View, {
                 pointerEvents="none"
               />
             </View>
-            <Text style={styles.timeText}>{formatDuration(duration)}</Text>
+            <Text style={styles.timeText}>{formatTime(duration)}</Text>
           </View>
         );
       }}
@@ -3199,7 +3189,8 @@ const styles = StyleSheet.create({
   imdbBadgeWhiteText: { color: "#000", fontSize: fs(9), fontFamily: font.black },
   factRating: { color: "#fff", fontSize: fs(13), fontFamily: font.black },
   seekRow: { flexDirection: "row", alignItems: "center", gap: s(12) },
-  timeText: { color: "#fff", fontSize: fs(12), fontFamily: font.semiBold, width: s(54), textAlign: "center" },
+  // Bigger per request, and wide enough for "1:45:30" now that the total shows seconds too.
+  timeText: { color: "#fff", fontSize: fs(16), fontFamily: font.bold, width: s(84), textAlign: "center" },
   seekTrack: { flex: 1, height: s(24), justifyContent: "center" },
   // Track thickens and the fill glows a bit brighter while the bar itself has focus - the only
   // visual cue (besides the bigger thumb below) that D-pad input lands here now that it's a

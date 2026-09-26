@@ -69,6 +69,7 @@ const ROW_REVEAL_RADIUS = 1;
 // Imported from api.ts (not defined here) - sectionsToCategories there needs the exact same
 // number to decide whether a row's own "View more" card should appear at all.
 const ROW_MAX_ITEMS = HOME_ROW_MAX_ITEMS;
+const INITIAL_ROWS = 3;
 
 interface Props {
   heroMovies: Movie[];
@@ -131,6 +132,15 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
     return ordered;
   }, [categories, heroMovies]);
   const rowItems = useMemo(() => rows.map((cat) => (cat.items || []).slice(0, ROW_MAX_ITEMS)), [rows]);
+  // Built a few rows at a time: mounting every row's cards in one go took seconds on the TV, and
+  // Home is rebuilt after every playback (it's unmounted during it, for memory). The first rows -
+  // all that's on screen - come in the first pass, the rest in small batches right after.
+  const [builtRows, setBuiltRows] = useState(INITIAL_ROWS);
+  useEffect(() => {
+    if (builtRows >= rows.length) return;
+    const timer = setTimeout(() => setBuiltRows((n) => n + 2), 80);
+    return () => clearTimeout(timer);
+  }, [builtRows, rows.length]);
 
   // Populated once, on the very first row's very first card - the sidebar's own Home icon
   // (useImperativeHandle below) imperatively refocuses this the same one-shot way BrowseScreen's
@@ -402,7 +412,7 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
           between rows. scrollsChildToFocus={false} removes the native jump so the one animated scroll is
           the only thing that moves. */}
       <ScrollView ref={scrollRef} style={styles.rowsScroll} showsVerticalScrollIndicator={false} scrollsChildToFocus={false}>
-        {rows.map((cat, index) => (
+        {rows.slice(0, builtRows).map((cat, index) => (
           <CategoryRow
             key={cat.id}
             title={pickText(cat.titleAr, cat.titleEn, lang)}
