@@ -848,6 +848,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                 active={activeSeason}
                 onChange={setActiveSeason}
                 lang={lang}
+                hasTVPreferredFocus
                 onFocusChange={(f) => f && scrollToTop()}
               />
             )}
@@ -862,7 +863,8 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
               // playback source anywhere - see hasPlaybackSource above), this is the only button
               // in the row, so it has to be the one that picks up initial TV focus instead -
               // otherwise nothing here is focused at all on first open.
-              hasTVPreferredFocus={movie.type === "series" || !hasPlaybackSource}
+              // A series hands initial focus to the season button once its seasons have loaded.
+              hasTVPreferredFocus={movie.type === "series" ? !isSeries : !hasPlaybackSource}
               onFocusChange={(f) => f && scrollToTop()}
             />
             {versions.length > 1 && (
@@ -1180,18 +1182,31 @@ const EpisodeCard = React.memo(function EpisodeCard({
 // - it grows, and up/down then switch the season right away (the episode row follows); OK again,
 // left/right, or leaving it deactivates. While it isn't active, D-pad navigation is left entirely
 // to Android, so moving between the hero's buttons works as usual.
+// The season's own name when it has a real one ("Book One: Water"), otherwise "موسم 2" /
+// "Season 2" in the app's language - catalog names are often just a generic "Season 2" or
+// "الموسم 2" in one language, which read wrong once the app's language was switched.
+const GENERIC_SEASON_NAME = /^\s*(season|series|specials|الموسم|موسم)\s*\d*\s*$/i;
+function seasonLabel(season: Season, lang: Lang): string {
+  const name = pickText(season.titleAr, season.titleEn, lang)?.trim();
+  if (name && !GENERIC_SEASON_NAME.test(name) && !/^\d+$/.test(name)) return name;
+  if (season.number === 0) return lang === "ar" ? "حلقات خاصة" : "Specials";
+  return `${lang === "ar" ? "موسم" : "Season"} ${season.number}`;
+}
+
 function SeasonStepper({
   seasons,
   active,
   onChange,
   lang,
   onFocusChange,
+  hasTVPreferredFocus,
 }: {
   seasons: Season[];
   active?: Season;
   onChange: (season: Season) => void;
   lang: Lang;
   onFocusChange?: (focused: boolean) => void;
+  hasTVPreferredFocus?: boolean;
 }) {
   const [activated, setActivated] = useState(false);
   const grow = useRef(new Animated.Value(1)).current;
@@ -1223,8 +1238,7 @@ function SeasonStepper({
       KeyEventBridge?.setDpadNavActive(false);
     };
   }, [activated]);
-  const label =
-    pickText(active?.titleAr, active?.titleEn, lang) || `${lang === "ar" ? "الموسم" : "Season"} ${active?.number ?? ""}`;
+  const label = active ? seasonLabel(active, lang) : "";
   const arrowColor = activated ? "#fff" : colors.textMuted;
   return (
     <Focusable
@@ -1234,22 +1248,24 @@ function SeasonStepper({
         onFocusChange?.(f);
       }}
       scaleTo={1}
+      hasTVPreferredFocus={hasTVPreferredFocus}
     >
       {(focused: boolean) => (
         <Animated.View
           style={[
             styles.detailBtn,
+            styles.seasonStepperGap,
             styles.detailBtnOutline,
             focused && styles.detailBtnFocusedOutline,
             focused && focusShadow,
             { transform: [{ scale: grow }] },
           ]}
         >
+          <Text style={styles.detailBtnText}>{label}</Text>
           <View style={styles.seasonStepperArrows}>
             <ChevronUp size={s(12)} color={arrowColor} strokeWidth={2.5} />
             <ChevronDown size={s(12)} color={arrowColor} strokeWidth={2.5} />
           </View>
-          <Text style={styles.detailBtnText}>{label}</Text>
         </Animated.View>
       )}
     </Focusable>
@@ -1331,7 +1347,7 @@ const HERO_HEIGHT = Math.max(POSTER_H + s(40), SCREEN_H - CAST_BLOCK_ESTIMATE);
 // cards; the chips have since moved into the hero's buttons (SeasonStepper), and that freed space
 // is kept on purpose - the cards sit higher and the episode title shows on the first screen too. Floored so the title/logo, facts
 // and buttons column still fits; the poster shrinks to match.
-const SERIES_BELOW_HERO = s(276);
+const SERIES_BELOW_HERO = s(246);
 const HERO_HEIGHT_SERIES = Math.min(HERO_HEIGHT, Math.max(s(300), SCREEN_H - SERIES_BELOW_HERO));
 const POSTER_H_SERIES = Math.min(POSTER_H, HERO_HEIGHT_SERIES - s(40));
 const POSTER_W_SERIES = Math.round((POSTER_H_SERIES * 2) / 3);
@@ -1383,7 +1399,8 @@ const styles = StyleSheet.create({
   titleLogo: { marginBottom: s(2) },
   // Stands in for a missing title logo - enlarged (was fs(28), then 38, then 44) to hold its own against the s(95)
   // logo it replaces, per request.
-  title: { color: "#fff", fontSize: fs(48), fontFamily: font.black, maxWidth: s(640) },
+  // Only shown for titles with no logo - bigger and in capitals so it reads like one (per request).
+  title: { color: "#fff", fontSize: fs(58), lineHeight: fs(66), fontFamily: font.black, textTransform: "uppercase", maxWidth: s(680) },
   metaRow: { flexDirection: "row", gap: s(12), flexWrap: "wrap", alignItems: "center" },
   ageBadge: { borderWidth: 1.5, borderColor: "rgba(255,255,255,0.5)", borderRadius: 4, paddingHorizontal: s(6), paddingVertical: s(1) },
   ageBadgeText: { color: "#fff", fontSize: fs(11), fontFamily: font.black },
@@ -1422,6 +1439,8 @@ const styles = StyleSheet.create({
   },
   detailBtnIconOnly: { paddingHorizontal: s(16) },
   seasonStepperArrows: { alignItems: "center", marginVertical: -s(4) },
+  // A clear gap between the season button and Watch later beside it (it also grows when active).
+  seasonStepperGap: { marginEnd: s(16) },
   detailBtnFilled: { backgroundColor: "#fff" },
   detailBtnOutline: { backgroundColor: "rgba(24,24,27,0.6)", borderColor: "rgba(255,255,255,0.2)" },
   detailBtnFocusedFilled: { borderColor: "rgba(255,255,255,0.5)" },
@@ -1434,7 +1453,8 @@ const styles = StyleSheet.create({
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.15)", marginBottom: s(14), maxWidth: CAST_MAX_WIDTH },
   // On a series the cast comes after the episode title/description - a clear gap above its divider,
   // which otherwise sat tucked right under the description text.
-  dividerAfterEpisodes: { marginTop: s(30) },
+  // Deliberately empty black space before the cast, so the page doesn't feel crowded.
+  dividerAfterEpisodes: { marginTop: s(64) },
   sectionLabelRow: { flexDirection: "row", alignItems: "center", gap: s(8), marginBottom: s(12) },
   sectionLabel: { color: colors.textSecondary, fontSize: fs(13), fontFamily: font.bold },
   // Capped at the screen's actual midpoint (not the earlier full-bleed-to-the-edge horizontal
@@ -1562,7 +1582,7 @@ const styles = StyleSheet.create({
   // One shared block below the whole row instead of per-card text - see focusedEpisodeId's own
   // comment. Bigger type than the old per-card title/story now that it's not competing for space
   // inside a small card.
-  episodeInfoBlock: { marginTop: s(4), maxWidth: CAST_MAX_WIDTH, gap: s(6) },
+  episodeInfoBlock: { marginTop: s(22), maxWidth: CAST_MAX_WIDTH, gap: s(6) },
   episodeInfoYear: { color: colors.textMuted, fontSize: fs(12), fontFamily: font.bold },
   // Both bumped slightly (was 16/13) per explicit request - easier to read at a glance from the
   // couch without the title/description reading as an afterthought next to the episode cards.

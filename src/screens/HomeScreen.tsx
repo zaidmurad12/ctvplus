@@ -714,7 +714,8 @@ const styles = StyleSheet.create({
   heroDotActive: { width: s(24), backgroundColor: "#fff" },
   heroContent: { padding: s(32), paddingLeft: spacing.contentStart, gap: s(10) },
   // Enlarged (was fs(38), then 44, then 50) - stands in for a missing title logo, per request.
-  heroTitle: { color: "#fff", fontSize: fs(54), maxWidth: s(700), fontFamily: font.black, textShadowColor: "rgba(0,0,0,0.6)", textShadowOffset: { width: 0, height: 3 }, textShadowRadius: 10 },
+  // Only shown for titles with no logo - bigger and in capitals so it reads like one (per request).
+  heroTitle: { color: "#fff", fontSize: fs(66), lineHeight: fs(74), textTransform: "uppercase", maxWidth: s(760), fontFamily: font.black, textShadowColor: "rgba(0,0,0,0.6)", textShadowOffset: { width: 0, height: 3 }, textShadowRadius: 10 },
   // One line - type, year, duration, rating (with its IMDb badge).
   heroMetaRow: { flexDirection: "row", gap: s(10), alignItems: "center" },
   heroMetaLine: { color: colors.textSecondary, fontSize: fs(13), fontFamily: font.bold },
@@ -813,6 +814,6 @@ const styles = StyleSheet.create({
   // this now sits on the artwork itself, over a dark gradient built to keep it readable
   // regardless of focus, so dimming it unfocused had nothing left to actually contrast against.
   // Stands in for a missing title logo (s(40) tall) - enlarged from fs(16), then 20, then 22, per request.
-  recentTitle: { color: "#fff", fontSize: fs(24), fontFamily: font.bold },
+  recentTitle: { color: "#fff", fontSize: fs(30), fontFamily: font.black, textTransform: "uppercase" },
   recentMeta: { flex: 1, color: "rgba(255,255,255,0.75)", fontSize: fs(12), fontFamily: font.semiBold },
 });
