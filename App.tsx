@@ -110,19 +110,16 @@ export default function App() {
   // (Sidebar/Home/Library/Settings) used to remount in that same commit - reported as exiting a
   // movie still being slow. Holding them back until the details screen is already on screen moves
   // that cost off the exit itself.
+  // Set by handleExitPlayer itself, in the same update that closes the player - it used to be set by
+  // an effect watching `playing`, which only ran *after* that update had already rendered, so the
+  // very commit that closed the player still mounted Sidebar/Home/Library/Settings in full (then
+  // unmounted them again, then rebuilt them 2.5s later) - reported as exiting a video being very slow.
   const [deferSections, setDeferSections] = useState(false);
-  const wasPlayingRef = useRef(false);
   useEffect(() => {
-    if (playing) {
-      wasPlayingRef.current = true;
-      return;
-    }
-    if (!wasPlayingRef.current) return;
-    wasPlayingRef.current = false;
-    setDeferSections(true);
+    if (!deferSections) return;
     const timer = setTimeout(() => setDeferSections(false), 2500);
     return () => clearTimeout(timer);
-  }, [playing]);
+  }, [deferSections]);
   // Closing the details screen needs Home right away - no point holding it back any longer then.
   useEffect(() => {
     if (!selectedMovie) setDeferSections(false);
@@ -605,6 +602,7 @@ export default function App() {
   const handleExitPlayer = useCallback(() => {
     setExitBackdrop(posterUrl(playing?.movie.backdrop || playing?.movie.poster, "w1280"));
     const showTimer = setTimeout(() => setExitTransition(true), 1000);
+    setDeferSections(true);
     setPlaying(null);
     const safetyCeiling = setTimeout(clearExitTransition, 20000);
     requestAnimationFrame(() => requestAnimationFrame(clearExitTransition));

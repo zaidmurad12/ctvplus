@@ -165,9 +165,10 @@ function EpisodeRow({
                         {pickText(ep.titleAr, ep.titleEn, lang)}
                       </Text>
                       {isPlayingNow ? (
+                        // A check mark on the episode that's playing (was a "Now Playing" pill), per
+                        // request - the same white circle as the watched badge.
                         <View style={styles.nowPlayingBadge}>
-                          <Play size={s(9)} color="#000" fill="#000" />
-                          <Text style={styles.nowPlayingText}>{lang === "ar" ? "يُعرض الآن" : "Now Playing"}</Text>
+                          <Check size={s(12)} color="#000" strokeWidth={3.5} />
                         </View>
                       ) : !ep.hasPlayableStream ? (
                         <View style={styles.comingSoonBadge}>
@@ -251,15 +252,13 @@ const styles = StyleSheet.create({
   // chunk of the actual image) - filled white to read as "active" the same way cardFocused's own
   // white border and the season indicator's focused fill do.
   nowPlayingBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: s(3),
+    width: s(20),
+    height: s(20),
+    borderRadius: s(10),
     backgroundColor: "#fff",
-    borderRadius: 4,
-    paddingHorizontal: s(6),
-    paddingVertical: s(3),
+    alignItems: "center",
+    justifyContent: "center",
   },
-  nowPlayingText: { color: "#000", fontSize: fs(10), fontFamily: font.black },
   // Pinned to the thumbnail's own bottom edge (was a separate line of text below the whole card)
   // - see thumbBox's own LinearGradient for the fade this now sits on top of. Title takes
   // whatever width the trailing status (duration/coming-soon/now-playing) doesn't need, so a long
