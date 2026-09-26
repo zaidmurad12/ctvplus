@@ -620,7 +620,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
       contentContainerStyle={[styles.content, isSeries && styles.seriesContent]}
       scrollEnabled={canScroll}
     >
-      <View style={styles.hero}>
+      <View style={[styles.hero, movie.type === "series" && styles.heroSeries]}>
         {/* Same fix as HomeScreen's own hero backdrop (see its comment): a plain absoluteFill
             Image with the default "cover" resizeMode centers its crop, which - for a backdrop
             shorter (in its own 16:9) than `hero`'s own box - crops evenly off both the top and
@@ -763,9 +763,9 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
           style={StyleSheet.absoluteFill}
         />
 
-        <Image source={{ uri: posterUrl(movie.poster || movie.backdrop, "w780") }} style={styles.poster} fadeDuration={0} />
+        <Image source={{ uri: posterUrl(movie.poster || movie.backdrop, "w780") }} style={[styles.poster, movie.type === "series" && styles.posterSeries]} fadeDuration={0} />
 
-        <View style={styles.infoCol}>
+        <View style={[styles.infoCol, movie.type === "series" && styles.infoColSeries]}>
           {movie.logoUrl || movie.titleLogo ? (
             <LogoImage uri={posterUrl(movie.logoUrl || movie.titleLogo, "w780")} height={s(95)} maxWidth={s(460)} style={styles.titleLogo} />
           ) : (
@@ -1068,28 +1068,6 @@ const EpisodeRail = React.memo(function EpisodeRail({
 
   return (
     <>
-      {/* Above the episode cards now (was below them), per request - the cards themselves then show
-          in full, with the cast further down near the bottom of the screen. Fixed height, so moving
-          between episodes with shorter or longer descriptions doesn't make the cards jump. */}
-      {!!shownEpisode && (
-        <View style={styles.episodeInfoBlock}>
-          {/* Season number now sits right beside the year, per explicit request - one combined
-              fact line instead of the year standing alone with nothing to place it in the show. */}
-          {(!!seasonYear || !!season.number) && (
-            <Text style={styles.episodeInfoYear}>
-              {[seasonYear, lang === "ar" ? `الموسم ${season.number}` : `Season ${season.number}`].filter(Boolean).join(" • ")}
-            </Text>
-          )}
-          <Text numberOfLines={1} style={styles.episodeInfoTitle}>
-            {pickText(shownEpisode.titleAr, shownEpisode.titleEn, lang)}
-          </Text>
-          {!!(shownEpisode.storyAr || shownEpisode.storyEn) && (
-            <Text numberOfLines={2} style={styles.episodeInfoStory}>
-              {pickText(shownEpisode.storyAr, shownEpisode.storyEn, lang)}
-            </Text>
-          )}
-        </View>
-      )}
       <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.episodeList}>
         {season.episodes.slice(0, renderCount).map((ep, i) => (
           <EpisodeCard
@@ -1109,6 +1087,25 @@ const EpisodeRail = React.memo(function EpisodeRail({
           />
         ))}
       </ScrollView>
+      {!!shownEpisode && (
+        <View style={styles.episodeInfoBlock}>
+          {/* Season number now sits right beside the year, per explicit request - one combined
+              fact line instead of the year standing alone with nothing to place it in the show. */}
+          {(!!seasonYear || !!season.number) && (
+            <Text style={styles.episodeInfoYear}>
+              {[seasonYear, lang === "ar" ? `الموسم ${season.number}` : `Season ${season.number}`].filter(Boolean).join(" • ")}
+            </Text>
+          )}
+          <Text numberOfLines={1} style={styles.episodeInfoTitle}>
+            {pickText(shownEpisode.titleAr, shownEpisode.titleEn, lang)}
+          </Text>
+          {!!(shownEpisode.storyAr || shownEpisode.storyEn) && (
+            <Text numberOfLines={3} style={styles.episodeInfoStory}>
+              {pickText(shownEpisode.storyAr, shownEpisode.storyEn, lang)}
+            </Text>
+          )}
+        </View>
+      )}
     </>
   );
 });
@@ -1265,6 +1262,15 @@ const CAST_BLOCK_ESTIMATE = s(210);
 // itself needs to be at least tall enough for that poster regardless of how short the actual
 // screen turns out to be.
 const HERO_HEIGHT = Math.max(POSTER_H + s(40), SCREEN_H - CAST_BLOCK_ESTIMATE);
+// A series' hero is shorter, so its season chips and episode cards show in full on the first screen
+// without scrolling (with the film-sized hero - its height floored by the big poster - only the top
+// of the episode cards showed). SERIES_BELOW_HERO ~ seasons margin + chip row + gap + the episode
+// list's margin/padding + one card (s(240) wide, 16:9, bordered). Floored so the title/logo, facts
+// and buttons column still fits; the poster shrinks to match.
+const SERIES_BELOW_HERO = s(276);
+const HERO_HEIGHT_SERIES = Math.min(HERO_HEIGHT, Math.max(s(300), SCREEN_H - SERIES_BELOW_HERO));
+const POSTER_H_SERIES = Math.min(POSTER_H, HERO_HEIGHT_SERIES - s(40));
+const POSTER_W_SERIES = Math.round((POSTER_H_SERIES * 2) / 3);
 // Ends at the screen's actual horizontal midpoint, not a fixed width - the section starts at
 // spacing.contentStart from the left (the body's own paddingLeft), so capping its width at
 // half the screen minus that offset is what makes it stop exactly at mid-screen on any
@@ -1281,6 +1287,9 @@ const styles = StyleSheet.create({
   // big s(150) cushion to not sit flush against the bottom edge) - only a small margin below it.
   seriesContent: { paddingBottom: s(28) },
   hero: { height: HERO_HEIGHT, position: "relative", overflow: "hidden" },
+  heroSeries: { height: HERO_HEIGHT_SERIES },
+  posterSeries: { width: POSTER_W_SERIES, height: POSTER_H_SERIES },
+  infoColSeries: { right: POSTER_W_SERIES + s(28) + s(48) },
   heroBackdrop: { position: "absolute", top: 0, left: 0, right: 0, width: "100%", aspectRatio: 16 / 9 },
   // Poster on the end side, text starting right after the sidebar - matches the app's own
   // left-to-right content flow (sidebar, then content) instead of mirroring the RTL web
@@ -1494,7 +1503,7 @@ const styles = StyleSheet.create({
   // One shared block below the whole row instead of per-card text - see focusedEpisodeId's own
   // comment. Bigger type than the old per-card title/story now that it's not competing for space
   // inside a small card.
-  episodeInfoBlock: { height: s(104), maxWidth: CAST_MAX_WIDTH, gap: s(6), overflow: "hidden" },
+  episodeInfoBlock: { marginTop: s(4), maxWidth: CAST_MAX_WIDTH, gap: s(6) },
   episodeInfoYear: { color: colors.textMuted, fontSize: fs(12), fontFamily: font.bold },
   // Both bumped slightly (was 16/13) per explicit request - easier to read at a glance from the
   // couch without the title/description reading as an afterthought next to the episode cards.
