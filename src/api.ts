@@ -16,7 +16,7 @@ import {
   type CinemanaInfo,
   type CinemanaSearchItem,
 } from "./providers/cinemana";
-import { searchCee, makeCeeId, fetchCeeEpisodes, fetchCeeInfo, fetchCeeVideos, type CeeSearchItem } from "./providers/cee";
+import { searchCee, makeCeeId, fetchCeeEpisodes, fetchCeeInfo, fetchCeeVideos, type CeeSearchItem, type CeeInfo } from "./providers/cee";
 import { qualityRank, qualityLabel } from "./quality";
 
 const NEW_API_BASE = "https://ctv-platform-backend-afcem6ospa-ww.a.run.app/api/v1";
@@ -609,7 +609,8 @@ async function fetchCeePlaybackAs(rawCeeId: string, kind: "movie" | "series"): P
     if (!nb) return { servers: [], subtitles: [] };
     ceeId = makeCeeId(nb);
   }
-  const [videos, info] = await Promise.all([fetchCeeVideos(ceeId), fetchCeeInfo(ceeId)]);
+  // The info request only carries subtitles - its failing must not throw away the videos.
+  const [videos, info] = await Promise.all([fetchCeeVideos(ceeId), fetchCeeInfo(ceeId).catch(() => ({}) as CeeInfo)]);
   return { servers: mapCinemanaVideos(videos), subtitles: mapCinemanaSubtitles(info) };
 }
 
@@ -1074,11 +1075,14 @@ async function fetchCinemanaPlaybackAs(rawCinemanaId: string, kind: "movie" | "s
     const nb = firstEpisodeNb(await fetchCinemanaEpisodes(rawCinemanaId));
     if (!nb) return { servers: [], subtitles: [] };
     const episodeId = makeCinemanaId(nb);
-    const [videos, info] = await Promise.all([fetchCinemanaEpisodeVideos(episodeId), fetchCinemanaInfo(episodeId)]);
+    const [videos, info] = await Promise.all([fetchCinemanaEpisodeVideos(episodeId), fetchCinemanaInfo(episodeId).catch(() => ({}) as CinemanaInfo)]);
     return { servers: mapCinemanaVideos(videos), subtitles: mapCinemanaSubtitles(info) };
   }
   const cinemanaId = rawCinemanaId;
-  const [videos, info] = await Promise.all([fetchCinemanaVideos(cinemanaId), fetchCinemanaInfo(cinemanaId)]);
+  // Cinemana answers some titles' info request with HTTP 400 (El Sett) while their video list is
+  // fine - that one failure used to discard every link ("0 Cinemana links"). Info only carries the
+  // subtitles, so it's optional now.
+  const [videos, info] = await Promise.all([fetchCinemanaVideos(cinemanaId), fetchCinemanaInfo(cinemanaId).catch(() => ({}) as CinemanaInfo)]);
   return { servers: mapCinemanaVideos(videos), subtitles: mapCinemanaSubtitles(info) };
 }
 

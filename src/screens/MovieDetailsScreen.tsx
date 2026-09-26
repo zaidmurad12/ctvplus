@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Image, ScrollView, StyleSheet, Dimensions, ActivityIndicator, Animated, ToastAndroid, NativeModules, NativeEventEmitter } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import { Play, Bookmark, Users, Check, ChevronDown, ChevronUp, Languages } from "lucide-react-native";
-import type { Movie, Season, Episode, StreamServer, SubtitleTrack, SourceVersion } from "../api";
+import type { Movie, Season, Episode, StreamServer, SubtitleTrack, SourceVersion, PlaybackMapping } from "../api";
 import { findSourceVersions, posterUrl, fetchCollection, fetchMovieDetail, fetchShowDetail, fetchEpisodePlayback, fetchCinemanaMoviePlayback, fetchCeeMoviePlayback, findCinemanaMatch, findCeeMatch, bestQualityLabel } from "../api";
 import { pickBestServers } from "../streamSelect";
 import Focusable from "../components/Focusable";
@@ -276,9 +276,16 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
       const found = (await Promise.all([findCinemanaMatch(m), findCeeMatch(m)])).filter((source): source is NonNullable<typeof source> => !!source);
       return [...found.filter((source) => pinnedProviders.has(source.provider)), ...found.filter((source) => !pinnedProviders.has(source.provider))];
     }
-    return m.playbackSources?.length
-      ? m.playbackSources
-      : [m.playback, ...(await Promise.all([findCinemanaMatch(m), findCeeMatch(m)]))].filter((source): source is NonNullable<typeof source> => !!source);
+    if (m.playbackSources?.length) return m.playbackSources;
+    const [cinemana, cee] = await Promise.all([findCinemanaMatch(m), findCeeMatch(m)]);
+    // CEE mirrors Cinemana under the same entry numbers, so when only one of the two matched (the
+    // other's search timed out or spells the title differently), the other is tried under the same
+    // number too - an entry that isn't there just returns no videos.
+    const cinemanaNb = cinemana?.cinemanaId?.replace(/^cinemana:/, "");
+    const ceeNb = cee?.ceeId?.replace(/^cee:/, "");
+    const mirroredCee: PlaybackMapping | null = !cee && cinemanaNb ? { provider: "cee", ceeId: `cee:${cinemanaNb}`, available: true } : null;
+    const mirroredCinemana: PlaybackMapping | null = !cinemana && ceeNb ? { provider: "cinemana", cinemanaId: `cinemana:${ceeNb}`, available: true } : null;
+    return [m.playback, cinemana ?? mirroredCinemana, cee ?? mirroredCee].filter((source): source is NonNullable<typeof source> => !!source);
   };
   const playMovie = async () => {
     if (resolvingMovie) return;
