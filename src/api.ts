@@ -432,10 +432,20 @@ export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]>
   const cached = versionCache.get(movie.id);
   if (cached) return cached;
   const type = movie.type === "series" ? "series" : "movie";
+  // A search that failed (timeout, blocked request) used to count as "no results", and the empty
+  // answer was then cached for the whole session - so one slow moment on the TV's connection hid
+  // the subtitled/dubbed button for that title until the app restarted. Failures are tracked now:
+  // an empty result is only cached when every search actually answered, otherwise this throws and
+  // the caller tries again.
+  let failed = false;
+  const onFail = <T,>(fallback: T) => () => {
+    failed = true;
+    return fallback;
+  };
   const search = async (queries: string[]) => {
     const [cin, cee] = await Promise.all([
-      Promise.all(queries.map((q) => searchCinemana(q, type).catch(() => [] as CinemanaSearchItem[]))),
-      Promise.all(queries.map((q) => searchCee(q, type).catch(() => [] as CeeSearchItem[]))),
+      Promise.all(queries.map((q) => searchCinemana(q, type).catch(onFail([] as CinemanaSearchItem[])))),
+      Promise.all(queries.map((q) => searchCee(q, type).catch(onFail([] as CeeSearchItem[])))),
     ]);
     return { cin: cin.flat(), cee: cee.flat() as CinemanaSearchItem[] };
   };
@@ -443,6 +453,7 @@ export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]>
   const first = await search(baseQueries);
   const best = matchTmdbWithCinemana(movie, first.cin) ?? matchTmdbWithCinemana(movie, first.cee);
   if (!best) {
+    if (failed) throw new Error("source search failed");
     versionCache.set(movie.id, []);
     return [];
   }
@@ -499,6 +510,7 @@ export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]>
   const subtitled = versions.find((v) => !v.dubbed);
   const dubbed = versions.find((v) => v.dubbed);
   const result = subtitled && dubbed ? (versions[0] === dubbed ? [dubbed, subtitled] : [subtitled, dubbed]) : [];
+  if (!result.length && failed) throw new Error("source search failed");
   versionCache.set(movie.id, result);
   return result;
 }
@@ -1189,7 +1201,7 @@ export function youtubeEmbedUrl(
   // bumping this when its layout changes is what makes TVs fetch the new one.
   if (opts.preview) {
     params.set("preview", "1");
-    params.set("pv", "2");
+    params.set("pv", "3");
   }
   return `${API_BASE}/youtube-embed?${params.toString()}`;
 }

@@ -121,13 +121,18 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     let cancelled = false;
     // A moment after the page settles, not the instant it loads - the lookup runs a few source
     // searches, which shouldn't compete with the page's own images and trailer starting up.
-    const timer = setTimeout(() => {
+    // A failed lookup (a source search timed out) is tried again a few seconds later, up to twice.
+    let timer: ReturnType<typeof setTimeout>;
+    const lookup = (attempt: number) => {
       findSourceVersions(movie)
         .then((found) => {
           if (!cancelled) setVersions(found);
         })
-        .catch(() => {});
-    }, 1500);
+        .catch(() => {
+          if (!cancelled && attempt < 2) timer = setTimeout(() => lookup(attempt + 1), 5000);
+        });
+    };
+    timer = setTimeout(() => lookup(0), 1000);
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -304,9 +309,12 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // the embed is treated as failed and this reverts to the plain backdrop image instead of
   // leaving a broken player on screen indefinitely.
   const trailerConfirmedRef = useRef(false);
+  // Full plays of the trailer so far (the page reports each restart) - see onMessage's "loop".
+  const trailerLoopsRef = useRef(0);
   useEffect(() => {
     if (!showTrailer) return;
     trailerConfirmedRef.current = false;
+    trailerLoopsRef.current = 0;
     // Raised from 6000 - reported as "the trailer never plays, just a loading mark then it
     // disappears," which this window being too short exactly explains: this screen's own detail/
     // cast/collection fetches are all competing for bandwidth/CPU at the same moment the trailer's
@@ -704,6 +712,22 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                 }
                 if (msg?.startsWith("error:")) {
                   setShowTrailer(false);
+                  return;
+                }
+                // The preview page loops by itself (no YouTube playlist, whose loop drew previous/
+                // next arrows over the trailer). After two full plays the trailer is unloaded and
+                // the backdrop stays - a WebView decoding video forever on a page left open was
+                // the heaviest thing on this screen.
+                if (msg === "loop") {
+                  trailerLoopsRef.current += 1;
+                  if (trailerLoopsRef.current >= 2) setShowTrailer(false);
+                  return;
+                }
+                // Paused (2) or buffering (3) after it had been playing: YouTube draws its play
+                // icon / spinner over the picture then, which controls:0 doesn't stop - the
+                // backdrop covers it until "playing" comes back.
+                if (trailerConfirmedRef.current && (msg === "diag:state:2" || msg === "diag:state:3")) {
+                  setTrailerLoopCover(true);
                   return;
                 }
                 // 0 is YT.PlayerState.ENDED - momentary here (loop+playlist restarts it
