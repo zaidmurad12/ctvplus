@@ -99,7 +99,9 @@ export function rawCinemanaId(id: string): string {
 const searchCache = new Map<string, { at: number; value: Promise<CinemanaSearchItem[]> }>();
 
 export function searchCinemana(query: string, type?: "movie" | "series"): Promise<CinemanaSearchItem[]> {
-  return cachedSearch(searchCache, `${type ?? ""}|${query.trim().toLowerCase()}`, () => searchCinemanaUncached(query, type));
+  // Keyed on the exact query: matching retries spelling variants (case, a trailing space...) that
+  // the source can answer differently, so they mustn't share one cache entry.
+  return cachedSearch(searchCache, `${type ?? ""}|${query}`, () => searchCinemanaUncached(query, type));
 }
 
 function searchCinemanaUncached(query: string, type?: "movie" | "series"): Promise<CinemanaSearchItem[]> {

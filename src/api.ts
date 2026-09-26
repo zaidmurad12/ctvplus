@@ -357,6 +357,38 @@ export function matchTmdbWithCinemana(tmdbMovie: Movie, candidates: CinemanaSear
   return bestScore >= CINEMANA_MATCH_THRESHOLD ? best : null;
 }
 
+// Other spellings of a title, tried only when the plain titles found nothing: the sources' search
+// sometimes answers one spelling and not another - capitals vs not, a subtitle after a colon, a
+// space before or after (confirmed by hand: a title that found nothing matched once re-cased).
+function titleVariants(titles: string[]): string[] {
+  const variants = new Set<string>();
+  for (const title of titles) {
+    const base = title.trim();
+    const lower = base.toLowerCase();
+    const titleCase = lower.replace(/(^|[\s\-:(])(\p{L})/gu, (_m, before: string, letter: string) => before + letter.toUpperCase());
+    const noPunctuation = base.replace(/[:\-–—'’.,!?&]/g, " ").replace(/\s+/g, " ").trim();
+    const beforeSubtitle = base.split(/\s*[:\-–—]\s+/)[0].trim();
+    for (const v of [lower, titleCase, base.toUpperCase(), noPunctuation, beforeSubtitle, `${base} `, ` ${base}`]) {
+      if (v.trim().length >= 2 && !titles.includes(v)) variants.add(v);
+    }
+  }
+  return [...variants].slice(0, 10);
+}
+
+// Searches a source by the title's own spellings first; only if that matches nothing, by
+// titleVariants too. A single failed search no longer fails the whole lookup.
+async function searchAndMatch(movie: Movie, search: (query: string) => Promise<CinemanaSearchItem[]>): Promise<CinemanaSearchItem | null> {
+  const titles = [...new Set([movie.titleEn, movie.originalTitle, movie.titleAr].filter((t): t is string => !!t?.trim()).map((t) => t.trim()))];
+  const run = async (queries: string[]) => {
+    const groups = await Promise.all(queries.map((query) => search(query).catch(() => [] as CinemanaSearchItem[])));
+    return matchTmdbWithCinemana(movie, groups.flat());
+  };
+  const first = await run(titles);
+  if (first) return first;
+  const variants = titleVariants(titles);
+  return variants.length ? run(variants) : null;
+}
+
 export async function findCinemanaMatch(movie: Movie): Promise<PlaybackMapping | null> {
   const linked = movie.sourceLinks?.find((link) => link.source === "cinemana");
   if (linked) return { provider: "cinemana", cinemanaId: makeCinemanaId(linked.nb), kind: linked.kind, available: true };
@@ -364,9 +396,7 @@ export async function findCinemanaMatch(movie: Movie): Promise<PlaybackMapping |
   if (cached) return cached;
   const type = movie.type === "series" ? "series" : "movie";
   try {
-    const queries = [...new Set([movie.titleEn, movie.originalTitle, movie.titleAr].filter((title): title is string => !!title?.trim()))];
-    const candidateGroups = await Promise.all(queries.map((query) => searchCinemana(query, type)));
-    const match = matchTmdbWithCinemana(movie, candidateGroups.flat());
+    const match = await searchAndMatch(movie, (query) => searchCinemana(query, type));
     if (!match || match.nb == null) return null;
     const playback: PlaybackMapping = { provider: "cinemana", cinemanaId: makeCinemanaId(match.nb), available: true };
     cacheMatch(movie.id, playback);
@@ -531,9 +561,7 @@ export async function findCeeMatch(movie: Movie): Promise<PlaybackMapping | null
   if (cached) return cached;
   const type = movie.type === "series" ? "series" : "movie";
   try {
-    const queries = [...new Set([movie.titleEn, movie.originalTitle, movie.titleAr].filter((title): title is string => !!title?.trim()))];
-    const groups = await Promise.all(queries.map((query) => searchCee(query, type)));
-    const match = matchTmdbWithCinemana(movie, groups.flat() as CeeSearchItem[]);
+    const match = await searchAndMatch(movie, (query) => searchCee(query, type) as Promise<CinemanaSearchItem[]>);
     if (!match || match.nb == null) return null;
     const playback: PlaybackMapping = { provider: "cee", ceeId: makeCeeId(match.nb), available: true };
     cacheMatch(cacheKey, playback);

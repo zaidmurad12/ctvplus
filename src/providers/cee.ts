@@ -98,7 +98,8 @@ export function rawCeeId(id: string): string {
 const searchCache = new Map<string, { at: number; value: Promise<CeeSearchItem[]> }>();
 
 export function searchCee(query: string, type?: "movie" | "series"): Promise<CeeSearchItem[]> {
-  return cachedSearch(searchCache, `${type ?? ""}|${query.trim().toLowerCase()}`, () => searchCeeUncached(query, type));
+  // Exact query as the key - see searchCinemana.
+  return cachedSearch(searchCache, `${type ?? ""}|${query}`, () => searchCeeUncached(query, type));
 }
 
 function searchCeeUncached(query: string, type?: "movie" | "series"): Promise<CeeSearchItem[]> {
