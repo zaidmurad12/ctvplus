@@ -105,12 +105,6 @@ export default function App() {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => dispatchBack());
     return () => sub.remove();
   }, []);
-  // See the render section below (where this actually gates Home/Sidebar's own remount) for the
-  // full reasoning. Stays false for the first few seconds of every playback session - long enough
-  // for the player's own initial focus grab to have already settled - then flips true so
-  // Home/Sidebar can quietly rebuild in the background, hidden, well ahead of when exiting would
-  // otherwise need to build them from scratch.
-  const [homeWarm, setHomeWarm] = useState(false);
   // True for a short while right after a player exit. The screen revealed on exit is always the
   // movie's details screen (still mounted underneath the player), but every hidden section
   // (Sidebar/Home/Library/Settings) used to remount in that same commit - reported as exiting a
@@ -133,20 +127,6 @@ export default function App() {
   useEffect(() => {
     if (!selectedMovie) setDeferSections(false);
   }, [selectedMovie]);
-  // Reset at the *start* of playback now, not at exit - resetting on exit unmounted a Home that had
-  // already been rebuilt in the background (while deferSections above held the remount back),
-  // throwing that work away right when it was about to pay off.
-  const isPlaying = !!playing;
-  useEffect(() => {
-    if (!isPlaying) return;
-    setHomeWarm(false);
-    // Was 4000 - that landed Home's CPU-heavy remount right inside the stream's own startup
-    // buffering, reported as playback starting slowly and stuttering in its first seconds. Late
-    // enough now that the video is well past startup; an exit before it just falls back to the
-    // normal remount (covered by handleExitPlayer's own transition).
-    const timer = setTimeout(() => setHomeWarm(true), 20000);
-    return () => clearTimeout(timer);
-  }, [isPlaying]);
   // Purely a delayed-appearance visual bridge for handleExitPlayer below - never shown outright
   // the instant the player exits.
   const [exitTransition, setExitTransition] = useState(false);
@@ -743,7 +723,12 @@ export default function App() {
               renders inside it (see just before this View's end), in Home's place, so the sidebar
               stays on screen next to it like on every other section, per request. */}
           <View style={[StyleSheet.absoluteFill, (selectedPerson || selectedMovie || !!playing) && styles.sectionHidden]}>
-            {((!playing && !deferSections) || homeWarm) && (
+            {/* Home/Sidebar stay unmounted for the whole playback (they used to be rebuilt in the
+                background 20s in, "homeWarm", to make the exit faster). Their images and views
+                were a real share of the memory the TV's own memory killer ended the app at,
+                every ~10 minutes mid-film - and exits no longer need it: deferSections rebuilds
+                them just after the details screen is already back on screen. */}
+            {!playing && !deferSections && (
               <>
                 <Suspense fallback={null}>
                   <Sidebar active={section} onSelect={handleSelectSection} />

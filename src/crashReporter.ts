@@ -34,6 +34,12 @@ async function reportPreviousExits(): Promise<void> {
     const info = await CrashInfo.collect();
     deviceInfo = { device: info.device ?? "", android: info.android ?? "" };
     if (info.javaCrash) sendCrashReport({ kind: "java_crash", message: String(info.javaCrash).split("\n")[1] ?? "", detail: info.javaCrash });
+    // What memory looked like in the minutes before the previous session ended (recorded once a
+    // minute during playback - see recordPlaybackMemory). Only worth sending when that session
+    // actually ended abnormally.
+    if (info.memoryTrail && (info.exits?.length || info.javaCrash)) {
+      sendCrashReport({ kind: "memory_trail", message: "memory during the last playback before exit", detail: info.memoryTrail });
+    }
     for (const exit of info.exits ?? []) {
       sendCrashReport({
         kind: `exit_${exit.reason}`,
@@ -56,4 +62,15 @@ export function installCrashReporting(): void {
   // A few seconds in, past the app's own first loads - but short, so an app that keeps crashing
   // soon after launch still gets to report the previous crash.
   setTimeout(reportPreviousExits, 6000);
+}
+
+// Called once a minute while a video plays (see VideoPlayer): appends a memory snapshot to a short
+// local trail that the next launch reports if this session gets killed.
+export function recordPlaybackMemory(label: string): void {
+  NativeModules.CrashInfo?.recordMemory?.(label);
+}
+
+// Drops decoded images from memory (see CrashInfoModule.trimImageMemory) - called as playback starts.
+export function trimImageMemory(): void {
+  NativeModules.CrashInfo?.trimImageMemory?.();
 }

@@ -26,6 +26,7 @@ import { decodeSubtitleBytes } from "../subtitleEncoding";
 import { isRtlText } from "../rtl";
 import { pushBackHandler } from "../backStack";
 import { loadJson, saveJson, storageKeys } from "../storage";
+import { recordPlaybackMemory, trimImageMemory } from "../crashReporter";
 import { Lang, ageRatingDescription, ageRatingColor, countryName, languageName, genreName } from "../i18n";
 
 interface Props {
@@ -228,12 +229,15 @@ export default function VideoPlayerScreen({
   const videoBufferConfig = React.useMemo(
     () => ({
       minBufferMs: 15000,
-      maxBufferMs: 45000,
+      // Was 45s / 45% of the Java heap - on a high-bitrate file that let the buffer alone reach
+      // 100-200MB (the app requests largeHeap), a big part of the ~270MB the TV's memory killer
+      // ended the app at mid-film. 30s is still plenty of cushion against a brief network dip.
+      maxBufferMs: 30000,
       // 4K moves several times the data per second of 1080p - a bigger cushion before starting
       // and after a stall keeps a brief throughput dip from turning into stutter.
       bufferForPlaybackMs: currentIs4K ? 6000 : 2500,
       bufferForPlaybackAfterRebufferMs: currentIs4K ? 12000 : 7000,
-      maxHeapAllocationPercent: 0.45,
+      maxHeapAllocationPercent: 0.2,
     }),
     [currentIs4K]
   );
@@ -970,6 +974,19 @@ export default function VideoPlayerScreen({
   // updated every tick is immune to that: `.current` is always the latest value regardless of
   // which render's closure is reading it.
   const currentTimeRef = useRef(0);
+  // Memory during playback. Reported: the app killed every ~10 minutes mid-film, at the same
+  // ~250-275MB each time, by the TV's own memory killer (exit reason SIGNALED, foreground) - the
+  // video decoder needs room and the biggest process goes. Images decoded while browsing are
+  // dropped as playback starts, and a snapshot is kept once a minute so that if it ever happens
+  // again, the next launch's report shows what was growing (see crashReporter.ts).
+  useEffect(() => {
+    const trimTimer = setTimeout(trimImageMemory, 1500);
+    const memTimer = setInterval(() => recordPlaybackMemory(`t=${Math.round(currentTimeRef.current / 60)}m`), 60000);
+    return () => {
+      clearTimeout(trimTimer);
+      clearInterval(memTimer);
+    };
+  }, []);
   useEffect(() => {
     currentTimeRef.current = progress?.currentTime ?? 0;
   }, [progress?.currentTime]);

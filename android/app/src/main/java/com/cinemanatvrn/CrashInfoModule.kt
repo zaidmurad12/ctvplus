@@ -4,6 +4,8 @@ import android.app.ActivityManager
 import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.Build
+import android.os.Debug
+import com.facebook.drawee.backends.pipeline.Fresco
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -71,9 +73,53 @@ class CrashInfoModule(private val reactContext: ReactApplicationContext) :
         if (newest > lastReported) prefs.edit().putLong(KEY_LAST_EXIT, newest).apply()
       }
       result.putArray("exits", exits)
+      // The memory trail recorded during the previous session's playback (see recordMemory) -
+      // what the process looked like in the minutes before it was killed, if it was.
+      val trailPrefs = reactContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      result.putString("memoryTrail", trailPrefs.getString(KEY_MEMORY_TRAIL, "") ?: "")
+      trailPrefs.edit().remove(KEY_MEMORY_TRAIL).apply()
       promise.resolve(result)
     } catch (e: Exception) {
       promise.reject("CRASH_INFO_FAILED", e)
+    }
+  }
+
+  /**
+   * One memory snapshot appended to a short on-disk trail (last MAX_TRAIL entries), called once a
+   * minute while a video plays. Written locally, not sent: if the system kills the app mid-film the
+   * trail survives, and collect() hands it to the next launch's crash report - showing which part
+   * (Java heap, native heap, graphics) was growing before the kill.
+   */
+  @ReactMethod
+  fun recordMemory(label: String) {
+    try {
+      val mi = Debug.MemoryInfo()
+      Debug.getMemoryInfo(mi)
+      val am = reactContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+      val sys = ActivityManager.MemoryInfo()
+      am.getMemoryInfo(sys)
+      fun mb(kb: String?): Long = (kb?.toLongOrNull() ?: 0L) / 1024
+      val line = "$label pss=${mi.totalPss / 1024} java=${mb(mi.getMemoryStat("summary.java-heap"))} " +
+          "native=${mb(mi.getMemoryStat("summary.native-heap"))} gfx=${mb(mi.getMemoryStat("summary.graphics"))} " +
+          "sysAvail=${sys.availMem / (1024 * 1024)}/${sys.totalMem / (1024 * 1024)}MB low=${sys.lowMemory}"
+      val prefs = reactContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      val trail = (prefs.getString(KEY_MEMORY_TRAIL, "") ?: "").split("\n").filter { it.isNotBlank() }
+      prefs.edit().putString(KEY_MEMORY_TRAIL, (trail + line).takeLast(MAX_TRAIL).joinToString("\n")).apply()
+    } catch (_: Exception) {
+    }
+  }
+
+  /**
+   * Drops every decoded image held in memory (Fresco's bitmap caches). Called as playback starts:
+   * posters/backdrops decoded while browsing otherwise stay resident for the whole film, on TVs
+   * whose memory killer ends the biggest foreground process once the video decoder needs room.
+   * Images still on screen are simply re-decoded from the disk cache when next shown.
+   */
+  @ReactMethod
+  fun trimImageMemory() {
+    try {
+      Fresco.getImagePipeline().clearMemoryCaches()
+    } catch (_: Exception) {
     }
   }
 
@@ -95,5 +141,7 @@ class CrashInfoModule(private val reactContext: ReactApplicationContext) :
     const val CRASH_FILE = "last_crash.txt"
     private const val PREFS = "crash_info"
     private const val KEY_LAST_EXIT = "last_exit_timestamp"
+    private const val KEY_MEMORY_TRAIL = "memory_trail"
+    private const val MAX_TRAIL = 15
   }
 }
