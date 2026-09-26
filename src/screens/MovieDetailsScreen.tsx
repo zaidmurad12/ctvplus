@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Image, ScrollView, StyleSheet, Dimensions, ActivityIndicator, Animated, ToastAndroid, NativeModules, NativeEventEmitter } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
-import { WebView } from "react-native-webview";
 import { Play, Bookmark, Users, Check, ChevronDown, ChevronUp, Languages } from "lucide-react-native";
 import type { Movie, Season, Episode, StreamServer, SubtitleTrack, SourceVersion } from "../api";
-import { findSourceVersions, posterUrl, youtubeVideoId, youtubeEmbedUrl, fetchCollection, fetchMovieDetail, fetchShowDetail, fetchEpisodePlayback, fetchCinemanaMoviePlayback, fetchCeeMoviePlayback, findCinemanaMatch, findCeeMatch, bestQualityLabel } from "../api";
+import { findSourceVersions, posterUrl, fetchCollection, fetchMovieDetail, fetchShowDetail, fetchEpisodePlayback, fetchCinemanaMoviePlayback, fetchCeeMoviePlayback, findCinemanaMatch, findCeeMatch, bestQualityLabel } from "../api";
 import { pickBestServers } from "../streamSelect";
 import Focusable from "../components/Focusable";
 import MovieCard from "../components/MovieCard";
@@ -17,9 +16,6 @@ import { useFocusClamp } from "../useFocusClamp";
 import { useProgressiveReveal } from "../useProgressiveReveal";
 import { pushBackHandler } from "../backStack";
 
-// Lowered from 10000, then 6000, then 4000, then 1500 - still reported as too slow to start each
-// time. Just enough to skip mounting a WebView for a screen the viewer is only passing through.
-const TRAILER_DELAY_MS = 400;
 // See playEpisode's own comment - a floor under how quickly the resolving spinner can disappear
 // again, so a cached/instant fetch still leaves it on screen long enough to actually be seen.
 const MIN_RESOLVE_MS = 200;
@@ -35,8 +31,7 @@ interface Props {
   onBack: () => void;
   isEpisodeWatched: (movieId: string, seasonNumber: number, episodeNumber: number) => boolean;
   // True while the video player is on screen - this screen stays mounted underneath it (see
-  // App.tsx's render tree), so without this the trailer WebView kept decoding a YouTube video,
-  // sound included, for the whole watch, competing with the real stream for CPU/decoder/bandwidth.
+  // App.tsx's render tree); its own animations pause meanwhile.
   playerActive: boolean;
 }
 
@@ -120,7 +115,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     if (detailLoading) return;
     let cancelled = false;
     // A moment after the page settles, not the instant it loads - the lookup runs a few source
-    // searches, which shouldn't compete with the page's own images and trailer starting up.
+    // searches, which shouldn't compete with the page's own images loading.
     // A failed lookup (a source search timed out) is tried again a few seconds later, up to twice.
     let timer: ReturnType<typeof setTimeout>;
     const lookup = (attempt: number) => {
@@ -164,14 +159,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   const versionLabel = (v: SourceVersion) =>
     v.dubbed ? (lang === "ar" ? "مدبلج عربي" : "Arabic dub") : lang === "ar" ? "مترجم" : "Subtitled";
 
-  // Opening another part of the same work replaces this whole screen. The trailer is stopped and
-  // torn down first, and the new part opens a moment later - opening it straight away left the old
-  // trailer's WebView still alive while the new screen (with its own images and trailer) loaded,
-  // a memory spike reported as the app closing when a part was opened while a trailer played.
-  const openPart = (part: Movie) => {
-    stopTrailer();
-    setTimeout(() => onSelectMovie(part), 250);
-  };
+  const openPart = (part: Movie) => onSelectMovie(part);
 
   const isSeries = movie.type === "series" && (movie.seasons?.length ?? 0) > 0;
   const [activeSeason, setActiveSeason] = useState<Season | undefined>(movie.seasons?.[0]);
@@ -181,42 +169,8 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     if (!activeSeason && movie.seasons?.length) setActiveSeason(movie.seasons[0]);
   }, [movie.seasons, activeSeason]);
   const [resolvingEpisodeId, setResolvingEpisodeId] = useState<string | null>(null);
-  const [showTrailer, setShowTrailer] = useState(false);
-  // See the trailer WebView's own onMessage below - covers the brief moment its own loop restart
-  // (playlist+loop, since there's no "seamless" native loop option) flashes YouTube's own
-  // play/seek indicator icons, which happens regardless of controls:0. Cleared again as soon as
-  // "playing" confirms the restart actually completed, or after a short ceiling either way so a
-  // restart that never confirms doesn't leave this stuck covering the trailer forever.
-  const [trailerLoopCover, setTrailerLoopCover] = useState(false);
-  // See the trailer WebView's own style comment below - true only once "playing" confirms real
-  // video is actually decoding, so the cover image right after the WebView can stay up the whole
-  // time before that regardless of what the WebView's own surface is doing underneath.
-  const [trailerReady, setTrailerReady] = useState(false);
   const [parts, setParts] = useState<Movie[]>([]);
-  const trailerVideoId = youtubeVideoId(movie.trailerUrl);
-  // Declared up here (not next to playMovie) since the trailer's own gating below depends on it.
   const [resolvingMovie, setResolvingMovie] = useState(false);
-  // The trailer never runs while a play is being resolved or the player is up - it used to keep
-  // playing (audibly) through the whole resolve and underneath the player, reported as playback
-  // starting slowly and stuttering with the trailer's sound still audible.
-  const trailerSuspended = playerActive || resolvingMovie || resolvingEpisodeId !== null;
-  const trailerWebViewRef = useRef<any>(null);
-  const returnedFromPlayerRef = useRef(false);
-  // Called synchronously from the play handlers, before any state update re-renders - silences
-  // the embed's global YouTube `player` (see the backend's youtube-embed page) through the still-
-  // mounted WebView, then unmounts it, so the sound stops the instant play is pressed even if the
-  // trailer hadn't started yet.
-  const closingRef = useRef(false);
-  useEffect(() => {
-    closingRef.current = false;
-  }, [movie.id]);
-  const stopTrailer = () => {
-    trailerWebViewRef.current?.injectJavaScript("try{player.mute();player.stopVideo();}catch(e){}true;");
-    setShowTrailer(false);
-    setTrailerReady(false);
-    setTrailerLoopCover(false);
-  };
-
   // The app previously had no way at all to look up a movie's other parts - it only ever had
   // the single Movie object the viewer tapped into, with nothing pointing at sibling entries
   // sharing the same collectionId. /api/movies/collection is a dedicated server-side lookup
@@ -284,67 +238,10 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // on native listener registration order.
   useEffect(() => {
     return pushBackHandler(() => {
-      // The trailer's WebView is torn down first, while this page is still showing, and the page
-      // closes a moment later - destroying a WebView mid-video in the same step as revealing Home
-      // held Home back.
-      if (closingRef.current) return true;
-      if (trailerWebViewRef.current) {
-        closingRef.current = true;
-        stopTrailer();
-        setTimeout(onBack, 120);
-      } else {
-        onBack();
-      }
+      onBack();
       return true;
     }, "MovieDetailsScreen");
   }, [onBack]);
-
-  useEffect(() => {
-    setShowTrailer(false);
-    // A restart later (e.g. back from the player) must start covered again, not reveal a WebView
-    // that hasn't painted a frame yet.
-    setTrailerReady(false);
-    if (!trailerVideoId || trailerSuspended) {
-      if (playerActive) returnedFromPlayerRef.current = true;
-      return;
-    }
-    // Coming back from the player, a WebView booting up right away competed with the exit itself
-    // (the player's own teardown, Home rebuilding in the background) - wait until that settles.
-    const delay = returnedFromPlayerRef.current ? 3000 : TRAILER_DELAY_MS;
-    returnedFromPlayerRef.current = false;
-    const timer = setTimeout(() => setShowTrailer(true), delay);
-    return () => clearTimeout(timer);
-  }, [movie.id, trailerVideoId, trailerSuspended, playerActive]);
-
-  // The old version pointed the iframe straight at youtube.com/embed's own autoplay params
-  // and just trusted it worked - WebView's onError only ever catches the *outer* local HTML
-  // document failing to load, never anything going wrong *inside* the embedded iframe (blocked
-  // by the device's network/DNS, no system WebView build capable of running it, YouTube
-  // rejecting the autoplay), so a silently-failed embed just sat there as a dead black
-  // rectangle over the backdrop with no code path that ever noticed. Using the real YouTube
-  // IFrame API lets the page tell us, via postMessage, whether the video actually reached the
-  // *playing* state - if that confirmation never arrives within a few seconds of mounting,
-  // the embed is treated as failed and this reverts to the plain backdrop image instead of
-  // leaving a broken player on screen indefinitely.
-  const trailerConfirmedRef = useRef(false);
-  // Full plays of the trailer so far (the page reports each restart) - see onMessage's "loop".
-  const trailerLoopsRef = useRef(0);
-  useEffect(() => {
-    if (!showTrailer) return;
-    trailerConfirmedRef.current = false;
-    trailerLoopsRef.current = 0;
-    // Raised from 6000 - reported as "the trailer never plays, just a loading mark then it
-    // disappears," which this window being too short exactly explains: this screen's own detail/
-    // cast/collection fetches are all competing for bandwidth/CPU at the same moment the trailer's
-    // WebView is trying to boot up (load the iframe_api script, create the player, start
-    // buffering) right after the viewer just navigated here, unlike VideoPlayerScreen's own
-    // equivalent timeout (also 15s), which runs with no such competing load. 6s was enough on a
-    // fast connection but not reliably otherwise.
-    const timer = setTimeout(() => {
-      if (!trailerConfirmedRef.current) setShowTrailer(false);
-    }, 15000);
-    return () => clearTimeout(timer);
-  }, [showTrailer]);
 
   // A season switch used to leave the episode row wherever its scroll position happened to
   // be from the *previous* season - if that was scrolled a few cards in, the new season's
@@ -375,7 +272,6 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   };
   const playMovie = async () => {
     if (resolvingMovie) return;
-    stopTrailer();
     if (movie.servers?.length) {
       setResolvingMovie(true);
       try {
@@ -479,7 +375,6 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // (Promise.all waits for whichever of the two takes longer).
   const playEpisode = async (ep: Episode) => {
     if (!ep.hasPlayableStream || resolvingEpisodeId) return;
-    stopTrailer();
     setResolvingEpisodeId(ep.id);
     try {
       const [{ servers, subtitles }] = await Promise.all([
@@ -669,149 +564,6 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
           resizeMode="cover"
           fadeDuration={0}
         />
-        {showTrailer && trailerVideoId && !trailerSuspended && (
-          // trailerUrl is always a YouTube watch link (never a direct video file - see
-          // server.ts's own field description), so react-native-video can never play it;
-          // this is a real player, just reached through YouTube's embeddable iframe instead.
-          //
-          // Loads a real page hosted on this backend's own domain (youtube-embed - see
-          // youtubeEmbedUrl's own comment in api.ts) rather than a WebView-local HTML string with
-          // a faked `baseUrl` - that older trick (meant to work around YouTube error 153, "this
-          // origin is blocked") turned out to be the real cause of this trailer silently failing
-          // to ever play on every device: the origin it faked never actually satisfied the real
-          // IFrame Player API's own validation, and this effect's own 6s no-confirmation fallback
-          // (see trailerConfirmedRef above) just quietly reverted to the plain backdrop image
-          // instead of ever surfacing that as a visible error. A genuine https:// navigation gives
-          // it a real, consistent origin to check instead.
-          <>
-            <WebView
-              ref={trailerWebViewRef}
-              // mute:true is still required for autoplay to actually start at all (YouTube's own
-              // autoplay policy - see VideoPlayer.tsx's identical fix for the full write-up);
-              // unmuteOnPlay is what turns real sound on the instant it actually starts playing -
-              // per explicit request, this preview is no longer silent.
-              source={{ uri: youtubeEmbedUrl(trailerVideoId, { autoplay: true, mute: true, loop: true, unmuteOnPlay: true, preview: true }) }}
-              // Explicit background color - the native Android WebView otherwise paints its own
-              // default white surface for the brief gap before this page's own content (background
-              // :#000 in its own CSS included) actually arrives and paints over it. A prior attempt
-              // to fix "black screen before playback" by making this transparent instead (so the
-              // backdrop image behind it would show through) reintroduced exactly that white flash,
-              // *and* still went black again right as the video element itself first initializes
-              // (any video surface, on any platform, paints black before its first real frame
-              // decodes - nothing to do with this WebView's own background either way) - reported
-              // as "white screen at the start, then black once the play marks appear." The
-              // trailerReady cover image below is what actually solves the original ask now: it
-              // stays opaque over this whole WebView (whatever it's doing underneath) until
-              // "playing" confirms real video is actually decoding, so neither flash is ever seen.
-              // Same 16:9 top-pinned box as the still image (styles.heroBackdrop) - filling the whole hero
-              // instead made the picture visibly change size the moment the trailer started.
-              // Laid out at half size and scaled up 2x: the WebView's hardware layer (needed for
-              // its video to play at all on the test TV) is redrawn on every video frame, and at
-              // full screen size that made moving around this page heavy - films all have a
-              // trailer, series none, which is why series pages felt fast. The trailer streams at
-              // 360p anyway, so a half-resolution layer loses nothing visible.
-              style={styles.trailerWebView}
-              allowsInlineMediaPlayback
-              mediaPlaybackRequiresUserAction={false}
-              javaScriptEnabled
-              domStorageEnabled
-              // See the identical prop (and its own comment) on VideoPlayer.tsx's own YouTube
-              // WebView - a documented Android WebView video-playback fix, not specific to the
-              // trailer, applied here too since it goes through the exact same underlying issue.
-              androidLayerType="hardware"
-              scrollEnabled={false}
-              onError={() => setShowTrailer(false)}
-              onHttpError={() => setShowTrailer(false)}
-              // The renderer process dying (memory pressure on TV boxes) left a frozen black box
-              // over the backdrop - fall back to the plain backdrop instead.
-              onRenderProcessGone={() => setShowTrailer(false)}
-              onMessage={(e) => {
-                const msg = e.nativeEvent.data;
-                if (msg === "playing") {
-                  trailerConfirmedRef.current = true;
-                  setTrailerLoopCover(false);
-                  setTrailerReady(true);
-                  return;
-                }
-                if (msg?.startsWith("error:")) {
-                  setShowTrailer(false);
-                  return;
-                }
-                // The preview page loops by itself (no YouTube playlist, whose loop drew previous/
-                // next arrows over the trailer). After two full plays the trailer is unloaded and
-                // the backdrop stays - a WebView decoding video forever on a page left open was
-                // the heaviest thing on this screen.
-                if (msg === "loop") {
-                  trailerLoopsRef.current += 1;
-                  if (trailerLoopsRef.current >= 2) setShowTrailer(false);
-                  return;
-                }
-                // Paused (2) or buffering (3) after it had been playing: YouTube draws its play
-                // icon / spinner over the picture then, which controls:0 doesn't stop - the
-                // backdrop covers it until "playing" comes back.
-                if (trailerConfirmedRef.current && (msg === "diag:state:2" || msg === "diag:state:3")) {
-                  setTrailerLoopCover(true);
-                  return;
-                }
-                // 0 is YT.PlayerState.ENDED - momentary here (loop+playlist restarts it
-                // immediately), but YouTube still flashes its own play/seek indicator icons for
-                // that instant regardless of controls:0, with no playerVar to suppress it - per
-                // explicit request ("hide the play/forward/rewind marks that show"), covering the
-                // trailer for a brief moment here hides that flash instead. Cleared by the
-                // "playing" branch above once the restart actually confirms, or this same short
-                // ceiling either way so a restart that never confirms doesn't leave it stuck.
-                if (msg === "diag:state:0") {
-                  setTrailerLoopCover(true);
-                  setTimeout(() => setTrailerLoopCover(false), 1200);
-                }
-              }}
-            />
-            {/* Covers the WebView entirely (same backdrop image already showing behind it, so
-                hiding this reads as a seamless reveal, not a swap) until "playing" confirms real
-                video is actually decoding - see the WebView's own style comment above for why this,
-                not a transparent background, is what actually fixes both the white-then-black
-                flash. */}
-            {!trailerReady && (
-              <Image
-                source={{ uri: posterUrl(movie.backdrop || movie.poster, "w1280") }}
-                style={styles.heroBackdrop}
-                resizeMode="cover"
-                fadeDuration={0}
-              />
-            )}
-            {trailerLoopCover && (
-              <View style={[StyleSheet.absoluteFill, { backgroundColor: "#000" }]} pointerEvents="none" />
-            )}
-            {/* Same top-dark-fade VideoPlayer.tsx's own YouTube branch uses over its header - this
-                trailer has no header content of its own to show over it (the movie's title/logo/
-                facts row already sit further down, outside this WebView entirely - see below), so
-                this exists purely to hide whatever YouTube itself might draw near the top edge
-                (its own video title/channel overlay) the same way that one does.
-                A plain 0->35% fade still let that overlay peek through on some titles/devices -
-                it was already dimmed near the very top instead of fully opaque, since a linear
-                fade starts lightening immediately. Holding full black for a brief ~6% (where
-                YouTube's own title/channel text actually sits) before fading out by 24% - the
-                same "solid band, then fade" shape VideoPlayer.tsx's own header uses, just as
-                gradient stops instead of a separate fixed-height View (this box's own height is
-                aspect-ratio-relative, not a fixed scaled unit like the full player's header).
-                Was 0.14/0.42 - covered noticeably more of the trailer than intended, reported as
-                too heavy; this keeps just enough solid band to still fully hide the overlay text
-                without the fade trailing on so long past it.
-                Only once the trailer is actually playing - rendered from the WebView's own mount,
-                this band sat over the still backdrop image for the whole load (up to 15s),
-                reported as a black layer on the backdrop before any trailer appeared. */}
-            {trailerReady && (
-              <LinearGradient
-                // Lighter (was solid black to 6%, fading out by 24%): the preview-mode zoom already
-                // crops YouTube's title/channel bar out of view (see youtubeEmbedUrl's preview).
-                colors={["rgba(0,0,0,0.5)", "transparent"]}
-                locations={[0, 0.14]}
-                style={StyleSheet.absoluteFill}
-                pointerEvents="none"
-              />
-            )}
-          </>
-        )}
         <LinearGradient
           colors={["rgba(0,0,0,0.15)", "rgba(0,0,0,0.55)", colors.bg]}
           locations={[0, 0.55, 1]}
@@ -1445,16 +1197,6 @@ const styles = StyleSheet.create({
   heroSeries: { height: HERO_HEIGHT_SERIES },
   posterSeries: { width: POSTER_W_SERIES, height: POSTER_H_SERIES },
   infoColSeries: { right: POSTER_W_SERIES + s(28) + s(48) },
-  trailerWebView: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: SCREEN_W / 2,
-    height: (SCREEN_W / 2) * (9 / 16),
-    backgroundColor: "#000",
-    transformOrigin: "top left",
-    transform: [{ scale: 2 }],
-  },
   heroBackdrop: { position: "absolute", top: 0, left: 0, right: 0, width: "100%", aspectRatio: 16 / 9 },
   // Poster on the end side, text starting right after the sidebar - matches the app's own
   // left-to-right content flow (sidebar, then content) instead of mirroring the RTL web
