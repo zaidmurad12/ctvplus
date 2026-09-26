@@ -1,3 +1,5 @@
+import { cachedSearch } from "./searchCache";
+
 const CINEMANA_BASE = "https://cinemana.shabakaty.com/api/android";
 
 export interface CinemanaSearchItem {
@@ -94,7 +96,13 @@ export function rawCinemanaId(id: string): string {
   return id.replace(/^cinemana:/, "");
 }
 
+const searchCache = new Map<string, { at: number; value: Promise<CinemanaSearchItem[]> }>();
+
 export function searchCinemana(query: string, type?: "movie" | "series"): Promise<CinemanaSearchItem[]> {
+  return cachedSearch(searchCache, `${type ?? ""}|${query.trim().toLowerCase()}`, () => searchCinemanaUncached(query, type));
+}
+
+function searchCinemanaUncached(query: string, type?: "movie" | "series"): Promise<CinemanaSearchItem[]> {
   const params = new URLSearchParams({ videoTitle: query });
   if (type) params.set("type", type === "series" ? "series" : "movie");
   return request<CinemanaSearchItem[] | { data?: CinemanaSearchItem[] }>(`/AdvancedSearch?${params.toString()}`).then((value) =>

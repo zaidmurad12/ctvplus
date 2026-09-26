@@ -411,6 +411,14 @@ function isArabicOnlyEntry(item: { en_title?: string; ar_title?: string }): bool
   return titles.length > 0 && titles.every((t) => ARABIC_SCRIPT.test(t) && !LATIN_LETTER.test(t));
 }
 
+// The dubbed release: either titled only in Arabic (One Piece's "ون بيس"), or - the usual case for
+// films - marked in its title ("Moana Dubbed" / "موانا مدبلج", "Toy Story 5 Dubbed"), which the
+// Arabic-only check alone missed, so films never showed the subtitled/dubbed choice.
+const DUB_MARKER = /dubbed|مدبلج/i;
+function isDubbedEntry(item: { en_title?: string; ar_title?: string; other_title?: string }): boolean {
+  return isArabicOnlyEntry(item) || [item.en_title, item.ar_title, item.other_title].some((t) => !!t && DUB_MARKER.test(t));
+}
+
 const versionCache = new Map<string, SourceVersion[]>();
 
 // Wording sources add to a version's title ("... مدبلج", "(مترجم)") - not part of the work's name.
@@ -461,7 +469,7 @@ export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]>
     if (itemKey) return false;
     const itemYear = cinemanaNumber(item.year);
     if (!year || !itemYear || Math.abs(itemYear - year) > 1) return false;
-    return !!wantedArabic && isArabicOnlyEntry(item) && normalizeTitle(stripVersionWords(item.ar_title || item.en_title || "")) === wantedArabic;
+    return !!wantedArabic && isDubbedEntry(item) && normalizeTitle(stripVersionWords(item.ar_title || item.en_title || "")) === wantedArabic;
   };
   const add = (items: CinemanaSearchItem[], provider: "cinemana" | "cee") => {
     for (const item of items) {
@@ -469,7 +477,7 @@ export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]>
       const nb = String(item.nb);
       let group = groups.get(nb);
       if (!group) {
-        group = { key: nb, dubbed: isArabicOnlyEntry(item), title: (item.ar_title || item.en_title || "").trim(), sources: [] };
+        group = { key: nb, dubbed: isDubbedEntry(item), title: (item.ar_title || item.en_title || "").trim(), sources: [] };
         groups.set(nb, group);
       }
       if (group.sources.some((source) => source.provider === provider)) continue;
@@ -1177,7 +1185,12 @@ export function youtubeEmbedUrl(
   if (opts.loop) params.set("loop", "1");
   if (opts.unmuteOnPlay) params.set("unmuteOnPlay", "1");
   if (opts.transparentBg) params.set("bg", "transparent");
-  if (opts.preview) params.set("preview", "1");
+  // pv: the preview page's own layout version - the page is cached for a day (see the backend), so
+  // bumping this when its layout changes is what makes TVs fetch the new one.
+  if (opts.preview) {
+    params.set("preview", "1");
+    params.set("pv", "2");
+  }
   return `${API_BASE}/youtube-embed?${params.toString()}`;
 }
 

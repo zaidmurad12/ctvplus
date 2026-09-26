@@ -1,3 +1,5 @@
+import { cachedSearch } from "./searchCache";
+
 const CEE_BASE = "https://cee.buzz/api/android";
 
 export interface CeeSearchItem {
@@ -89,15 +91,17 @@ export function makeCeeId(id: string | number): string {
   return `cee:${String(id)}`;
 }
 
-export function isCeeId(id: string): boolean {
-  return id.startsWith("cee:");
-}
-
 export function rawCeeId(id: string): string {
   return id.replace(/^cee:/, "");
 }
 
+const searchCache = new Map<string, { at: number; value: Promise<CeeSearchItem[]> }>();
+
 export function searchCee(query: string, type?: "movie" | "series"): Promise<CeeSearchItem[]> {
+  return cachedSearch(searchCache, `${type ?? ""}|${query.trim().toLowerCase()}`, () => searchCeeUncached(query, type));
+}
+
+function searchCeeUncached(query: string, type?: "movie" | "series"): Promise<CeeSearchItem[]> {
   const params = new URLSearchParams({ videoTitle: query });
   if (type) params.set("type", type);
   return request<CeeSearchItem[] | { data?: CeeSearchItem[] }>(`/AdvancedSearch?${params.toString()}`).then((value) =>

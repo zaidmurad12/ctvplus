@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Image, ScrollView, StyleSheet, Dimensions, ActivityIndicator, Animated, ToastAndroid } from "react-native";
+import { View, Text, Image, ScrollView, StyleSheet, Dimensions, ActivityIndicator, Animated, ToastAndroid, NativeModules, NativeEventEmitter } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import { WebView } from "react-native-webview";
-import { Play, Bookmark, Users, Check, ChevronDown, Languages } from "lucide-react-native";
+import { Play, Bookmark, Users, Check, ChevronDown, ChevronUp, Languages } from "lucide-react-native";
 import type { Movie, Season, Episode, StreamServer, SubtitleTrack, SourceVersion } from "../api";
 import { findSourceVersions, posterUrl, youtubeVideoId, youtubeEmbedUrl, fetchCollection, fetchMovieDetail, fetchShowDetail, fetchEpisodePlayback, fetchCinemanaMoviePlayback, fetchCeeMoviePlayback, findCinemanaMatch, findCeeMatch, bestQualityLabel } from "../api";
 import { pickBestServers } from "../streamSelect";
@@ -119,13 +119,18 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     setVersionIndex(0);
     if (detailLoading) return;
     let cancelled = false;
-    findSourceVersions(movie)
-      .then((found) => {
-        if (!cancelled) setVersions(found);
-      })
-      .catch(() => {});
+    // A moment after the page settles, not the instant it loads - the lookup runs a few source
+    // searches, which shouldn't compete with the page's own images and trailer starting up.
+    const timer = setTimeout(() => {
+      findSourceVersions(movie)
+        .then((found) => {
+          if (!cancelled) setVersions(found);
+        })
+        .catch(() => {});
+    }, 1500);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per title, after its detail loads
   }, [movie.id, detailLoading]);
@@ -223,7 +228,6 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
 
   const scrollRef = useRef<any>(null);
   const episodeScrollRef = useRef<any>(null);
-  const seasonScrollRef = useRef<any>(null);
   // Only two positions this screen ever sits at now, not one per section - focus on the hero's
   // own buttons means the top of the screen, focus on *anything* below (cast, parts, seasons,
   // episodes) means the bottom, full stop. Moving focus card-to-card *within* the same row
@@ -506,7 +510,6 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   const castCount = crewAndCast.length;
   const castClamp = useFocusClamp(castCount);
   const partsClamp = useFocusClamp(parts.length);
-  const seasonsClamp = useFocusClamp(movie.seasons?.length ?? 0);
   const episodesClamp = useFocusClamp(activeSeason?.episodes.length ?? 0);
   // See useProgressiveReveal's own comment - same "don't fire every row's images in one burst"
   // fix as Home's rails, just applied to this screen's own longer rows (a season can easily run
@@ -539,9 +542,9 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
 
   const castBlock = (
     <>
-    {detailLoading && !crewAndCast.length ? (
+    {movie.type !== "series" && detailLoading && !crewAndCast.length ? (
       <>
-        <View style={styles.divider} />
+        <View style={[styles.divider, movie.type === "series" && styles.dividerAfterEpisodes]} />
         <View style={styles.castSection}>
           <View style={styles.sectionLabelRow}>
             <Users size={s(16)} color={colors.textMuted} />
@@ -560,7 +563,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     ) : null}
     {!!crewAndCast.length && (
       <>
-        <View style={styles.divider} />
+        <View style={[styles.divider, movie.type === "series" && styles.dividerAfterEpisodes]} />
         <View style={styles.castSection}>
           <View style={styles.sectionLabelRow}>
             <Users size={s(16)} color={colors.textMuted} />
@@ -839,11 +842,21 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                 onFocusChange={(f) => f && scrollToTop()}
               />
             )}
+            {isSeries && (
+              <SeasonStepper
+                seasons={movie.seasons!}
+                active={activeSeason}
+                onChange={setActiveSeason}
+                lang={lang}
+                onFocusChange={(f) => f && scrollToTop()}
+              />
+            )}
             <DetailButton
               label={isFavorite ? t("removeFromFavorites", lang) : t("addToFavorites", lang)}
               Icon={Bookmark}
               iconFill={isFavorite}
               active={isFavorite}
+              iconOnly
               onPress={onToggleFavorite}
               // Whenever Watch itself doesn't render (a series, or now also a movie with no
               // playback source anywhere - see hasPlaybackSource above), this is the only button
@@ -916,52 +929,17 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
           </>
         )}
 
+        {/* A series' episodes load in where the cast placeholder used to show - so the loading
+            placeholder is shaped like the episode row that's about to appear there. */}
+        {movie.type === "series" && !isSeries && detailLoading && (
+          <View style={[styles.seasons, styles.episodeList, styles.episodeSkeletonRow]} pointerEvents="none">
+            {[0, 1, 2, 3].map((i) => (
+              <View key={i} style={styles.episodeSkeletonCard} />
+            ))}
+          </View>
+        )}
         {isSeries && (
           <View style={styles.seasons}>
-            <ScrollView ref={seasonScrollRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seasonRow}>
-              {movie.seasons!.map((item, i) => (
-                <Focusable
-                  key={item.id}
-                  ref={seasonsClamp.setRef(i)}
-                  nextFocusLeft={i === 0 ? seasonsClamp.clampLeft() : undefined}
-                  nextFocusRight={i === movie.seasons!.length - 1 ? seasonsClamp.clampRight() : undefined}
-                  onPress={() => setActiveSeason(item)}
-                  scaleTo={1.04}
-                  onFocusChange={(f) => {
-                    if (!f) return;
-                    scrollToBottom();
-                    // See the episode row's own identical fix just below for why this can't rely
-                    // on Android's own auto-scroll alone for the boundary chips.
-                    if (i === 0) seasonScrollRef.current?.scrollTo({ x: 0, animated: true });
-                    else if (i === movie.seasons!.length - 1) seasonScrollRef.current?.scrollToEnd({ animated: true });
-                  }}
-                >
-                  {(focused: boolean) => (
-                    <View
-                      style={[
-                        styles.seasonChip,
-                        activeSeason?.id === item.id && styles.seasonChipActive,
-                        focused && styles.seasonChipFocused,
-                        focused && focusShadowTight,
-                      ]}
-                    >
-                      <Text style={[styles.seasonChipText, activeSeason?.id === item.id && styles.seasonChipTextActive]}>
-                        {pickText(item.titleAr, item.titleEn, lang) || `${lang === "ar" ? "الموسم" : "Season"} ${item.number}`}
-                        {/* A season this new has been imported (see AIR_DATE_IMPORT_HORIZON_DAYS
-                            in bootstrap-importer.mjs) purely as a "coming soon" placeholder -
-                            episodes only get added once they individually cross that same
-                            window. A bare season chip with nothing under it read as broken
-                            rather than "not out yet", so its own air date rides along right on
-                            the chip whenever it has no episodes at all. */}
-                        {item.episodes.length === 0 && !!upcomingLabel(item.airDate, lang, "season") &&
-                          ` - ${upcomingLabel(item.airDate, lang, "season")}`}
-                      </Text>
-                    </View>
-                  )}
-                </Focusable>
-              ))}
-            </ScrollView>
-
             {activeSeason && activeSeason.episodes.length === 0 ? (
               <View style={styles.emptySeasonBox}>
                 <Text style={styles.emptySeasonText}>
@@ -1197,6 +1175,87 @@ const EpisodeCard = React.memo(function EpisodeCard({
   );
 });
 
+// The season picker, in the hero's button row (was a row of season chips above the episodes): one
+// button showing the current season, shaped like the Movies/Series filter steppers. OK activates it
+// - it grows, and up/down then switch the season right away (the episode row follows); OK again,
+// left/right, or leaving it deactivates. While it isn't active, D-pad navigation is left entirely
+// to Android, so moving between the hero's buttons works as usual.
+function SeasonStepper({
+  seasons,
+  active,
+  onChange,
+  lang,
+  onFocusChange,
+}: {
+  seasons: Season[];
+  active?: Season;
+  onChange: (season: Season) => void;
+  lang: Lang;
+  onFocusChange?: (focused: boolean) => void;
+}) {
+  const [activated, setActivated] = useState(false);
+  const grow = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.spring(grow, { toValue: activated ? 1.15 : 1, useNativeDriver: true, speed: 20, bounciness: 6 }).start();
+  }, [activated, grow]);
+  const stateRef = useRef({ seasons, active, onChange });
+  stateRef.current = { seasons, active, onChange };
+  useEffect(() => {
+    if (!activated) return;
+    const { KeyEventBridge } = NativeModules;
+    KeyEventBridge?.setDpadNavActive(true);
+    const emitter = new NativeEventEmitter(KeyEventBridge);
+    const sub = emitter.addListener("onNavKey", (event: any) => {
+      const { direction, action } = event as { direction: "up" | "down" | "left" | "right"; action: "down" | "up" };
+      if (action !== "down") return;
+      const { seasons: list, active: current, onChange: change } = stateRef.current;
+      const i = Math.max(0, list.findIndex((sn) => sn.id === current?.id));
+      if (direction === "up") {
+        if (i > 0) change(list[i - 1]);
+      } else if (direction === "down") {
+        if (i < list.length - 1) change(list[i + 1]);
+      } else {
+        setActivated(false);
+      }
+    });
+    return () => {
+      sub.remove();
+      KeyEventBridge?.setDpadNavActive(false);
+    };
+  }, [activated]);
+  const label =
+    pickText(active?.titleAr, active?.titleEn, lang) || `${lang === "ar" ? "الموسم" : "Season"} ${active?.number ?? ""}`;
+  const arrowColor = activated ? "#fff" : colors.textMuted;
+  return (
+    <Focusable
+      onPress={() => setActivated((on) => !on)}
+      onFocusChange={(f) => {
+        if (!f) setActivated(false);
+        onFocusChange?.(f);
+      }}
+      scaleTo={1}
+    >
+      {(focused: boolean) => (
+        <Animated.View
+          style={[
+            styles.detailBtn,
+            styles.detailBtnOutline,
+            focused && styles.detailBtnFocusedOutline,
+            focused && focusShadow,
+            { transform: [{ scale: grow }] },
+          ]}
+        >
+          <View style={styles.seasonStepperArrows}>
+            <ChevronUp size={s(12)} color={arrowColor} strokeWidth={2.5} />
+            <ChevronDown size={s(12)} color={arrowColor} strokeWidth={2.5} />
+          </View>
+          <Text style={styles.detailBtnText}>{label}</Text>
+        </Animated.View>
+      )}
+    </Focusable>
+  );
+}
+
 function DetailButton({
   label,
   Icon,
@@ -1206,9 +1265,12 @@ function DetailButton({
   iconFill,
   hasTVPreferredFocus,
   onFocusChange,
+  iconOnly,
 }: {
   label: string;
   Icon: typeof Play;
+  // Just the icon, no text (Watch later, per request) - a compact square-ish pill.
+  iconOnly?: boolean;
   onPress: () => void;
   filled?: boolean;
   active?: boolean;
@@ -1227,6 +1289,7 @@ function DetailButton({
         <View
           style={[
             styles.detailBtn,
+            iconOnly && styles.detailBtnIconOnly,
             filled ? styles.detailBtnFilled : styles.detailBtnOutline,
             focused && (filled ? styles.detailBtnFocusedFilled : styles.detailBtnFocusedOutline),
             focused && focusShadow,
@@ -1237,7 +1300,7 @@ function DetailButton({
             color={filled ? "#000" : active ? colors.accentRed : "#fff"}
             fill={iconFill ? (filled ? "#000" : colors.accentRed) : "none"}
           />
-          <Text style={[styles.detailBtnText, filled && styles.detailBtnTextFilled]}>{label}</Text>
+          {!iconOnly && <Text style={[styles.detailBtnText, filled && styles.detailBtnTextFilled]}>{label}</Text>}
         </View>
       )}
     </Focusable>
@@ -1264,8 +1327,9 @@ const CAST_BLOCK_ESTIMATE = s(210);
 const HERO_HEIGHT = Math.max(POSTER_H + s(40), SCREEN_H - CAST_BLOCK_ESTIMATE);
 // A series' hero is shorter, so its season chips and episode cards show in full on the first screen
 // without scrolling (with the film-sized hero - its height floored by the big poster - only the top
-// of the episode cards showed). SERIES_BELOW_HERO ~ seasons margin + chip row + gap + the episode
-// list's margin/padding + one card (s(240) wide, 16:9, bordered). Floored so the title/logo, facts
+// of the episode cards showed). SERIES_BELOW_HERO was sized for the season chip row plus a row of
+// cards; the chips have since moved into the hero's buttons (SeasonStepper), and that freed space
+// is kept on purpose - the cards sit higher and the episode title shows on the first screen too. Floored so the title/logo, facts
 // and buttons column still fits; the poster shrinks to match.
 const SERIES_BELOW_HERO = s(276);
 const HERO_HEIGHT_SERIES = Math.min(HERO_HEIGHT, Math.max(s(300), SCREEN_H - SERIES_BELOW_HERO));
@@ -1356,6 +1420,8 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "transparent",
   },
+  detailBtnIconOnly: { paddingHorizontal: s(16) },
+  seasonStepperArrows: { alignItems: "center", marginVertical: -s(4) },
   detailBtnFilled: { backgroundColor: "#fff" },
   detailBtnOutline: { backgroundColor: "rgba(24,24,27,0.6)", borderColor: "rgba(255,255,255,0.2)" },
   detailBtnFocusedFilled: { borderColor: "rgba(255,255,255,0.5)" },
@@ -1366,6 +1432,9 @@ const styles = StyleSheet.create({
   scrollHintText: { color: "#fff", fontSize: fs(11), fontFamily: font.bold },
   body: { paddingHorizontal: s(32), paddingLeft: spacing.contentStart },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.15)", marginBottom: s(14), maxWidth: CAST_MAX_WIDTH },
+  // On a series the cast comes after the episode title/description - a clear gap above its divider,
+  // which otherwise sat tucked right under the description text.
+  dividerAfterEpisodes: { marginTop: s(30) },
   sectionLabelRow: { flexDirection: "row", alignItems: "center", gap: s(8), marginBottom: s(12) },
   sectionLabel: { color: colors.textSecondary, fontSize: fs(13), fontFamily: font.bold },
   // Capped at the screen's actual midpoint (not the earlier full-bleed-to-the-edge horizontal
@@ -1391,7 +1460,6 @@ const styles = StyleSheet.create({
   // right at the screen's edge.
   castRow: { gap: s(14), paddingLeft: s(36), paddingRight: s(40), paddingVertical: s(10) },
   castItem: { alignItems: "center", width: s(64) },
-  seasonRow: { paddingLeft: s(36), paddingRight: s(40), paddingVertical: s(6) },
   castAvatar: {
     // A plain circle center-crops a portrait TMDB headshot, which on many photos chops the
     // top of the head off since the face sits above center in the source frame. A portrait-
@@ -1418,20 +1486,9 @@ const styles = StyleSheet.create({
   castSkeletonAvatar: { width: s(60), height: s(80), borderRadius: s(12), backgroundColor: "#27272a" },
   castSkeletonLine: { width: s(40), height: s(9), borderRadius: s(4), backgroundColor: "#27272a", marginTop: s(8) },
   castRole: { color: colors.textFaint, fontSize: fs(9), fontFamily: font.semiBold, textAlign: "center", textTransform: "uppercase" },
-  seasons: { marginTop: s(26), gap: s(14) },
-  seasonChip: {
-    paddingHorizontal: s(18),
-    paddingVertical: s(9),
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    marginRight: s(10),
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  seasonChipActive: { backgroundColor: "#fff" },
-  seasonChipFocused: { borderColor: "#fff" },
-  seasonChipText: { color: colors.textSecondary, fontSize: fs(12), fontFamily: font.bold },
-  seasonChipTextActive: { color: "#000" },
+  // No season chips above the cards any more (the season picker moved into the hero's button row),
+  // so the cards sit right under the hero, in the space the chips used to take.
+  seasons: { marginTop: s(4) },
   episodeList: { gap: s(16), marginTop: s(8), paddingVertical: s(14), paddingLeft: s(36), paddingRight: s(40) },
   emptySeasonBox: { marginTop: s(8), paddingVertical: s(28), paddingHorizontal: s(16), alignItems: "center" },
   emptySeasonText: { color: colors.textMuted, fontSize: fs(13), fontFamily: font.semiBold },
@@ -1453,6 +1510,8 @@ const styles = StyleSheet.create({
   // reported as "the episode with focus on it gets cropped, on some devices." The image itself
   // now rounds its own corners directly (episodeThumb's own borderRadius) instead, which doesn't
   // need any ancestor clip to look right.
+  episodeSkeletonRow: { flexDirection: "row" },
+  episodeSkeletonCard: { width: s(240), aspectRatio: 16 / 9, borderRadius: s(10), backgroundColor: "#27272a" },
   episodeThumbBox: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000" },
   episodeThumb: { width: "100%", height: "100%" },
   episodeNumberBadge: {

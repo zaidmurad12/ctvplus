@@ -86,8 +86,8 @@ android {
         // same-versionCode APK as "nothing to update" and silently keep the old app installed,
         // which was indistinguishable from "the fix didn't work" from the outside. Bump this on
         // every release build going forward so a reinstall is unambiguous.
-        versionCode 148
-        versionName "1.23.08-versions-fix"
+        versionCode 149
+        versionName "1.23.09-season-stepper"
     }
     signingConfigs {
         debug {
