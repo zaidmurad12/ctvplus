@@ -235,7 +235,12 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // so this tracks *which of the two* we last scrolled to and only moves when that actually
   // changes - immune to both animation timing and to re-firing for no reason.
   const lastScrollTarget = useRef<"top" | "bottom" | null>(null);
+  // The episode title/story under the cards stays hidden while focus is up on the hero's buttons:
+  // it fades in once an episode card is focused, stays while moving on down to the cast, and fades
+  // out again on the way back up. An Animated value, not state - toggling it re-renders nothing.
+  const episodeInfoOpacity = useRef(new Animated.Value(0)).current;
   const scrollToTop = () => {
+    Animated.timing(episodeInfoOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
     if (lastScrollTarget.current === "top") return;
     lastScrollTarget.current = "top";
     scrollRef.current?.scrollTo({ y: 0, animated: true });
@@ -966,6 +971,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                   onPlayEpisode={stablePlayEpisode}
                   onFocusScroll={stableScrollToBottom}
                   isEpisodeWatched={isEpisodeWatched}
+                  infoOpacity={episodeInfoOpacity}
                 />
               )
             )}
@@ -996,6 +1002,7 @@ const EpisodeRail = React.memo(function EpisodeRail({
   onPlayEpisode,
   onFocusScroll,
   isEpisodeWatched,
+  infoOpacity,
 }: {
   season: Season;
   movieId: string;
@@ -1008,6 +1015,7 @@ const EpisodeRail = React.memo(function EpisodeRail({
   onPlayEpisode: (ep: Episode) => void;
   onFocusScroll: () => void;
   isEpisodeWatched: (movieId: string, seasonNumber: number, episodeNumber: number) => boolean;
+  infoOpacity: Animated.Value;
 }) {
   const [focusedEpisodeId, setFocusedEpisodeId] = useState<string | null>(season.episodes[0]?.id ?? null);
   useEffect(() => {
@@ -1029,6 +1037,7 @@ const EpisodeRail = React.memo(function EpisodeRail({
   const handleFocus = useCallback(
     (ep: Episode, index: number) => {
       onFocusScroll();
+      Animated.timing(infoOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
       setFocusedEpisodeId(ep.id);
       if (index >= renderCountRef.current - EPISODE_LOOKAHEAD) {
         setRenderCount((c) => Math.min(countRef.current, c + EPISODE_BATCH));
@@ -1040,7 +1049,7 @@ const EpisodeRail = React.memo(function EpisodeRail({
       if (index === 0) scrollRef.current?.scrollTo({ x: 0, animated: true });
       else if (index === countRef.current - 1) scrollRef.current?.scrollToEnd({ animated: true });
     },
-    [onFocusScroll, scrollRef]
+    [onFocusScroll, scrollRef, infoOpacity]
   );
 
   const shownEpisode = season.episodes.find((e) => e.id === focusedEpisodeId) ?? season.episodes[0];
@@ -1067,8 +1076,12 @@ const EpisodeRail = React.memo(function EpisodeRail({
           />
         ))}
       </ScrollView>
+      {/* A fixed height (fits the longest possible block: fact line, one-line title, three-line
+          story), always laid out even while hidden - so a short or missing description never
+          shifts the cast below it. */}
+      <Animated.View style={[styles.episodeInfoBlock, { opacity: infoOpacity }]}>
       {!!shownEpisode && (
-        <View style={styles.episodeInfoBlock}>
+        <>
           {/* Season number now sits right beside the year, per explicit request - one combined
               fact line instead of the year standing alone with nothing to place it in the show. */}
           {(!!seasonYear || !!season.number) && (
@@ -1084,8 +1097,9 @@ const EpisodeRail = React.memo(function EpisodeRail({
               {pickText(shownEpisode.storyAr, shownEpisode.storyEn, lang)}
             </Text>
           )}
-        </View>
+        </>
       )}
+      </Animated.View>
     </>
   );
 });
@@ -1240,6 +1254,14 @@ function SeasonStepper({
   }, [activated]);
   const label = active ? seasonLabel(active, lang) : "";
   const arrowColor = activated ? "#fff" : colors.textMuted;
+  // Beside the season number: Arabic "موسم 2" shows its number on the left, English "Season 2" on
+  // the right.
+  const arrows = (
+    <View style={styles.seasonStepperArrows}>
+      <ChevronUp size={s(12)} color={arrowColor} strokeWidth={2.5} />
+      <ChevronDown size={s(12)} color={arrowColor} strokeWidth={2.5} />
+    </View>
+  );
   return (
     <Focusable
       onPress={() => setActivated((on) => !on)}
@@ -1261,11 +1283,9 @@ function SeasonStepper({
             { transform: [{ scale: grow }] },
           ]}
         >
+          {lang === "ar" && arrows}
           <Text style={styles.detailBtnText}>{label}</Text>
-          <View style={styles.seasonStepperArrows}>
-            <ChevronUp size={s(12)} color={arrowColor} strokeWidth={2.5} />
-            <ChevronDown size={s(12)} color={arrowColor} strokeWidth={2.5} />
-          </View>
+          {lang !== "ar" && arrows}
         </Animated.View>
       )}
     </Focusable>
@@ -1440,7 +1460,7 @@ const styles = StyleSheet.create({
   detailBtnIconOnly: { paddingHorizontal: s(16) },
   seasonStepperArrows: { alignItems: "center", marginVertical: -s(4) },
   // A clear gap between the season button and Watch later beside it (it also grows when active).
-  seasonStepperGap: { marginEnd: s(16) },
+  seasonStepperGap: { marginEnd: s(4) },
   detailBtnFilled: { backgroundColor: "#fff" },
   detailBtnOutline: { backgroundColor: "rgba(24,24,27,0.6)", borderColor: "rgba(255,255,255,0.2)" },
   detailBtnFocusedFilled: { borderColor: "rgba(255,255,255,0.5)" },
@@ -1582,11 +1602,17 @@ const styles = StyleSheet.create({
   // One shared block below the whole row instead of per-card text - see focusedEpisodeId's own
   // comment. Bigger type than the old per-card title/story now that it's not competing for space
   // inside a small card.
-  episodeInfoBlock: { marginTop: s(22), maxWidth: CAST_MAX_WIDTH, gap: s(6) },
-  episodeInfoYear: { color: colors.textMuted, fontSize: fs(12), fontFamily: font.bold },
+  episodeInfoBlock: {
+    marginTop: s(22),
+    maxWidth: CAST_MAX_WIDTH,
+    gap: s(6),
+    height: fs(17) + fs(26) + 3 * fs(21) + 2 * s(6),
+    overflow: "hidden",
+  },
+  episodeInfoYear: { color: colors.textMuted, fontSize: fs(12), lineHeight: fs(17), fontFamily: font.bold },
   // Both bumped slightly (was 16/13) per explicit request - easier to read at a glance from the
   // couch without the title/description reading as an afterthought next to the episode cards.
-  episodeInfoTitle: { color: "#fff", fontSize: fs(18), fontFamily: font.bold },
+  episodeInfoTitle: { color: "#fff", fontSize: fs(18), lineHeight: fs(26), fontFamily: font.bold },
   episodeInfoStory: { color: colors.textMuted, fontSize: fs(14), lineHeight: fs(21), fontFamily: font.semiBold },
 });
 
