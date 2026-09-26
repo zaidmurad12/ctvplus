@@ -661,9 +661,21 @@ const RecentCard = React.memo(React.forwardRef<View, {
                 own rate of change than to its absolute darkness. Slowing that rate down right at
                 the top (transparent for a while, then only gradually darkening) is what makes it
                 fade out instead of just stopping. */}
+            {/* Lighter per request (was up to 0.9), on a many-stop ease-in curve so the lighter shade
+                still fades in with no visible band. */}
             <LinearGradient
-              colors={["transparent", "rgba(0,0,0,0.05)", "rgba(0,0,0,0.55)", "rgba(0,0,0,0.9)"]}
-              locations={[0, 0.4, 0.75, 1]}
+              colors={[
+                "rgba(0,0,0,0)",
+                "rgba(0,0,0,0.02)",
+                "rgba(0,0,0,0.06)",
+                "rgba(0,0,0,0.13)",
+                "rgba(0,0,0,0.23)",
+                "rgba(0,0,0,0.35)",
+                "rgba(0,0,0,0.48)",
+                "rgba(0,0,0,0.6)",
+                "rgba(0,0,0,0.7)",
+              ]}
+              locations={[0, 0.3, 0.42, 0.53, 0.63, 0.72, 0.81, 0.9, 1]}
               style={StyleSheet.absoluteFill}
               pointerEvents="none"
             />
