@@ -15,6 +15,7 @@ import LogoImage from "../components/LogoImage";
 import { useFocusClamp } from "../useFocusClamp";
 import { useProgressiveReveal } from "../useProgressiveReveal";
 import { pushBackHandler } from "../backStack";
+import { usePerfProbe } from "../perfProbe";
 
 // See playEpisode's own comment - a floor under how quickly the resolving spinner can disappear
 // again, so a cached/instant fetch still leaves it on screen long enough to actually be seen.
@@ -35,7 +36,7 @@ interface Props {
   playerActive: boolean;
 }
 
-export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, lang, onToggleFavorite, onPlay, onSelectPerson, onSelectMovie, onBack, isEpisodeWatched }: Props) {
+export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, lang, onToggleFavorite, onPlay, onSelectPerson, onSelectMovie, onBack, isEpisodeWatched, playerActive: covered }: Props) {
   // Home/Browse/Search only ever hand this screen the new backend's *summary* shape (no
   // titleAr/genres/cast/director yet - only its dedicated detail endpoint has those, see
   // fetchMovieDetail in api.ts). Shadowing the prop with local state of the same name means
@@ -465,6 +466,10 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // self-referencing the first/last item's nextFocusLeft/Right (see useFocusClamp) makes that
   // direction a no-op there instead, so only up/down ever actually leaves a row.
   const castCount = crewAndCast.length;
+  usePerfProbe("details", movie.id, () =>
+    `title="${movie.titleEn}" type=${movie.type} parts=${parts.length} seasons=${movie.seasons?.length ?? 0} ` +
+    `episodes=${activeSeason?.episodes.length ?? 0} cast=${castCount} logo=${movie.logoUrl || movie.titleLogo ? 1 : 0}`
+  );
   const castClamp = useFocusClamp(castCount);
   const partsClamp = useFocusClamp(parts.length);
   const episodesClamp = useFocusClamp(activeSeason?.episodes.length ?? 0);
@@ -667,7 +672,9 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                 Icon={Play}
                 iconFill
                 filled
-                hasTVPreferredFocus
+                // Never while another screen covers this one (the artist page, the player): a covered page
+                // asking for focus as its data arrives took it away from the screen actually showing.
+                hasTVPreferredFocus={!covered}
                 onPress={playMovie}
                 onFocusChange={(f) => f && scrollToTop()}
               />
@@ -679,7 +686,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                 active={activeSeason}
                 onChange={setActiveSeason}
                 lang={lang}
-                hasTVPreferredFocus
+                hasTVPreferredFocus={!covered}
                 onFocusChange={(f) => f && scrollToTop()}
               />
             )}
@@ -695,7 +702,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
               // in the row, so it has to be the one that picks up initial TV focus instead -
               // otherwise nothing here is focused at all on first open.
               // A series hands initial focus to the season button once its seasons have loaded.
-              hasTVPreferredFocus={movie.type === "series" ? !isSeries : !hasPlaybackSource}
+              hasTVPreferredFocus={!covered && (movie.type === "series" ? !isSeries : !hasPlaybackSource)}
               onFocusChange={(f) => f && scrollToTop()}
             />
             {versions.length > 1 && (

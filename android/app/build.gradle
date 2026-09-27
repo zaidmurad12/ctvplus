@@ -86,8 +86,8 @@ android {
         // same-versionCode APK as "nothing to update" and silently keep the old app installed,
         // which was indistinguishable from "the fix didn't work" from the outside. Bump this on
         // every release build going forward so a reinstall is unambiguous.
-        versionCode 170
-        versionName "1.24.10-logo-size"
+        versionCode 171
+        versionName "1.24.11-focus-fixes"
     }
     signingConfigs {
         debug {

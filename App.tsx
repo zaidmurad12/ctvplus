@@ -14,6 +14,7 @@ import { hasStoredValue, loadJson, saveJson, storageKeys } from "./src/storage";
 import { DEFAULT_UI_SCALE, getUIScale, setUIScale, suggestInitialUIScale } from "./src/scale";
 import { dispatchBack, pushBackHandler } from "./src/backStack";
 import { FocusScopeContext, type FocusScope } from "./src/components/Focusable";
+import FocusBlockView from "./src/components/FocusBlockView";
 
 // Every screen (and Sidebar) is lazy-loaded, not statically imported - each one's own
 // `StyleSheet.create({...})` calls s()/fs() (see scale.ts) at the moment that module is first
@@ -911,7 +912,8 @@ export default function App() {
           </FocusScopeContext.Provider>
 
           {selectedMovie && (
-            <View style={StyleSheet.absoluteFill}>
+            // Focus blocked while the artist page sits on top of it (see FocusBlockView).
+            <FocusBlockView blocked={!!selectedPerson} style={StyleSheet.absoluteFill}>
               <Suspense fallback={<ScreenLoader />}>
                 {/* key={movie.id}: tapping one of a movie's "other parts" calls setSelectedMovie
                     again while this same screen is already mounted (not routed through null
@@ -935,7 +937,7 @@ export default function App() {
                   playerActive={!!playing || !!selectedPerson}
                 />
               </Suspense>
-            </View>
+            </FocusBlockView>
           )}
 
           {selectedPerson && (
