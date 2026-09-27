@@ -344,25 +344,28 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
             <LinearGradient
               // Many stops on an ease-out curve (not 4-5 straight segments): a few linear segments each read as
               // a visible "step", i.e. an edge. This falloff is gradual enough to melt into the black.
-              // A cubic ease-out from solid at the very edge (so the picture's own edge never shows)
-              // to clear by ~80% of the width - lighter than before and with no straight segments,
-              // which is what read as a dark "block" with an edge.
+              // A "smootherstep" fade: flat at both ends (solid at the very edge, so the picture's own
+              // edge never shows; fully clear by 80% of the width), so neither where the shade starts nor
+              // where it ends reads as a line - it melts into the page background.
               colors={[
                 "rgba(0,0,0,1)",
-                "rgba(0,0,0,0.757)",
-                "rgba(0,0,0,0.558)",
-                "rgba(0,0,0,0.398)",
-                "rgba(0,0,0,0.273)",
-                "rgba(0,0,0,0.178)",
-                "rgba(0,0,0,0.109)",
-                "rgba(0,0,0,0.061)",
-                "rgba(0,0,0,0.03)",
-                "rgba(0,0,0,0.012)",
+                "rgba(0,0,0,0.997)",
+                "rgba(0,0,0,0.977)",
+                "rgba(0,0,0,0.931)",
+                "rgba(0,0,0,0.855)",
+                "rgba(0,0,0,0.754)",
+                "rgba(0,0,0,0.632)",
+                "rgba(0,0,0,0.5)",
+                "rgba(0,0,0,0.368)",
+                "rgba(0,0,0,0.246)",
+                "rgba(0,0,0,0.145)",
+                "rgba(0,0,0,0.069)",
+                "rgba(0,0,0,0.023)",
                 "rgba(0,0,0,0.003)",
                 "rgba(0,0,0,0)",
                 "rgba(0,0,0,0)",
               ]}
-              locations={[0, 0.075, 0.15, 0.225, 0.3, 0.375, 0.45, 0.525, 0.6, 0.675, 0.75, 0.825, 1]}
+              locations={[0, 0.057, 0.114, 0.171, 0.229, 0.286, 0.343, 0.4, 0.457, 0.514, 0.571, 0.629, 0.686, 0.743, 0.8, 1]}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               style={StyleSheet.absoluteFill}
@@ -372,22 +375,27 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
               reference screenshot's own lighter dimming, so the backdrop itself reads as more
               vibrant/colorful instead of mostly darkened out. */}
           <LinearGradient
-            // Lighter at the bottom per request: a quartic ease-in that stays faint across the lower
-            // band and only reaches black right at the edge (still no visible seam with the rows).
+            // Same flat-ended smootherstep from the middle of the picture down to solid at the bottom
+            // edge - no visible start line, and the rows below blend into the picture with no seam.
             colors={[
               "rgba(0,0,0,0)",
               "rgba(0,0,0,0)",
-              "rgba(0,0,0,0)",
-              "rgba(0,0,0,0.002)",
-              "rgba(0,0,0,0.012)",
-              "rgba(0,0,0,0.039)",
-              "rgba(0,0,0,0.095)",
-              "rgba(0,0,0,0.198)",
-              "rgba(0,0,0,0.366)",
-              "rgba(0,0,0,0.624)",
+              "rgba(0,0,0,0.003)",
+              "rgba(0,0,0,0.023)",
+              "rgba(0,0,0,0.069)",
+              "rgba(0,0,0,0.145)",
+              "rgba(0,0,0,0.246)",
+              "rgba(0,0,0,0.368)",
+              "rgba(0,0,0,0.5)",
+              "rgba(0,0,0,0.632)",
+              "rgba(0,0,0,0.754)",
+              "rgba(0,0,0,0.855)",
+              "rgba(0,0,0,0.931)",
+              "rgba(0,0,0,0.977)",
+              "rgba(0,0,0,0.997)",
               "rgba(0,0,0,1)",
             ]}
-            locations={[0, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1]}
+            locations={[0, 0.5, 0.536, 0.571, 0.607, 0.643, 0.679, 0.714, 0.75, 0.786, 0.821, 0.857, 0.893, 0.929, 0.964, 1]}
             style={StyleSheet.absoluteFill}
           />
           {/* Meta row back to type/year/duration/rating only (was genre/age-rating/rating/year/
