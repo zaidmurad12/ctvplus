@@ -207,7 +207,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // re-fires this on every single left/right press, not just the first one entering that row,
   // so this tracks *which of the two* we last scrolled to and only moves when that actually
   // changes - immune to both animation timing and to re-firing for no reason.
-  const lastScrollTarget = useRef<"top" | "bottom" | null>(null);
+  const lastScrollTarget = useRef<"top" | "bottom" | "cast" | null>(null);
   // The "Scroll down" hint goes away for good once the viewer has been down there once (per title).
   const [scrolledDown, setScrolledDown] = useState(false);
   useEffect(() => setScrolledDown(false), [movie.id]);
@@ -220,6 +220,16 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     if (lastScrollTarget.current === "top") return;
     lastScrollTarget.current = "top";
     scrollRef.current?.scrollTo({ y: 0, animated: true });
+  };
+  // Where the film's cast row sits in the page, for scrollToCast.
+  const bodyYRef = useRef(0);
+  const castYRef = useRef(0);
+  const scrollToCast = () => {
+    if (!isSeries && parts.length === 0) return;
+    if (lastScrollTarget.current === "cast") return;
+    lastScrollTarget.current = "cast";
+    setScrolledDown(true);
+    scrollRef.current?.scrollTo({ y: Math.max(0, bodyYRef.current + castYRef.current - s(24)), animated: true });
   };
   const scrollToBottom = () => {
     // scrollEnabled only ever blocks the *viewer's own* touch/drag scrolling - it does nothing
@@ -533,7 +543,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                     biographyAr: c.biographyAr,
                   })
                 }
-                onFocusChange={(f) => f && scrollToBottom()}
+                onFocusChange={(f) => f && (movie.type === "series" ? scrollToBottom() : scrollToCast())}
               >
                 {(focused: boolean) => (
                   <View style={styles.castItem}>
@@ -565,6 +575,11 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
       style={styles.root}
       contentContainerStyle={[styles.content, isSeries && styles.seriesContent]}
       scrollEnabled={canScroll}
+      // The page scrolls itself (scrollToTop/scrollToBottom on focus). Android's own
+      // scroll-to-focused-child on top of that ran on every single move along the cast row of a
+      // film with parts (the only film pages that scroll) - what made that row slow to move along.
+      // Films only - a series page relies on it to keep the episode row and the cast in view.
+      scrollsChildToFocus={movie.type === "series"}
     >
       <View style={[styles.hero, movie.type === "series" && styles.heroSeries]}>
         {/* Same fix as HomeScreen's own hero backdrop (see its comment): a plain absoluteFill
@@ -723,8 +738,10 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
         )}
       </View>
 
-      <View style={styles.body}>
-        {movie.type !== "series" && castBlock}
+      <View style={styles.body} onLayout={(e) => (bodyYRef.current = e.nativeEvent.layout.y)}>
+        {movie.type !== "series" && (
+          <View onLayout={(e) => (castYRef.current = e.nativeEvent.layout.y)}>{castBlock}</View>
+        )}
 
         {/* Below cast, not above it - per explicit request. */}
         {parts.length > 0 && (
@@ -1046,10 +1063,11 @@ function SeasonStepper({
   onFocusChange?: (focused: boolean) => void;
   hasTVPreferredFocus?: boolean;
 }) {
-  // No grow-on-activate any more: the focused button is drawn as one GPU texture (see Focusable),
-  // and scaling up past it cut the button's edges off. Active now shows as white arrows and a
-  // lighter fill instead.
   const [activated, setActivated] = useState(false);
+  const grow = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.spring(grow, { toValue: activated ? 1.15 : 1, useNativeDriver: true, speed: 20, bounciness: 6 }).start();
+  }, [activated, grow]);
   const stateRef = useRef({ seasons, active, onChange });
   stateRef.current = { seasons, active, onChange };
   useEffect(() => {
@@ -1097,15 +1115,15 @@ function SeasonStepper({
       hasTVPreferredFocus={hasTVPreferredFocus}
     >
       {(focused: boolean) => (
-        <View
+        <Animated.View
           style={[
             styles.detailBtn,
             styles.seasonStepper,
             styles.seasonStepperGap,
             styles.detailBtnOutline,
             focused && styles.detailBtnFocusedOutline,
-            activated && styles.seasonStepperActive,
             focused && focusShadow,
+            { transform: [{ scale: grow }] },
           ]}
         >
           {/* Word and number as separate pieces with a clear gap, the number bigger. Arabic reads
@@ -1131,7 +1149,7 @@ function SeasonStepper({
               {lang !== "ar" && arrows}
             </>
           )}
-        </View>
+        </Animated.View>
       )}
     </Focusable>
   );
@@ -1307,8 +1325,7 @@ const styles = StyleSheet.create({
   // A clear gap between the season button and Watch later beside it (it also grows when active).
   seasonNumber: { color: "#fff", fontSize: fs(19), fontFamily: font.black },
   // A little wider than the other buttons, and a clear gap between the word and the number.
-  seasonStepper: { paddingHorizontal: s(32), gap: s(12) },
-  seasonStepperActive: { backgroundColor: "rgba(255,255,255,0.22)" },
+  seasonStepper: { gap: s(12) },
   seasonStepperGap: { marginEnd: s(4) },
   detailBtnFilled: { backgroundColor: "#fff" },
   detailBtnOutline: { backgroundColor: "rgba(24,24,27,0.6)", borderColor: "rgba(255,255,255,0.2)" },
@@ -1408,9 +1425,12 @@ const styles = StyleSheet.create({
     top: s(6),
     left: s(6),
     backgroundColor: "rgba(0,0,0,0.75)",
-    borderRadius: 4,
-    paddingHorizontal: s(6),
-    paddingVertical: s(2),
+    minWidth: s(28),
+    height: s(28),
+    borderRadius: s(14),
+    paddingHorizontal: s(4),
+    alignItems: "center",
+    justifyContent: "center",
   },
   episodeNumberText: { color: "#fff", fontSize: fs(14), fontFamily: font.black },
   // Filled white circle (not just an outline) so a black check reads clearly regardless of
@@ -1436,7 +1456,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: s(6),
     paddingVertical: s(2),
   },
-  episodeDurationText: { color: "#fff", fontSize: fs(10), fontFamily: font.bold },
+  episodeDurationText: { color: "#fff", fontSize: fs(12.5), fontFamily: font.bold },
   episodeComingSoonBadge: {
     position: "absolute",
     bottom: s(6),

@@ -218,9 +218,12 @@ const styles = StyleSheet.create({
     top: s(6),
     left: s(6),
     backgroundColor: "rgba(0,0,0,0.75)",
-    borderRadius: 4,
-    paddingHorizontal: s(6),
-    paddingVertical: s(2),
+    minWidth: s(28),
+    height: s(28),
+    borderRadius: s(14),
+    paddingHorizontal: s(4),
+    alignItems: "center",
+    justifyContent: "center",
   },
   numberText: { color: "#fff", fontSize: fs(14), fontFamily: font.black },
   watchedBadge: {
@@ -236,7 +239,7 @@ const styles = StyleSheet.create({
   },
   // Plain inline text now (was its own absolutely-positioned corner badge) - it sits in
   // titleOverlay's own row below, beside the title, not floating independently over the artwork.
-  durationTextInline: { color: colors.textSecondary, fontSize: fs(11), fontFamily: font.bold },
+  durationTextInline: { color: colors.textSecondary, fontSize: fs(13), fontFamily: font.bold },
   // comingSoonBadge/nowPlayingBadge: no longer position:"absolute" (they used to float in their
   // own bottom corner) - both are inline children of titleOverlay's own row now, beside the title
   // text, since that row is where "what's happening with this episode" already lives.
