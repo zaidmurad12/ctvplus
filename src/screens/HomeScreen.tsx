@@ -9,6 +9,7 @@ import { colors, font, focusShadow, spacing } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, countryName, genreName, pickText, t } from "../i18n";
 import { useSidebarHomeHandle } from "../focusRefs";
+import { countRender } from "../perfProbe";
 import { useFocusClamp } from "../useFocusClamp";
 import { useProgressiveReveal } from "../useProgressiveReveal";
 
@@ -108,6 +109,7 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   { heroMovies, categories, lang, onSelectMovie, onOpenCategory, active },
   ref
 ) {
+  countRender("home");
   const homeHandle = useSidebarHomeHandle();
 
   // "recent" kept first (matching the emphasis it had as this screen's own hero before), every
@@ -503,6 +505,7 @@ const CategoryRow = React.memo(function CategoryRow({
   // below), never to gate rendering/reveal (that's revealImages' job).
   isCurrent: boolean;
 }) {
+  countRender("homeRow");
   const hasMore = !!category;
   // The "View more" card counts as the row's last focus target, so the right-edge clamp lands on it.
   const clamp = useFocusClamp(items.length + (hasMore ? 1 : 0));

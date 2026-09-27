@@ -8,6 +8,14 @@ const TICK_MS = 100;
 // is slow on its own apart from one that's only slow while keys are being pressed.
 export const perfCounters = { focusEvents: 0 };
 
+// Render counts per component during a probe window (App, Home, Home rows, Sidebar, every
+// Focusable call countRender) - says which part of the app keeps re-rendering while a details page
+// is open. React's own <Profiler> reports nothing in release builds, hence plain counters.
+const profile = new Map<string, number>();
+export function countRender(id: string): void {
+  profile.set(id, (profile.get(id) ?? 0) + 1);
+}
+
 type HermesStats = { js_heapSize?: number; js_allocatedBytes?: number; js_numGCs?: number; js_gcTime?: number };
 function hermesStats(): HermesStats {
   try {
@@ -31,6 +39,7 @@ export function usePerfProbe(label: string, pageKey: string, extra: () => string
   useEffect(() => {
     renders.current = 0;
     perfCounters.focusEvents = 0;
+    profile.clear();
     const startStats = hermesStats();
     const started = Date.now();
     let last = started;
@@ -60,7 +69,8 @@ export function usePerfProbe(label: string, pageKey: string, extra: () => string
           `avgLag=${Math.round(lagTotal / Math.max(1, ticks))}ms maxLag=${lagMax}ms ` +
           `lagPerSec=[${Array.from(lagBySecond, (v) => Math.round((v ?? 0) / 10) * 10).join(",")}] ` +
           `gc=${(end.js_numGCs ?? 0) - (startStats.js_numGCs ?? 0)} gcMs=${Math.round((end.js_gcTime ?? 0) - (startStats.js_gcTime ?? 0))} ` +
-          `heapMB=${mb(end.js_heapSize)} allocMB=${mb((end.js_allocatedBytes ?? 0) - (startStats.js_allocatedBytes ?? 0))} ` +
+          `heapMB=${mb(end.js_heapSize)} ` +
+          `renders=[${Array.from(profile, ([id, n]) => `${id}:${n}`).join(" ")}] ` +
           extraRef.current(),
       });
     }, PROBE_MS);

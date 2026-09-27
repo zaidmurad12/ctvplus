@@ -1,6 +1,6 @@
 import React, { useCallback, useContext, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, PressableProps, StyleSheet, View, ViewStyle } from "react-native";
-import { perfCounters } from "../perfProbe";
+import { countRender, perfCounters } from "../perfProbe";
 
 // Module-level constant, not a fresh object literal per render - every Focusable instance in the
 // app (there can easily be 100+ simultaneously mounted across Home's rails) shares this exact
@@ -76,6 +76,7 @@ const Focusable = React.forwardRef<View, Props>(function Focusable(
   { scaleTo = 1.06, children, style, focusRadius, clipFocusOverflow, onFocus, onBlur, onFocusChange, ...rest },
   ref
 ) {
+  countRender("focusable");
   const scope = useContext(FocusScopeContext);
   const blocked = !!scope?.blocked;
   const ownRef = useRef<View | null>(null);
