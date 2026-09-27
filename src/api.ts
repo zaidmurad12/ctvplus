@@ -577,6 +577,16 @@ export async function findCeeMatch(movie: Movie): Promise<PlaybackMapping | null
   const cacheKey = `${movie.id}:cee`;
   const cached = cinemanaMatchCache.get(cacheKey);
   if (cached) return cached;
+  // CEE mirrors Cinemana under the same entry numbers - a Cinemana match is reused as-is instead of
+  // running a whole second set of searches (and spelling variants) against CEE. Only a title
+  // Cinemana doesn't have is searched on CEE itself.
+  const cinemana = await findCinemanaMatch(movie);
+  const cinemanaNb = cinemana?.cinemanaId?.replace(/^cinemana:/, "");
+  if (cinemanaNb) {
+    const mirrored: PlaybackMapping = { provider: "cee", ceeId: makeCeeId(cinemanaNb), available: true };
+    cacheMatch(cacheKey, mirrored);
+    return mirrored;
+  }
   const type = movie.type === "series" ? "series" : "movie";
   try {
     const match = await searchAndMatch(movie, (query) => searchCee(query, type) as Promise<CinemanaSearchItem[]>);
