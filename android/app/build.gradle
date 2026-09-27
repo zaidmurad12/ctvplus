@@ -86,8 +86,8 @@ android {
         // same-versionCode APK as "nothing to update" and silently keep the old app installed,
         // which was indistinguishable from "the fix didn't work" from the outside. Bump this on
         // every release build going forward so a reinstall is unambiguous.
-        versionCode 165
-        versionName "1.24.05-season-btn"
+        versionCode 166
+        versionName "1.24.06-nav-revert"
     }
     signingConfigs {
         debug {

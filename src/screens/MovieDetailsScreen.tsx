@@ -1356,15 +1356,14 @@ const styles = StyleSheet.create({
     width: s(60),
     height: s(80),
     borderRadius: s(12),
-    // No overflow:hidden - the photo rounds its own corners (see Home's recentImageClip for why a
-    // rounded clip is costly while moving along the row).
+    overflow: "hidden",
     borderWidth: 2,
     borderColor: "transparent",
     backgroundColor: colors.cardBg,
   },
   castAvatarFocused: { borderColor: "#fff" },
-  castAvatarImg: { width: "100%", height: "100%", borderRadius: s(10) },
-  castAvatarPlaceholder: { width: "100%", height: "100%", borderRadius: s(10), alignItems: "center", justifyContent: "center", backgroundColor: "#27272a" },
+  castAvatarImg: { width: "100%", height: "100%" },
+  castAvatarPlaceholder: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center", backgroundColor: "#27272a" },
   castAvatarInitial: { color: "#fff", fontSize: fs(18), fontFamily: font.black },
   castName: { color: "#fff", fontSize: fs(10.5), fontFamily: font.bold, marginTop: s(6), textAlign: "center" },
   // Same footprint as a real cast card (castAvatar/castName above) so the section doesn't

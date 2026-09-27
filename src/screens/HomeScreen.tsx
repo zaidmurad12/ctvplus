@@ -342,19 +342,22 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
             <LinearGradient
               // Many stops on an ease-out curve (not 4-5 straight segments): a few linear segments each read as
               // a visible "step", i.e. an edge. This falloff is gradual enough to melt into the black.
+              // Lighter and narrower per request (was darkening most of the picture's width): still
+              // solid at the very edge so the image's own edge never shows, then an ease-out curve
+              // that's clear by ~70% of the width.
               colors={[
                 colors.bg,
-                "rgba(0,0,0,0.96)",
-                "rgba(0,0,0,0.88)",
-                "rgba(0,0,0,0.76)",
-                "rgba(0,0,0,0.6)",
-                "rgba(0,0,0,0.44)",
-                "rgba(0,0,0,0.28)",
-                "rgba(0,0,0,0.15)",
-                "rgba(0,0,0,0.06)",
+                "rgba(0,0,0,0.9)",
+                "rgba(0,0,0,0.72)",
+                "rgba(0,0,0,0.52)",
+                "rgba(0,0,0,0.34)",
+                "rgba(0,0,0,0.2)",
+                "rgba(0,0,0,0.1)",
+                "rgba(0,0,0,0.04)",
+                "rgba(0,0,0,0.01)",
                 "rgba(0,0,0,0)",
               ]}
-              locations={[0, 0.07, 0.15, 0.24, 0.34, 0.45, 0.57, 0.7, 0.84, 1]}
+              locations={[0, 0.05, 0.11, 0.18, 0.26, 0.35, 0.45, 0.56, 0.67, 1]}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               style={StyleSheet.absoluteFill}
@@ -364,8 +367,19 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
               reference screenshot's own lighter dimming, so the backdrop itself reads as more
               vibrant/colorful instead of mostly darkened out. */}
           <LinearGradient
-            colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.3)", "rgba(0,0,0,0.65)", colors.bg]}
-            locations={[0, 0.5, 0.7, 0.87, 1]}
+            // Lighter per request: clear for the top 60%, then an ease-in curve to solid only at the
+            // very bottom edge (so the rows below still blend into the picture with no seam).
+            colors={[
+              "rgba(0,0,0,0)",
+              "rgba(0,0,0,0)",
+              "rgba(0,0,0,0.04)",
+              "rgba(0,0,0,0.12)",
+              "rgba(0,0,0,0.26)",
+              "rgba(0,0,0,0.46)",
+              "rgba(0,0,0,0.72)",
+              colors.bg,
+            ]}
+            locations={[0, 0.6, 0.68, 0.76, 0.83, 0.89, 0.95, 1]}
             style={StyleSheet.absoluteFill}
           />
           {/* Meta row back to type/year/duration/rating only (was genre/age-rating/rating/year/
@@ -676,7 +690,7 @@ const RecentCard = React.memo(React.forwardRef<View, {
                 "rgba(0,0,0,0.7)",
               ]}
               locations={[0, 0.3, 0.42, 0.53, 0.63, 0.72, 0.81, 0.9, 1]}
-              style={styles.recentShade}
+              style={StyleSheet.absoluteFill}
               pointerEvents="none"
             />
             <View style={styles.recentInfo} pointerEvents="none">
@@ -787,12 +801,8 @@ const styles = StyleSheet.create({
   recentFrameFocused: { borderColor: "#fff" },
   // Rounded on all four corners now (was top-only) - the info panel that used to sit below the
   // image, squaring off its bottom edge, is gone: this clip *is* the whole visible card now.
-  // No overflow:hidden clip any more: on Android a rounded clip is redrawn for every card on every
-  // frame of a row scroll or focus animation - a real part of Home feeling heavy to move around.
-  // The image and the gradient round their own corners instead (both do it natively, for free).
-  recentImageClip: { width: "100%", aspectRatio: 16 / 9, borderRadius: s(9) },
-  recentImage: { width: "100%", height: "100%", borderRadius: s(9) },
-  recentShade: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: s(9) },
+  recentImageClip: { width: "100%", aspectRatio: 16 / 9, borderRadius: s(9), overflow: "hidden" },
+  recentImage: { width: "100%", height: "100%" },
   // The "View more" card: same footprint as a title card (16:9 inside the same framed border), so the row keeps its height.
   moreFrame: { aspectRatio: 16 / 9, alignItems: "center", justifyContent: "center", gap: s(4), backgroundColor: "rgba(255,255,255,0.06)" },
   morePlus: { color: "rgba(255,255,255,0.8)", fontSize: fs(44), fontFamily: font.black, lineHeight: fs(50) },
