@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Image, ScrollView, StyleSheet, Dimensions, ActivityIndicator, Animated, ToastAndroid, NativeModules, NativeEventEmitter } from "react-native";
+import { View, Text, Image, ScrollView, StyleSheet, Dimensions, ActivityIndicator, Animated, ToastAndroid, NativeModules, NativeEventEmitter, findNodeHandle } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import { Play, Bookmark, Users, Check, ChevronDown, ChevronUp, Languages } from "lucide-react-native";
 import type { Movie, Season, Episode, StreamServer, SubtitleTrack, SourceVersion, PlaybackMapping } from "../api";
@@ -35,7 +35,7 @@ interface Props {
   playerActive: boolean;
 }
 
-export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, lang, onToggleFavorite, onPlay, onSelectPerson, onSelectMovie, onBack, isEpisodeWatched, playerActive }: Props) {
+export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, lang, onToggleFavorite, onPlay, onSelectPerson, onSelectMovie, onBack, isEpisodeWatched }: Props) {
   // Home/Browse/Search only ever hand this screen the new backend's *summary* shape (no
   // titleAr/genres/cast/director yet - only its dedicated detail endpoint has those, see
   // fetchMovieDetail in api.ts). Shadowing the prop with local state of the same name means
@@ -208,6 +208,10 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // so this tracks *which of the two* we last scrolled to and only moves when that actually
   // changes - immune to both animation timing and to re-firing for no reason.
   const lastScrollTarget = useRef<"top" | "bottom" | "cast" | null>(null);
+  const [seasonButtonHandle, setSeasonButtonHandle] = useState<number | null>(null);
+  const setSeasonButtonNode = useCallback((node: View | null) => {
+    setSeasonButtonHandle(node ? findNodeHandle(node) ?? null : null);
+  }, []);
   // The "Scroll down" hint goes away for good once the viewer has been down there once (per title).
   const [scrolledDown, setScrolledDown] = useState(false);
   useEffect(() => setScrolledDown(false), [movie.id]);
@@ -216,7 +220,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // out again on the way back up. An Animated value, not state - toggling it re-renders nothing.
   const episodeInfoOpacity = useRef(new Animated.Value(0)).current;
   const scrollToTop = () => {
-    Animated.timing(episodeInfoOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
+    if (movie.type === "series") Animated.timing(episodeInfoOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
     if (lastScrollTarget.current === "top") return;
     lastScrollTarget.current = "top";
     scrollRef.current?.scrollTo({ y: 0, animated: true });
@@ -477,21 +481,10 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // page instead of one that merely happens not to need scrolling yet.
   const canScroll = isSeries || parts.length > 0;
 
-  // Blinking down-arrow hinting that seasons/episodes (or other parts, for a movie) sit just
-  // below the fold - only ever shown when there's actually something down there to point at
-  // (same condition as canScroll itself).
-  const scrollHintAnim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (!canScroll || playerActive || scrolledDown) return;
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scrollHintAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.timing(scrollHintAnim, { toValue: 0, duration: 700, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [canScroll, playerActive, scrolledDown, scrollHintAnim]);
+  // The down-arrow hint (seasons/episodes, or other parts, below the fold) is static now. It used to
+  // blink in a loop, which made the TV redraw that part of the big banner on every frame for as long
+  // as the page stayed open - only on scrollable pages (films with parts, series), exactly where
+  // moving between the buttons was reported as slow.
 
   const castBlock = (
     <>
@@ -681,6 +674,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
             )}
             {isSeries && (
               <SeasonStepper
+                buttonRef={setSeasonButtonNode}
                 seasons={movie.seasons!}
                 active={activeSeason}
                 onChange={setActiveSeason}
@@ -722,19 +716,10 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
         {/* Centered across the whole hero, not tucked beside a button - reads as a page-level
             "there's more below" cue rather than something tied to Favorite specifically. */}
         {canScroll && !scrolledDown && (
-          <Animated.View
-            style={[
-              styles.scrollHint,
-              {
-                opacity: scrollHintAnim.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }),
-                transform: [{ translateY: scrollHintAnim.interpolate({ inputRange: [0, 1], outputRange: [0, s(6)] }) }],
-              },
-            ]}
-            pointerEvents="none"
-          >
+          <View style={styles.scrollHint} pointerEvents="none">
             <Text style={styles.scrollHintText}>{lang === "ar" ? "مرر للأسفل" : "Scroll down"}</Text>
             <ChevronDown size={s(20)} color="#fff" />
-          </Animated.View>
+          </View>
         )}
       </View>
 
@@ -806,6 +791,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                   onFocusScroll={stableScrollToBottom}
                   isEpisodeWatched={isEpisodeWatched}
                   infoOpacity={episodeInfoOpacity}
+                  seasonButtonHandle={seasonButtonHandle}
                 />
               )
             )}
@@ -837,6 +823,7 @@ const EpisodeRail = React.memo(function EpisodeRail({
   onFocusScroll,
   isEpisodeWatched,
   infoOpacity,
+  seasonButtonHandle,
 }: {
   season: Season;
   movieId: string;
@@ -850,6 +837,8 @@ const EpisodeRail = React.memo(function EpisodeRail({
   onFocusScroll: () => void;
   isEpisodeWatched: (movieId: string, seasonNumber: number, episodeNumber: number) => boolean;
   infoOpacity: Animated.Value;
+  // The season button's native handle - up from any episode card goes there.
+  seasonButtonHandle: number | null;
 }) {
   const [focusedEpisodeId, setFocusedEpisodeId] = useState<string | null>(season.episodes[0]?.id ?? null);
   useEffect(() => {
@@ -905,6 +894,7 @@ const EpisodeRail = React.memo(function EpisodeRail({
             setRef={clamp.setRef(i)}
             nextFocusLeft={i === 0 ? clamp.clampLeft() : undefined}
             nextFocusRight={i === count - 1 ? clamp.clampRight() : undefined}
+            nextFocusUp={seasonButtonHandle ?? undefined}
             onPlay={onPlayEpisode}
             onFocusEpisode={handleFocus}
           />
@@ -949,6 +939,7 @@ const EpisodeCard = React.memo(function EpisodeCard({
   setRef,
   nextFocusLeft,
   nextFocusRight,
+  nextFocusUp,
   onPlay,
   onFocusEpisode,
 }: {
@@ -962,6 +953,7 @@ const EpisodeCard = React.memo(function EpisodeCard({
   setRef: (node: View | null) => void;
   nextFocusLeft?: number;
   nextFocusRight?: number;
+  nextFocusUp?: number;
   onPlay: (ep: Episode) => void;
   onFocusEpisode: (ep: Episode, index: number) => void;
 }) {
@@ -977,6 +969,7 @@ const EpisodeCard = React.memo(function EpisodeCard({
       ref={setRef}
       nextFocusLeft={nextFocusLeft}
       nextFocusRight={nextFocusRight}
+      nextFocusUp={nextFocusUp}
       onPress={handlePress}
       // No scale: scaling a card whose image is clipped to rounded corners showed the edges
       // cropping while moving between episodes on some devices. The border alone marks focus.
@@ -993,7 +986,7 @@ const EpisodeCard = React.memo(function EpisodeCard({
               <Image source={{ uri: posterUrl(ep.thumbnail || backdrop, "w342") }} style={styles.episodeThumb} fadeDuration={0} />
             )}
             <View style={styles.episodeNumberBadge}>
-              <Text style={styles.episodeNumberText}>E{ep.number}</Text>
+              <Text style={styles.episodeNumberText}>{ep.number}</Text>
             </View>
             {watched && (
               <View style={styles.episodeWatchedBadge}>
@@ -1049,6 +1042,7 @@ function seasonCountLabel(n: number, lang: Lang): string {
 }
 
 function SeasonStepper({
+  buttonRef,
   seasons,
   active,
   onChange,
@@ -1056,6 +1050,7 @@ function SeasonStepper({
   onFocusChange,
   hasTVPreferredFocus,
 }: {
+  buttonRef?: (node: View | null) => void;
   seasons: Season[];
   active?: Season;
   onChange: (season: Season) => void;
@@ -1106,6 +1101,7 @@ function SeasonStepper({
   );
   return (
     <Focusable
+      ref={buttonRef}
       onPress={() => setActivated((on) => !on)}
       onFocusChange={(f) => {
         if (!f) setActivated(false);

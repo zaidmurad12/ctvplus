@@ -135,7 +135,7 @@ function EpisodeRow({
                       pointerEvents="none"
                     />
                     <View style={styles.numberBadge}>
-                      <Text style={styles.numberText}>E{ep.number}</Text>
+                      <Text style={styles.numberText}>{ep.number}</Text>
                     </View>
                     {watched && !isPlayingNow && (
                       <View style={styles.watchedBadge}>
