@@ -810,15 +810,18 @@ export default function App() {
           <View
             ref={sectionsViewRef}
             collapsable={false}
-            style={[StyleSheet.absoluteFill, !!playing ? styles.sectionHidden : sectionsCovered && styles.sectionCovered]}
+            style={[
+              StyleSheet.absoluteFill,
+              playing || deferSections ? styles.sectionHidden : sectionsCovered && styles.sectionCovered,
+            ]}
             pointerEvents={sectionsCovered ? "none" : "auto"}
           >
-            {/* Home/Sidebar stay unmounted for the whole playback (they used to be rebuilt in the
-                background 20s in, "homeWarm", to make the exit faster). Their images and views
-                were a real share of the memory the TV's own memory killer ended the app at,
-                every ~10 minutes mid-film - and exits no longer need it: deferSections rebuilds
-                them just after the details screen is already back on screen. */}
-            {!playing && !deferSections && (
+            {/* The sections stay mounted through playback, only display:none (above) - which frees
+                their native views and images, the memory the TV's killer ended the app over, while
+                keeping the React tree. Unmounting them outright (as before) meant rebuilding all of
+                Home from scratch after every film: the long wait going back to Home. Their native
+                views come back after deferSections, once the details page is already on screen. */}
+            {(
               <>
                 <Suspense fallback={null}>
                   <Sidebar active={section} onSelect={handleSelectSection} />
@@ -838,7 +841,7 @@ export default function App() {
                 </View>
               </>
             )}
-            {!playing && !deferSections && (
+            {(
               <>
                 {section === "movies" && (
                   <View style={StyleSheet.absoluteFill}>

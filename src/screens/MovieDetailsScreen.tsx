@@ -1077,6 +1077,7 @@ function SeasonStepper({
     };
   }, [activated]);
   const label = active ? seasonLabel(active, lang) : "";
+  const labelParts = /^(.*\s)(\d+)$/.exec(label);
   const arrowColor = activated ? "#fff" : colors.textMuted;
   // Beside the season number: Arabic "موسم 2" shows its number on the left, English "Season 2" on
   // the right.
@@ -1108,7 +1109,15 @@ function SeasonStepper({
           ]}
         >
           {lang === "ar" && arrows}
-          <Text style={styles.detailBtnText}>{label}</Text>
+          {/* The season number drawn bigger than the word before it, per request. */}
+          {labelParts ? (
+            <Text style={styles.detailBtnText}>
+              {labelParts[1]}
+              <Text style={styles.seasonNumber}>{labelParts[2]}</Text>
+            </Text>
+          ) : (
+            <Text style={styles.detailBtnText}>{label}</Text>
+          )}
           {lang !== "ar" && arrows}
         </Animated.View>
       )}
@@ -1284,6 +1293,7 @@ const styles = StyleSheet.create({
   detailBtnIconOnly: { paddingHorizontal: s(16) },
   seasonStepperArrows: { alignItems: "center", marginVertical: -s(4) },
   // A clear gap between the season button and Watch later beside it (it also grows when active).
+  seasonNumber: { fontSize: fs(19), fontFamily: font.black },
   seasonStepperGap: { marginEnd: s(4) },
   detailBtnFilled: { backgroundColor: "#fff" },
   detailBtnOutline: { backgroundColor: "rgba(24,24,27,0.6)", borderColor: "rgba(255,255,255,0.2)" },
@@ -1331,14 +1341,15 @@ const styles = StyleSheet.create({
     width: s(60),
     height: s(80),
     borderRadius: s(12),
-    overflow: "hidden",
+    // No overflow:hidden - the photo rounds its own corners (see Home's recentImageClip for why a
+    // rounded clip is costly while moving along the row).
     borderWidth: 2,
     borderColor: "transparent",
     backgroundColor: colors.cardBg,
   },
   castAvatarFocused: { borderColor: "#fff" },
-  castAvatarImg: { width: "100%", height: "100%" },
-  castAvatarPlaceholder: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center", backgroundColor: "#27272a" },
+  castAvatarImg: { width: "100%", height: "100%", borderRadius: s(10) },
+  castAvatarPlaceholder: { width: "100%", height: "100%", borderRadius: s(10), alignItems: "center", justifyContent: "center", backgroundColor: "#27272a" },
   castAvatarInitial: { color: "#fff", fontSize: fs(18), fontFamily: font.black },
   castName: { color: "#fff", fontSize: fs(10.5), fontFamily: font.bold, marginTop: s(6), textAlign: "center" },
   // Same footprint as a real cast card (castAvatar/castName above) so the section doesn't

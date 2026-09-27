@@ -1,5 +1,5 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, TextInput, ScrollView, Dimensions, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, TextInput, ScrollView, Dimensions, ActivityIndicator, StyleSheet, NativeModules, NativeEventEmitter } from "react-native";
 import { Search as SearchIcon } from "lucide-react-native";
 import type { Movie } from "../api";
 import { searchMovies } from "../api";
@@ -36,7 +36,10 @@ type TypeFilter = "all" | "movie" | "series";
 // screenful renders immediately, the rest of a capped list follows a moment later, so focus and
 // key presses stay responsive while results appear.
 const MAX_RESULTS = 60;
-const FIRST_PAINT_COUNT = 12;
+// Results come in a row at a time (a row every RESULT_ROW_STEP_MS): committing a whole screenful of
+// cards in one go held the JS thread long enough that the keyboard stopped answering the remote.
+const FIRST_PAINT_COUNT = NUM_COLUMNS;
+const RESULT_ROW_STEP_MS = 90;
 
 interface Props {
   lang: Lang;
@@ -94,17 +97,32 @@ export default function SearchScreen({ lang, onSelect }: Props) {
       } finally {
         if (myId === requestId.current) setLoading(false);
       }
-    }, 350);
+    }, 550);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query]);
 
   useEffect(() => {
-    if (results.length <= FIRST_PAINT_COUNT) return;
-    const timer = setTimeout(() => setVisibleCount(MAX_RESULTS), 400);
+    if (visibleCount >= Math.min(results.length, MAX_RESULTS)) return;
+    const timer = setTimeout(() => setVisibleCount((n) => n + NUM_COLUMNS), RESULT_ROW_STEP_MS);
     return () => clearTimeout(timer);
-  }, [results]);
+  }, [results, visibleCount]);
+
+  // The remote's number keys type digits straight into the search (see KeyEventBridge.onDigitKey).
+  useEffect(() => {
+    const { KeyEventBridge } = NativeModules;
+    if (!KeyEventBridge) return;
+    KeyEventBridge.setDigitCaptureActive(true);
+    const emitter = new NativeEventEmitter(KeyEventBridge);
+    const sub = emitter.addListener("onDigitKey", (event: any) => {
+      setQuery((q) => q + String(event.digit));
+    });
+    return () => {
+      sub.remove();
+      KeyEventBridge.setDigitCaptureActive(false);
+    };
+  }, []);
 
   const filtered = useMemo(() => {
     const list = typeFilter === "all" ? results : results.filter((m) => m.type === typeFilter);
@@ -139,7 +157,7 @@ export default function SearchScreen({ lang, onSelect }: Props) {
     <View style={styles.root}>
       <View style={styles.topRow}>
       <View style={styles.searchBar}>
-        <SearchIcon size={s(16)} color={colors.textMuted} />
+        <SearchIcon size={s(22)} color={colors.textMuted} />
         {/* showSoftInputOnFocus=false: this used to bring up the OS's own on-screen keyboard,
             which has no guaranteed Arabic layout (or a remote-friendly one) on every TV box.
             The custom VirtualKeyboard below drives `query` directly instead - this TextInput
@@ -270,7 +288,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#2a2a2a",
   },
-  input: { flex: 1, color: "#fff", fontSize: fs(13), fontFamily: font.semiBold, padding: 0 },
+  // Bigger per request - easier to read what's been typed from the couch.
+  input: { flex: 1, color: "#fff", fontSize: fs(20), fontFamily: font.bold, padding: 0 },
   // The keyboard column has a fixed width and never scrolls; only resultsCol's own FlatList
   // does - flex:1 on this row plus flex:1 on resultsCol is what lets that FlatList size itself
   // to (and scroll within) the remaining space instead of pushing the whole page taller.

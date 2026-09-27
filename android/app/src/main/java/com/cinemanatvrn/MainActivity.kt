@@ -85,6 +85,18 @@ class MainActivity : ReactActivity() {
       return true
     }
 
+    if (KeyEventBridgeModule.digitCaptureActive &&
+        (event.keyCode in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 ||
+            event.keyCode in KeyEvent.KEYCODE_NUMPAD_0..KeyEvent.KEYCODE_NUMPAD_9)) {
+      if (event.action == KeyEvent.ACTION_DOWN) {
+        val digit =
+            if (event.keyCode >= KeyEvent.KEYCODE_NUMPAD_0) event.keyCode - KeyEvent.KEYCODE_NUMPAD_0
+            else event.keyCode - KeyEvent.KEYCODE_0
+        KeyEventBridgeModule.emitDigitKey(digit)
+      }
+      return true
+    }
+
     return super.dispatchKeyEvent(event)
   }
 }

@@ -69,24 +69,48 @@ function fixRtlPunctuation(cues: SubtitleCue[]): SubtitleCue[] {
       if (ENDING_PUNCT.test(line.trimEnd())) endsWith++;
     }
   }
-  if (startsWith < 3 || startsWith <= endsWith * 2) return cues;
+  const ltrTypedFile = startsWith >= 3 && startsWith > endsWith * 2;
   return cues.map((cue) => ({
     ...cue,
     text: cue.text
       .split("\n")
-      .map((line) => {
-        if (!RTL_CHAR.test(line)) return line;
-        const lead = LEADING_PUNCT.exec(line)?.[0] ?? "";
-        const run = lead.replace(/\s+/g, "");
-        const rest = line.slice(lead.length).trim();
-        if (!run || !rest) return line;
-        // A bracket typed at the start of such a line is the one that closes the sentence (the file's
-        // "..(لمرافقة (دانكن" means "لمرافقة (دانكن).."), so at the end it's always the closing one.
-        const moved = [...run].reverse().map((ch) => (ch === "(" ? ")" : ch === "[" ? "]" : ch));
-        return rest + moved.join("");
-      })
+      .map((line) => fixRtlLine(line, ltrTypedFile))
       .join("\n"),
   }));
+}
+
+// Always wrong in an Arabic line, whatever the file: a full stop, comma, question/exclamation mark
+// or *closing* bracket as the very first thing (no sentence starts that way) - only a file-wide LTR
+// typing (above) also justifies moving an opening bracket, a leading ellipsis ("...ثم" is a normal
+// continuation) or a trailing dialogue dash.
+const ALWAYS_WRONG_LEAD = /^[\s.,!?؟،؛:;)\]]+/;
+// Punctuation typed onto the front of the next word instead of the end of the previous one
+// ("مرحبا ،كيف") - moved back: "مرحبا، كيف".
+const DETACHED_PUNCT = /(\S)\s+([،,.!?؟؛:;])(?=[؀-ۿ])/g;
+
+function fixRtlLine(line: string, ltrTypedFile: boolean): string {
+  if (!RTL_CHAR.test(line)) return line;
+  let text = line.replace(DETACHED_PUNCT, "$1$2 ");
+  const leadPattern = ltrTypedFile ? LEADING_PUNCT : ALWAYS_WRONG_LEAD;
+  const lead = leadPattern.exec(text)?.[0] ?? "";
+  const run = lead.replace(/\s+/g, "");
+  // A lone "." at the start of an otherwise normal file is most likely part of an ellipsis
+  // continuation; only a real run of end punctuation is moved outside LTR-typed files.
+  if (run && !(run.startsWith("..") && !ltrTypedFile)) {
+    const rest = text.slice(lead.length).trim();
+    if (rest) {
+      // A bracket typed at the start of such a line is the one that closes the sentence (the file's
+      // "..(لمرافقة (دانكن" means "لمرافقة (دانكن).."), so at the end it's always the closing one.
+      const moved = [...run].reverse().map((ch) => (ch === "(" ? ")" : ch === "[" ? "]" : ch));
+      text = rest + moved.join("");
+    }
+  }
+  // An LTR-typed file puts the dialogue dash at the end of the line (so it lands on the left); in
+  // right-to-left it belongs at the start.
+  if (ltrTypedFile && /[^-\s]\s*-$/.test(text) && !text.startsWith("-")) {
+    text = "- " + text.replace(/\s*-$/, "");
+  }
+  return text;
 }
 
 // Was a linear .find() over the WHOLE array from the start every single call - fine for a few

@@ -112,11 +112,12 @@ const Focusable = React.forwardRef<View, Props>(function Focusable(
       // animating between two equal values, is what actually saves the work on every single focus
       // change, since `value` is always 1 in that case regardless of focus state.
       if (scaleTo === 1) return;
-      Animated.spring(scale, {
+      // A short timing, not a spring: the spring's bounce ran ~40 frames per focus change (two
+      // cards animating each move), which on the TV competed with every row scroll.
+      Animated.timing(scale, {
         toValue: value,
+        duration: 150,
         useNativeDriver: true,
-        speed: 24,
-        bounciness: 6,
       }).start();
     },
     [onFocusChange, scale, scaleTo]
@@ -178,7 +179,9 @@ const Focusable = React.forwardRef<View, Props>(function Focusable(
       {...rest}
       hasTVPreferredFocus={everBlockedRef.current ? false : rest.hasTVPreferredFocus}
     >
-      <Animated.View style={[style, { transform: [{ scale }] }]}>
+      {/* The focused card is kept as a GPU texture, so its zoom composites the texture instead of
+          redrawing the card (image, border, text) on every frame. Only one card at a time. */}
+      <Animated.View style={[style, { transform: [{ scale }] }]} renderToHardwareTextureAndroid={focused}>
         {typeof children === "function" ? children(focused) : children}
       </Animated.View>
     </Pressable>

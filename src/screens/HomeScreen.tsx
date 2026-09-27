@@ -676,7 +676,7 @@ const RecentCard = React.memo(React.forwardRef<View, {
                 "rgba(0,0,0,0.7)",
               ]}
               locations={[0, 0.3, 0.42, 0.53, 0.63, 0.72, 0.81, 0.9, 1]}
-              style={StyleSheet.absoluteFill}
+              style={styles.recentShade}
               pointerEvents="none"
             />
             <View style={styles.recentInfo} pointerEvents="none">
@@ -787,8 +787,12 @@ const styles = StyleSheet.create({
   recentFrameFocused: { borderColor: "#fff" },
   // Rounded on all four corners now (was top-only) - the info panel that used to sit below the
   // image, squaring off its bottom edge, is gone: this clip *is* the whole visible card now.
-  recentImageClip: { width: "100%", aspectRatio: 16 / 9, borderRadius: s(9), overflow: "hidden" },
-  recentImage: { width: "100%", height: "100%" },
+  // No overflow:hidden clip any more: on Android a rounded clip is redrawn for every card on every
+  // frame of a row scroll or focus animation - a real part of Home feeling heavy to move around.
+  // The image and the gradient round their own corners instead (both do it natively, for free).
+  recentImageClip: { width: "100%", aspectRatio: 16 / 9, borderRadius: s(9) },
+  recentImage: { width: "100%", height: "100%", borderRadius: s(9) },
+  recentShade: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: s(9) },
   // The "View more" card: same footprint as a title card (16:9 inside the same framed border), so the row keeps its height.
   moreFrame: { aspectRatio: 16 / 9, alignItems: "center", justifyContent: "center", gap: s(4), backgroundColor: "rgba(255,255,255,0.06)" },
   morePlus: { color: "rgba(255,255,255,0.8)", fontSize: fs(44), fontFamily: font.black, lineHeight: fs(50) },

@@ -58,6 +58,19 @@ class KeyEventBridgeModule(reactContext: ReactApplicationContext) :
     var dpadNavActive: Boolean = false
       private set
 
+    // The remote's number keys (0-9), forwarded as "onDigitKey" while the search screen is open,
+    // so a title with digits in it can be typed straight from the remote.
+    @Volatile
+    var digitCaptureActive: Boolean = false
+      private set
+
+    fun emitDigitKey(digit: Int) {
+      val module = instance ?: return
+      module.reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("onDigitKey", Arguments.createMap().apply { putInt("digit", digit) })
+    }
+
     // HomeScreen's own narrower need: the recent-items strip above its rails fully unmounts once
     // focus moves down into any other rail (see its own comment on why - kept re-enlarging/
     // reflowing every other way this was tried), which means there's no real native view left for
@@ -163,6 +176,11 @@ class KeyEventBridgeModule(reactContext: ReactApplicationContext) :
       } catch (_: Exception) {
       }
     }
+  }
+
+  @ReactMethod
+  fun setDigitCaptureActive(active: Boolean) {
+    digitCaptureActive = active
   }
 
   @ReactMethod
