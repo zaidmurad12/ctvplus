@@ -1046,11 +1046,10 @@ function SeasonStepper({
   onFocusChange?: (focused: boolean) => void;
   hasTVPreferredFocus?: boolean;
 }) {
+  // No grow-on-activate any more: the focused button is drawn as one GPU texture (see Focusable),
+  // and scaling up past it cut the button's edges off. Active now shows as white arrows and a
+  // lighter fill instead.
   const [activated, setActivated] = useState(false);
-  const grow = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    Animated.spring(grow, { toValue: activated ? 1.15 : 1, useNativeDriver: true, speed: 20, bounciness: 6 }).start();
-  }, [activated, grow]);
   const stateRef = useRef({ seasons, active, onChange });
   stateRef.current = { seasons, active, onChange };
   useEffect(() => {
@@ -1098,28 +1097,41 @@ function SeasonStepper({
       hasTVPreferredFocus={hasTVPreferredFocus}
     >
       {(focused: boolean) => (
-        <Animated.View
+        <View
           style={[
             styles.detailBtn,
+            styles.seasonStepper,
             styles.seasonStepperGap,
             styles.detailBtnOutline,
             focused && styles.detailBtnFocusedOutline,
+            activated && styles.seasonStepperActive,
             focused && focusShadow,
-            { transform: [{ scale: grow }] },
           ]}
         >
-          {lang === "ar" && arrows}
-          {/* The season number drawn bigger than the word before it, per request. */}
+          {/* Word and number as separate pieces with a clear gap, the number bigger. Arabic reads
+              "موسم 2" right to left, so its number (and the arrows beside it) sit on the left. */}
           {labelParts ? (
-            <Text style={styles.detailBtnText}>
-              {labelParts[1]}
-              <Text style={styles.seasonNumber}>{labelParts[2]}</Text>
-            </Text>
+            lang === "ar" ? (
+              <>
+                {arrows}
+                <Text style={styles.seasonNumber}>{labelParts[2]}</Text>
+                <Text style={styles.detailBtnText}>{labelParts[1].trim()}</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.detailBtnText}>{labelParts[1].trim()}</Text>
+                <Text style={styles.seasonNumber}>{labelParts[2]}</Text>
+                {arrows}
+              </>
+            )
           ) : (
-            <Text style={styles.detailBtnText}>{label}</Text>
+            <>
+              {lang === "ar" && arrows}
+              <Text style={styles.detailBtnText}>{label}</Text>
+              {lang !== "ar" && arrows}
+            </>
           )}
-          {lang !== "ar" && arrows}
-        </Animated.View>
+        </View>
       )}
     </Focusable>
   );
@@ -1293,7 +1305,10 @@ const styles = StyleSheet.create({
   detailBtnIconOnly: { paddingHorizontal: s(16) },
   seasonStepperArrows: { alignItems: "center", marginVertical: -s(4) },
   // A clear gap between the season button and Watch later beside it (it also grows when active).
-  seasonNumber: { fontSize: fs(19), fontFamily: font.black },
+  seasonNumber: { color: "#fff", fontSize: fs(19), fontFamily: font.black },
+  // A little wider than the other buttons, and a clear gap between the word and the number.
+  seasonStepper: { paddingHorizontal: s(32), gap: s(12) },
+  seasonStepperActive: { backgroundColor: "rgba(255,255,255,0.22)" },
   seasonStepperGap: { marginEnd: s(4) },
   detailBtnFilled: { backgroundColor: "#fff" },
   detailBtnOutline: { backgroundColor: "rgba(24,24,27,0.6)", borderColor: "rgba(255,255,255,0.2)" },
@@ -1398,7 +1413,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: s(6),
     paddingVertical: s(2),
   },
-  episodeNumberText: { color: "#fff", fontSize: fs(11), fontFamily: font.black },
+  episodeNumberText: { color: "#fff", fontSize: fs(14), fontFamily: font.black },
   // Filled white circle (not just an outline) so a black check reads clearly regardless of
   // whatever's behind it in the thumbnail - same treatment as the color-swatch checkmarks in
   // SettingsScreen.

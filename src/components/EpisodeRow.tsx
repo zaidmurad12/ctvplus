@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: s(6),
     paddingVertical: s(2),
   },
-  numberText: { color: "#fff", fontSize: fs(11), fontFamily: font.black },
+  numberText: { color: "#fff", fontSize: fs(14), fontFamily: font.black },
   watchedBadge: {
     position: "absolute",
     top: s(6),
