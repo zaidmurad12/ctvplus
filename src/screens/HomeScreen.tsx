@@ -342,22 +342,25 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
             <LinearGradient
               // Many stops on an ease-out curve (not 4-5 straight segments): a few linear segments each read as
               // a visible "step", i.e. an edge. This falloff is gradual enough to melt into the black.
-              // Lighter and narrower per request (was darkening most of the picture's width): still
-              // solid at the very edge so the image's own edge never shows, then an ease-out curve
-              // that's clear by ~70% of the width.
+              // A cubic ease-out from solid at the very edge (so the picture's own edge never shows)
+              // to clear by ~80% of the width - lighter than before and with no straight segments,
+              // which is what read as a dark "block" with an edge.
               colors={[
-                colors.bg,
-                "rgba(0,0,0,0.9)",
-                "rgba(0,0,0,0.72)",
-                "rgba(0,0,0,0.52)",
-                "rgba(0,0,0,0.34)",
-                "rgba(0,0,0,0.2)",
-                "rgba(0,0,0,0.1)",
-                "rgba(0,0,0,0.04)",
-                "rgba(0,0,0,0.01)",
+                "rgba(0,0,0,1)",
+                "rgba(0,0,0,0.757)",
+                "rgba(0,0,0,0.558)",
+                "rgba(0,0,0,0.398)",
+                "rgba(0,0,0,0.273)",
+                "rgba(0,0,0,0.178)",
+                "rgba(0,0,0,0.109)",
+                "rgba(0,0,0,0.061)",
+                "rgba(0,0,0,0.03)",
+                "rgba(0,0,0,0.012)",
+                "rgba(0,0,0,0.003)",
+                "rgba(0,0,0,0)",
                 "rgba(0,0,0,0)",
               ]}
-              locations={[0, 0.05, 0.11, 0.18, 0.26, 0.35, 0.45, 0.56, 0.67, 1]}
+              locations={[0, 0.075, 0.15, 0.225, 0.3, 0.375, 0.45, 0.525, 0.6, 0.675, 0.75, 0.825, 1]}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               style={StyleSheet.absoluteFill}
@@ -367,19 +370,23 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
               reference screenshot's own lighter dimming, so the backdrop itself reads as more
               vibrant/colorful instead of mostly darkened out. */}
           <LinearGradient
-            // Lighter per request: clear for the top 60%, then an ease-in curve to solid only at the
-            // very bottom edge (so the rows below still blend into the picture with no seam).
+            // Clear for the top half, then a cubic ease-in to solid only at the very bottom edge - so
+            // the rows below blend in with no seam, without a dark band across the picture.
             colors={[
               "rgba(0,0,0,0)",
               "rgba(0,0,0,0)",
-              "rgba(0,0,0,0.04)",
-              "rgba(0,0,0,0.12)",
-              "rgba(0,0,0,0.26)",
-              "rgba(0,0,0,0.46)",
-              "rgba(0,0,0,0.72)",
-              colors.bg,
+              "rgba(0,0,0,0.001)",
+              "rgba(0,0,0,0.008)",
+              "rgba(0,0,0,0.027)",
+              "rgba(0,0,0,0.064)",
+              "rgba(0,0,0,0.125)",
+              "rgba(0,0,0,0.216)",
+              "rgba(0,0,0,0.343)",
+              "rgba(0,0,0,0.512)",
+              "rgba(0,0,0,0.729)",
+              "rgba(0,0,0,1)",
             ]}
-            locations={[0, 0.6, 0.68, 0.76, 0.83, 0.89, 0.95, 1]}
+            locations={[0, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1]}
             style={StyleSheet.absoluteFill}
           />
           {/* Meta row back to type/year/duration/rating only (was genre/age-rating/rating/year/
