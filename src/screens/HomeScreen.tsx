@@ -83,6 +83,12 @@ interface Props {
   // page, a person page) - it stays mounted underneath, hidden, so its hero auto-rotation must stop or
   // it keeps decoding a full-size backdrop every few seconds behind whatever they are actually using.
   active: boolean;
+  // True while another screen (a title's details page) covers Home. The card rows are then taken out
+  // of the screen's drawing tree (display:none - React keeps them, so nothing is rebuilt). Kept
+  // attached but merely transparent, every frame drawn on the details page - each focus animation -
+  // still walked all of Home's hundreds of cards and images underneath: measured on the TV as the
+  // UI thread congested for the whole time a details page was open.
+  detached?: boolean;
 }
 
 export interface HomeScreenHandle {
@@ -106,7 +112,7 @@ export interface HomeScreenHandle {
 // satisfying "the transition between rows should be a smooth slide" without a bespoke animation of
 // its own to get wrong.
 const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen(
-  { heroMovies, categories, lang, onSelectMovie, onOpenCategory, active },
+  { heroMovies, categories, lang, onSelectMovie, onOpenCategory, active, detached = false },
   ref
 ) {
   countRender("home");
@@ -160,6 +166,21 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   // lastScrolledTo ref, which exists purely to guard against redundant scrollTo calls and isn't
   // itself something a render can react to).
   const [currentRowIndex, setCurrentRowIndex] = useState(0);
+  const [reattachRadius, setReattachRadius] = useState<number | null>(null);
+  useEffect(() => {
+    if (detached) {
+      setReattachRadius(0);
+      return;
+    }
+    if (reattachRadius == null) return;
+    if (reattachRadius > rows.length) {
+      setReattachRadius(null);
+      return;
+    }
+    const timer = setTimeout(() => setReattachRadius((r) => (r == null ? null : r + 1)), 60);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rows.length only bounds the steps
+  }, [detached, reattachRadius]);
 
   const scrollRef = useRef<any>(null);
   const lastScrolledTo = useRef<number | null>(null);
@@ -462,6 +483,7 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
             revealImages={Math.abs(index - currentRowIndex) <= (active ? ROW_REVEAL_RADIUS : 0)}
             firstCardRef={index === 0 ? firstCardRef : undefined}
             isCurrent={index === currentRowIndex}
+            detached={detached || (reattachRadius != null && Math.abs(index - currentRowIndex) > reattachRadius)}
           />
         ))}
       </ScrollView>
@@ -491,6 +513,7 @@ const CategoryRow = React.memo(function CategoryRow({
   revealImages,
   firstCardRef,
   isCurrent,
+  detached,
 }: {
   title: string;
   items: Movie[];
@@ -512,8 +535,12 @@ const CategoryRow = React.memo(function CategoryRow({
   // horizontal scroll back to column 0 the moment focus leaves it (see hScrollRef's own effect
   // below), never to gate rendering/reveal (that's revealImages' job).
   isCurrent: boolean;
+  detached: boolean;
 }) {
   countRender("homeRow");
+  // The strip's own height, kept while it's detached so the page doesn't reflow (row offsets and
+  // the scroll position stay exactly where they were).
+  const stripHeight = useRef(0);
   const hasMore = !!category;
   // The "View more" card counts as the row's last focus target, so the right-edge clamp lands on it.
   const clamp = useFocusClamp(items.length + (hasMore ? 1 : 0));
@@ -555,8 +582,19 @@ const CategoryRow = React.memo(function CategoryRow({
         <View style={styles.railTitleBar} />
         <Text style={styles.railTitle}>{title}</Text>
       </View>
-      <View style={styles.railClip}>
-        <ScrollView ref={hScrollRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recentStripContent}>
+      <View
+        style={[styles.railClip, detached && stripHeight.current > 0 && { height: stripHeight.current }]}
+        onLayout={(e) => {
+          if (!detached) stripHeight.current = e.nativeEvent.layout.height;
+        }}
+      >
+        <ScrollView
+          ref={hScrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.recentStripContent}
+          style={detached && stripHeight.current > 0 ? styles.detachedStrip : undefined}
+        >
           {items.map((movie, i) => (
             <RecentCard
               key={movie.id}
@@ -789,6 +827,7 @@ const styles = StyleSheet.create({
   // Starts exactly where the sidebar's own column ends - anything a horizontal scroll would
   // have carried further left than this is now outside the ScrollView's box entirely, not
   // just behind extra padding, so it can't paint through the sidebar's transparent gaps.
+  detachedStrip: { display: "none" },
   railClip: { marginLeft: spacing.sidebarWidth, overflow: "hidden" },
   railTitleBar: { width: s(5), height: s(15), borderRadius: 3, backgroundColor: "#fff" },
   railTitle: { color: "#fff", fontSize: fs(15), fontFamily: font.bold },

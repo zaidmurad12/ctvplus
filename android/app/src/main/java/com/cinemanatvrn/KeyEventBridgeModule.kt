@@ -7,6 +7,8 @@ import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.UiThreadUtil
 import com.facebook.react.uimanager.UIManagerHelper
 import android.view.ViewGroup
+import android.view.Choreographer
+import com.facebook.react.bridge.Promise
 import com.facebook.react.modules.core.DeviceEventManagerModule
 
 /**
@@ -175,6 +177,50 @@ class KeyEventBridgeModule(reactContext: ReactApplicationContext) :
         if (!blocked && focusTag != -1) manager.resolveView(focusTag)?.requestFocus()
       } catch (_: Exception) {
       }
+    }
+  }
+
+  // Diagnostics for the perf probe (src/perfProbe.ts): counts the UI thread's frames between start
+  // and stop, and how many took longer than two vsyncs - tells a congested UI thread apart from a
+  // busy JS thread, which the JS-side timer lag alone can't (RN's timers fire off the UI thread's
+  // frame clock).
+  private var frameCallback: Choreographer.FrameCallback? = null
+  private var frames = 0
+  private var slowFrames = 0
+  private var worstFrameMs = 0L
+  private var lastFrameNanos = 0L
+
+  @ReactMethod
+  fun startFrameStats() {
+    UiThreadUtil.runOnUiThread {
+      frameCallback?.let { Choreographer.getInstance().removeFrameCallback(it) }
+      frames = 0
+      slowFrames = 0
+      worstFrameMs = 0L
+      lastFrameNanos = 0L
+      val cb = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+          if (lastFrameNanos != 0L) {
+            val ms = (frameTimeNanos - lastFrameNanos) / 1_000_000
+            frames++
+            if (ms > 34) slowFrames++
+            if (ms > worstFrameMs) worstFrameMs = ms
+          }
+          lastFrameNanos = frameTimeNanos
+          Choreographer.getInstance().postFrameCallback(this)
+        }
+      }
+      frameCallback = cb
+      Choreographer.getInstance().postFrameCallback(cb)
+    }
+  }
+
+  @ReactMethod
+  fun stopFrameStats(promise: Promise) {
+    UiThreadUtil.runOnUiThread {
+      frameCallback?.let { Choreographer.getInstance().removeFrameCallback(it) }
+      frameCallback = null
+      promise.resolve("frames=$frames slowFrames=$slowFrames worstFrameMs=$worstFrameMs")
     }
   }
 

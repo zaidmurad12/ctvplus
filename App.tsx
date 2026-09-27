@@ -839,6 +839,7 @@ export default function App() {
                       onSelectMovie={setSelectedMovie}
                       onOpenCategory={setSelectedCategory}
                       active={section === "home" && !selectedPerson && !selectedMovie && !selectedCategory}
+                      detached={sectionsCovered}
                     />
                   </Suspense>
                 </View>

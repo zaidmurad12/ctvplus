@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { NativeModules } from "react-native";
 import { sendCrashReport } from "./crashReporter";
 
 const PROBE_MS = 20000;
@@ -41,6 +42,7 @@ export function usePerfProbe(label: string, pageKey: string, extra: () => string
     perfCounters.focusEvents = 0;
     profile.clear();
     const startStats = hermesStats();
+    NativeModules.KeyEventBridge?.startFrameStats?.();
     const started = Date.now();
     let last = started;
     let ticks = 0;
@@ -57,8 +59,14 @@ export function usePerfProbe(label: string, pageKey: string, extra: () => string
       const second = Math.floor((now - started) / 1000);
       lagBySecond[second] = (lagBySecond[second] ?? 0) + lag;
     }, TICK_MS);
-    const done = setTimeout(() => {
+    const done = setTimeout(async () => {
       clearInterval(interval);
+      let uiFrames = "";
+      try {
+        uiFrames = String((await NativeModules.KeyEventBridge?.stopFrameStats?.()) ?? "");
+      } catch {
+        // Older native side - just leave it out.
+      }
       const end = hermesStats();
       const mb = (b?: number) => (b == null ? "?" : (b / 1048576).toFixed(0));
       sendCrashReport({
@@ -69,7 +77,7 @@ export function usePerfProbe(label: string, pageKey: string, extra: () => string
           `avgLag=${Math.round(lagTotal / Math.max(1, ticks))}ms maxLag=${lagMax}ms ` +
           `lagPerSec=[${Array.from(lagBySecond, (v) => Math.round((v ?? 0) / 10) * 10).join(",")}] ` +
           `gc=${(end.js_numGCs ?? 0) - (startStats.js_numGCs ?? 0)} gcMs=${Math.round((end.js_gcTime ?? 0) - (startStats.js_gcTime ?? 0))} ` +
-          `heapMB=${mb(end.js_heapSize)} ` +
+          `heapMB=${mb(end.js_heapSize)} ui[${uiFrames}] ` +
           `renders=[${Array.from(profile, ([id, n]) => `${id}:${n}`).join(" ")}] ` +
           extraRef.current(),
       });
@@ -77,6 +85,7 @@ export function usePerfProbe(label: string, pageKey: string, extra: () => string
     return () => {
       clearInterval(interval);
       clearTimeout(done);
+      NativeModules.KeyEventBridge?.stopFrameStats?.().catch?.(() => {});
     };
   }, [label, pageKey]);
 }
