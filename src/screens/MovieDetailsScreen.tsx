@@ -1323,7 +1323,9 @@ const styles = StyleSheet.create({
   detailBtnIconOnly: { paddingHorizontal: s(16) },
   seasonStepperArrows: { alignItems: "center", marginVertical: -s(4) },
   // A clear gap between the season button and Watch later beside it (it also grows when active).
-  seasonNumber: { color: "#fff", fontSize: fs(19), fontFamily: font.black },
+  // Its line box trimmed to the digits themselves: the bigger number's default line height made
+  // this button taller than the Watch-later one beside it.
+  seasonNumber: { color: "#fff", fontSize: fs(19), lineHeight: fs(17), fontFamily: font.black, includeFontPadding: false, marginVertical: -s(2) },
   // A little wider than the other buttons, and a clear gap between the word and the number.
   seasonStepper: { gap: s(12) },
   seasonStepperGap: { marginEnd: s(4) },

@@ -370,23 +370,22 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
               reference screenshot's own lighter dimming, so the backdrop itself reads as more
               vibrant/colorful instead of mostly darkened out. */}
           <LinearGradient
-            // Clear for the top half, then a cubic ease-in to solid only at the very bottom edge - so
-            // the rows below blend in with no seam, without a dark band across the picture.
+            // Lighter at the bottom per request: a quartic ease-in that stays faint across the lower
+            // band and only reaches black right at the edge (still no visible seam with the rows).
             colors={[
               "rgba(0,0,0,0)",
               "rgba(0,0,0,0)",
-              "rgba(0,0,0,0.001)",
-              "rgba(0,0,0,0.008)",
-              "rgba(0,0,0,0.027)",
-              "rgba(0,0,0,0.064)",
-              "rgba(0,0,0,0.125)",
-              "rgba(0,0,0,0.216)",
-              "rgba(0,0,0,0.343)",
-              "rgba(0,0,0,0.512)",
-              "rgba(0,0,0,0.729)",
+              "rgba(0,0,0,0)",
+              "rgba(0,0,0,0.002)",
+              "rgba(0,0,0,0.012)",
+              "rgba(0,0,0,0.039)",
+              "rgba(0,0,0,0.095)",
+              "rgba(0,0,0,0.198)",
+              "rgba(0,0,0,0.366)",
+              "rgba(0,0,0,0.624)",
               "rgba(0,0,0,1)",
             ]}
-            locations={[0, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1]}
+            locations={[0, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1]}
             style={StyleSheet.absoluteFill}
           />
           {/* Meta row back to type/year/duration/rating only (was genre/age-rating/rating/year/
