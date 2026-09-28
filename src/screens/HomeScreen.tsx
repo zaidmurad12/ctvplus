@@ -9,7 +9,7 @@ import { colors, font, focusShadow, spacing } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, countryName, genreName, pickText, t } from "../i18n";
 import { useSidebarHomeHandle } from "../focusRefs";
-import { countRender } from "../perfProbe";
+import { countRender, usePerfProbe } from "../perfProbe";
 import { useFocusClamp } from "../useFocusClamp";
 import { useProgressiveReveal } from "../useProgressiveReveal";
 
@@ -63,7 +63,15 @@ const HERO_AUTO_ROTATE_MS = 7000;
 // reported as stutter while scrolling between rows, the same class of concurrent-decode cost
 // BrowseScreen's own IMAGE_REVEAL_RADIUS was just tightened for. 1 still keeps both neighbors a
 // single up/down press could reach ready ahead of time, just without the second ring beyond that.
-const ROW_REVEAL_RADIUS = 1;
+// Two rows ahead (was one): the row focus arrives at already has its images decoded, instead of
+// ~20 of them starting to load in the same instant the scroll animation ends. A row's images, once
+// shown, stay shown (see revealedRows) - dropping them when moving away and loading them again on
+// the way back was more work in the middle of every move.
+const ROW_REVEAL_RADIUS = 2;
+// The banner's picture swaps only once focus has settled on a row, well after the row scroll
+// (~300ms) has finished - swapping it in the same instant (the old shared debounce) put a full-width
+// image decode right on top of the scroll's last frames.
+const HERO_SWAP_DELAY_MS = 650;
 // Every card in a row is a live view (Focusable + gradient + text + image), so this is the single biggest
 // lever on how smooth moving between cards feels: 40 per row (tried for long imported lists) made
 // navigation visibly heavier than the original 20.
@@ -166,6 +174,10 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   // lastScrolledTo ref, which exists purely to guard against redundant scrollTo calls and isn't
   // itself something a render can react to).
   const [currentRowIndex, setCurrentRowIndex] = useState(0);
+  const [homeProbeKey, setHomeProbeKey] = useState(0);
+  useEffect(() => {
+    if (active) setHomeProbeKey((k) => k + 1);
+  }, [active]);
   const [reattachRadius, setReattachRadius] = useState<number | null>(null);
   useEffect(() => {
     if (detached) {
@@ -223,6 +235,10 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   // fast scrubbing" behavior other TV UIs use for an identical reason - cuts that down to at most
   // one fetch per pause, not one per card passed through.
   const heroUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heroSwapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Rows whose images have been shown - kept shown (see ROW_REVEAL_RADIUS).
+  const revealedRows = useRef(new Set<number>()).current;
+  usePerfProbe("home", String(homeProbeKey), () => `rows=${rows.length} currentRow=${currentRowIndex}`);
 
   // Auto-rotating hero (restored per explicit request) - cycles through heroMovies on its own
   // whenever the viewer hasn't touched navigation for a while, the same "slider" behavior the
@@ -263,9 +279,12 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
       // between rows stutter.
       heroUpdateTimerRef.current = setTimeout(() => {
         setCurrentRowIndex(index);
+      }, HERO_UPDATE_DEBOUNCE_MS);
+      if (heroSwapTimerRef.current) clearTimeout(heroSwapTimerRef.current);
+      heroSwapTimerRef.current = setTimeout(() => {
         setFocusedMovie(movie);
         scheduleHeroAutoRotate();
-      }, HERO_UPDATE_DEBOUNCE_MS);
+      }, HERO_SWAP_DELAY_MS);
     },
     [scrollToRow, scheduleHeroAutoRotate]
   );
@@ -480,7 +499,10 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
             onRowLayout={onRowLayout}
             // While Home sits hidden under a details/person page, only its current row keeps its bitmaps -
             // the rest are released, which cuts peak memory exactly when the heavier page is on screen.
-            revealImages={Math.abs(index - currentRowIndex) <= (active ? ROW_REVEAL_RADIUS : 0)}
+            revealImages={(() => {
+              if (Math.abs(index - currentRowIndex) <= ROW_REVEAL_RADIUS) revealedRows.add(index);
+              return revealedRows.has(index);
+            })()}
             firstCardRef={index === 0 ? firstCardRef : undefined}
             isCurrent={index === currentRowIndex}
             detached={detached || (reattachRadius != null && Math.abs(index - currentRowIndex) > reattachRadius)}
