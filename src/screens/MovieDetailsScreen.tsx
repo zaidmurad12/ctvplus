@@ -48,18 +48,6 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // crew being "slow to appear" (or missing) rather than "still loading," especially on a slow
   // connection. This drives a real loading placeholder in that gap instead of nothing.
   const [detailLoading, setDetailLoading] = useState(true);
-  // Built in two steps: the top of the page (backdrop, poster, logo, facts, buttons) as soon as the
-  // details arrive, the rows below it (cast, parts, episodes) a quarter-second later. Building it
-  // all in one go is what froze the TV for 1-2 seconds right after a page opened (measured).
-  const [belowFoldReady, setBelowFoldReady] = useState(false);
-  useEffect(() => {
-    if (detailLoading) {
-      setBelowFoldReady(false);
-      return;
-    }
-    const timer = setTimeout(() => setBelowFoldReady(true), 250);
-    return () => clearTimeout(timer);
-  }, [detailLoading]);
   // Whether the Watch button should render at all for a movie (see its own render-site comment
   // for why series never gates on this) - starts from whatever the summary already knew
   // (instant, no flash for the common case), then gets a real answer once the detail fetch below
@@ -505,7 +493,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
 
   const castBlock = (
     <>
-    {movie.type !== "series" && (detailLoading || !belowFoldReady) && !(belowFoldReady && crewAndCast.length) ? (
+    {movie.type !== "series" && detailLoading && !crewAndCast.length ? (
       <>
         <View style={[styles.divider, movie.type === "series" && styles.dividerAfterEpisodes]} />
         <View style={styles.castSection}>
@@ -524,7 +512,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
         </View>
       </>
     ) : null}
-    {belowFoldReady && !!crewAndCast.length && (
+    {!!crewAndCast.length && (
       <>
         <View style={[styles.divider, movie.type === "series" && styles.dividerAfterEpisodes]} />
         <View style={styles.castSection}>
@@ -612,7 +600,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
           style={StyleSheet.absoluteFill}
         />
 
-        <Image source={{ uri: posterUrl(movie.poster || movie.backdrop, "w500") }} style={[styles.poster, movie.type === "series" && styles.posterSeries]} fadeDuration={0} />
+        <Image source={{ uri: posterUrl(movie.poster || movie.backdrop, "w780") }} style={[styles.poster, movie.type === "series" && styles.posterSeries]} fadeDuration={0} />
 
         <View style={[styles.infoCol, movie.type === "series" && styles.infoColSeries]}>
           {movie.logoUrl || movie.titleLogo ? (
@@ -748,7 +736,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
         )}
 
         {/* Below cast, not above it - per explicit request. */}
-        {belowFoldReady && parts.length > 0 && (
+        {parts.length > 0 && (
           <>
             <View style={styles.fullWidthDivider} />
             <View style={styles.partsSection}>
@@ -776,14 +764,14 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
 
         {/* A series' episodes load in where the cast placeholder used to show - so the loading
             placeholder is shaped like the episode row that's about to appear there. */}
-        {movie.type === "series" && (!isSeries || !belowFoldReady) && (detailLoading || !belowFoldReady) && (
+        {movie.type === "series" && !isSeries && detailLoading && (
           <View style={[styles.seasons, styles.episodeList, styles.episodeSkeletonRow]} pointerEvents="none">
             {[0, 1, 2, 3].map((i) => (
               <View key={i} style={styles.episodeSkeletonCard} />
             ))}
           </View>
         )}
-        {isSeries && belowFoldReady && (
+        {isSeries && (
           <View style={styles.seasons}>
             {activeSeason && activeSeason.episodes.length === 0 ? (
               <View style={styles.emptySeasonBox}>
@@ -826,8 +814,8 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
 // One season's episode cards plus the single shared title/story block under them. Owns its own
 // "which episode has focus" state so a focus change re-renders only this rail, and each card is
 // memoized so the ones whose props didn't change are skipped outright.
-const EPISODE_BATCH = 10;
-const EPISODE_LOOKAHEAD = 5;
+const EPISODE_BATCH = 24;
+const EPISODE_LOOKAHEAD = 10;
 
 const EpisodeRail = React.memo(function EpisodeRail({
   season,
