@@ -67,7 +67,13 @@ const ROW_REVEAL_RADIUS = 1;
 // Experimental speed mode only: the banner's picture swaps once focus has settled on a row, after
 // the row scroll (~300ms) has finished, instead of in the same instant the next row's images start
 // loading. Behind the Settings switch until the TV's measurements show it's better.
-const HERO_SWAP_DELAY_MS = 650;
+const HERO_SWAP_DELAY_MS = 1000;
+// Experimental speed mode only: each row builds its first ROW_WINDOW_START cards and adds
+// ROW_WINDOW_STEP more as focus comes within ROW_WINDOW_AHEAD of the last built one - about 40
+// cards on Home instead of all 100 at once (5 rows x 20).
+const ROW_WINDOW_START = 8;
+const ROW_WINDOW_STEP = 6;
+const ROW_WINDOW_AHEAD = 3;
 // Every card in a row is a live view (Focusable + gradient + text + image), so this is the single biggest
 // lever on how smooth moving between cards feels: 40 per row (tried for long imported lists) made
 // navigation visibly heavier than the original 20.
@@ -507,6 +513,7 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
             revealImages={Math.abs(index - currentRowIndex) <= (active ? ROW_REVEAL_RADIUS : 0)}
             firstCardRef={index === 0 ? firstCardRef : undefined}
             isCurrent={index === currentRowIndex}
+            windowed={speedExperiment}
             detached={detached || (reattachRadius != null && Math.abs(index - currentRowIndex) > reattachRadius)}
           />
         ))}
@@ -538,6 +545,7 @@ const CategoryRow = React.memo(function CategoryRow({
   firstCardRef,
   isCurrent,
   detached,
+  windowed,
 }: {
   title: string;
   items: Movie[];
@@ -560,6 +568,7 @@ const CategoryRow = React.memo(function CategoryRow({
   // below), never to gate rendering/reveal (that's revealImages' job).
   isCurrent: boolean;
   detached: boolean;
+  windowed: boolean;
 }) {
   countRender("homeRow");
   // The strip's own height, kept while it's detached so the page doesn't reflow (row offsets and
@@ -591,9 +600,19 @@ const CategoryRow = React.memo(function CategoryRow({
   useEffect(() => {
     if (!isCurrent) hScrollRef.current?.scrollTo({ x: 0, animated: false });
   }, [isCurrent]);
+  const [builtCards, setBuiltCards] = useState(() => (windowed ? Math.min(items.length, ROW_WINDOW_START) : items.length));
+  useEffect(() => {
+    setBuiltCards(windowed ? Math.min(items.length, ROW_WINDOW_START) : items.length);
+  }, [windowed, items.length]);
+  const builtCardsRef = useRef(builtCards);
+  builtCardsRef.current = builtCards;
   const handleCardFocusChange = useCallback(
     (index: number, focused: boolean) => {
-      if (focused) onRowFocusChange(rowIndex, items[index]);
+      if (!focused) return;
+      onRowFocusChange(rowIndex, items[index]);
+      if (index >= builtCardsRef.current - ROW_WINDOW_AHEAD) {
+        setBuiltCards((n) => Math.min(items.length, n + ROW_WINDOW_STEP));
+      }
     },
     [onRowFocusChange, rowIndex, items]
   );
@@ -619,7 +638,7 @@ const CategoryRow = React.memo(function CategoryRow({
           contentContainerStyle={styles.recentStripContent}
           style={detached && stripHeight.current > 0 ? styles.detachedStrip : undefined}
         >
-          {items.map((movie, i) => (
+          {items.slice(0, builtCards).map((movie, i) => (
             <RecentCard
               key={movie.id}
               ref={(node: View | null) => {
@@ -653,7 +672,7 @@ const CategoryRow = React.memo(function CategoryRow({
               nextFocusRight={i === items.length - 1 && !hasMore ? clamp.clampRight() : undefined}
             />
           ))}
-          {hasMore && (
+          {hasMore && builtCards >= items.length && (
             <Focusable
               ref={clamp.setRef(items.length)}
               onPress={handleOpenMore}
