@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Image, ScrollView, StyleSheet } from "react-native";
+import { View, Text, Image, ScrollView, StyleSheet, findNodeHandle } from "react-native";
 import type { Movie } from "../api";
 import { posterUrl, fetchByPerson } from "../api";
 import MovieCard from "../components/MovieCard";
@@ -66,6 +66,12 @@ export default function PersonScreen({ person, lang, onSelectMovie, onBack }: Pr
   const [filmography, setFilmography] = useState<Movie[]>([]);
   const [bioExpanded, setBioExpanded] = useState(false);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("movie");
+  // Down from the Movies/Series buttons goes to the first work on the left - Android's own nearest-
+  // neighbor pick landed on whichever card sat closest, usually one in the middle of the row.
+  const [firstCardHandle, setFirstCardHandle] = useState<number | null>(null);
+  const setFirstCardNode = useCallback((node: View | null) => {
+    setFirstCardHandle(node ? findNodeHandle(node) ?? null : null);
+  }, []);
   // See BrowseScreen's own identical rebuild for the full reasoning - this grid used to be a
   // FlatList in numColumns mode with either a reactive scrollToOffset correction or explicit
   // nextFocusUp node routing driving its vertical navigation, both of which left up/down between
@@ -231,7 +237,7 @@ export default function PersonScreen({ person, lang, onSelectMovie, onBack }: Pr
               </View>
               <View style={styles.typeFilterRow}>
                 {movieCount > 0 && (
-                  <Focusable onPress={() => setTypeFilter("movie")} scaleTo={1.05} hasTVPreferredFocus={typeFilter === "movie"}>
+                  <Focusable onPress={() => setTypeFilter("movie")} scaleTo={1.05} hasTVPreferredFocus={typeFilter === "movie"} nextFocusDown={firstCardHandle ?? undefined}>
                     {(focused: boolean) => (
                       // No focusShadowTight - filterPillFocused already turns this solid white,
                       // and a white glow behind an already-white fill is redundant at best
@@ -245,7 +251,7 @@ export default function PersonScreen({ person, lang, onSelectMovie, onBack }: Pr
                   </Focusable>
                 )}
                 {seriesCount > 0 && (
-                  <Focusable onPress={() => setTypeFilter("series")} scaleTo={1.05} hasTVPreferredFocus={typeFilter === "series" && movieCount === 0}>
+                  <Focusable onPress={() => setTypeFilter("series")} scaleTo={1.05} hasTVPreferredFocus={typeFilter === "series" && movieCount === 0} nextFocusDown={firstCardHandle ?? undefined}>
                     {(focused: boolean) => (
                       <View style={[styles.filterPill, typeFilter === "series" && !focused && styles.filterPillActive, focused && styles.filterPillFocused]}>
                         <Text style={[styles.filterPillText, typeFilter === "series" && styles.filterPillTextActive, focused && styles.filterPillTextFocused]}>
@@ -268,6 +274,7 @@ export default function PersonScreen({ person, lang, onSelectMovie, onBack }: Pr
             onSelect={onSelectMovie}
             onCardFocusChange={handleCardFocusChange}
             onRowLayout={onRowLayout}
+            firstCardRef={rowIndex === 0 ? setFirstCardNode : undefined}
           />
         ))}
       </ScrollView>
@@ -285,6 +292,7 @@ const Row = React.memo(function Row({
   onSelect,
   onCardFocusChange,
   onRowLayout,
+  firstCardRef,
 }: {
   items: Movie[];
   rowIndex: number;
@@ -292,11 +300,12 @@ const Row = React.memo(function Row({
   onSelect: (movie: Movie) => void;
   onCardFocusChange: (rowIndex: number, focused: boolean) => void;
   onRowLayout: (rowIndex: number, e: { nativeEvent: { layout: { y: number } } }) => void;
+  firstCardRef?: (node: View | null) => void;
 }) {
   return (
     <View style={styles.row} onLayout={(e) => onRowLayout(rowIndex, e)}>
-      {items.map((movie) => (
-        <MovieCard key={movie.id} movie={movie} lang={lang} onSelect={onSelect} onFocusChange={(f) => onCardFocusChange(rowIndex, f)} width={CARD_WIDTH} />
+      {items.map((movie, i) => (
+        <MovieCard key={movie.id} ref={i === 0 ? firstCardRef : undefined} movie={movie} lang={lang} onSelect={onSelect} onFocusChange={(f) => onCardFocusChange(rowIndex, f)} width={CARD_WIDTH} />
       ))}
     </View>
   );
