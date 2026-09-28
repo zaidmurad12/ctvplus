@@ -15,7 +15,7 @@ import { DEFAULT_UI_SCALE, getUIScale, setUIScale, suggestInitialUIScale } from 
 import { dispatchBack, pushBackHandler } from "./src/backStack";
 import { FocusScopeContext, type FocusScope } from "./src/components/Focusable";
 import FocusBlockView from "./src/components/FocusBlockView";
-import { countRender } from "./src/perfProbe";
+import { countRender, experimentFlags } from "./src/perfProbe";
 
 // Every screen (and Sidebar) is lazy-loaded, not statically imported - each one's own
 // `StyleSheet.create({...})` calls s()/fs() (see scale.ts) at the moment that module is first
@@ -95,6 +95,20 @@ export default function App() {
   // pickBestServers ranked first each time.
   const [preferredQuality, setPreferredQuality] = useState<string>(DEFAULT_PREFERRED_QUALITY);
   const [uiScale, setUiScaleState] = useState(DEFAULT_UI_SCALE);
+  // Settings > "experimental speed mode": off by default. Each speed change is tried behind it
+  // first, so it can be switched off at once if it makes things worse (see perfProbe's exp=).
+  const [speedExperiment, setSpeedExperimentState] = useState(false);
+  useEffect(() => {
+    loadJson<boolean>(storageKeys.speedExperiment, false).then((v) => {
+      experimentFlags.speed = !!v;
+      setSpeedExperimentState(!!v);
+    });
+  }, []);
+  const setSpeedExperiment = useCallback((v: boolean) => {
+    experimentFlags.speed = v;
+    setSpeedExperimentState(v);
+    saveJson(storageKeys.speedExperiment, v);
+  }, []);
   const [data, setData] = useState<MoviesResponse | null>(null);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [selectedPerson, setSelectedPerson] = useState<SelectedPerson | null>(null);
@@ -840,6 +854,7 @@ export default function App() {
                       onOpenCategory={setSelectedCategory}
                       active={section === "home" && !selectedPerson && !selectedMovie && !selectedCategory}
                       detached={sectionsCovered}
+                      speedExperiment={speedExperiment}
                     />
                   </Suspense>
                 </View>
@@ -893,6 +908,8 @@ export default function App() {
                       onChangeSubtitleSettings={setSubtitleSettings}
                       uiScale={uiScale}
                       onChangeUiScale={setUiScaleState}
+                      speedExperiment={speedExperiment}
+                      onChangeSpeedExperiment={setSpeedExperiment}
                       onBack={() => setSection("home")}
                       // See SettingsScreen's own comment on why this - not just being mounted -
                       // is what its back-handler push has to be gated on: it stays mounted

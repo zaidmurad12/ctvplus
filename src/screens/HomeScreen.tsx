@@ -9,7 +9,7 @@ import { colors, font, focusShadow, spacing } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, countryName, genreName, pickText, t } from "../i18n";
 import { useSidebarHomeHandle } from "../focusRefs";
-import { countRender } from "../perfProbe";
+import { countRender, usePerfProbe } from "../perfProbe";
 import { useFocusClamp } from "../useFocusClamp";
 import { useProgressiveReveal } from "../useProgressiveReveal";
 
@@ -64,6 +64,10 @@ const HERO_AUTO_ROTATE_MS = 7000;
 // BrowseScreen's own IMAGE_REVEAL_RADIUS was just tightened for. 1 still keeps both neighbors a
 // single up/down press could reach ready ahead of time, just without the second ring beyond that.
 const ROW_REVEAL_RADIUS = 1;
+// Experimental speed mode only: the banner's picture swaps once focus has settled on a row, after
+// the row scroll (~300ms) has finished, instead of in the same instant the next row's images start
+// loading. Behind the Settings switch until the TV's measurements show it's better.
+const HERO_SWAP_DELAY_MS = 650;
 // Every card in a row is a live view (Focusable + gradient + text + image), so this is the single biggest
 // lever on how smooth moving between cards feels: 40 per row (tried for long imported lists) made
 // navigation visibly heavier than the original 20.
@@ -89,6 +93,8 @@ interface Props {
   // still walked all of Home's hundreds of cards and images underneath: measured on the TV as the
   // UI thread congested for the whole time a details page was open.
   detached?: boolean;
+  // Settings > experimental speed mode (see HERO_SWAP_DELAY_MS).
+  speedExperiment?: boolean;
 }
 
 export interface HomeScreenHandle {
@@ -112,7 +118,7 @@ export interface HomeScreenHandle {
 // satisfying "the transition between rows should be a smooth slide" without a bespoke animation of
 // its own to get wrong.
 const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen(
-  { heroMovies, categories, lang, onSelectMovie, onOpenCategory, active, detached = false },
+  { heroMovies, categories, lang, onSelectMovie, onOpenCategory, active, detached = false, speedExperiment = false },
   ref
 ) {
   countRender("home");
@@ -166,6 +172,10 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   // lastScrolledTo ref, which exists purely to guard against redundant scrollTo calls and isn't
   // itself something a render can react to).
   const [currentRowIndex, setCurrentRowIndex] = useState(0);
+  const [homeProbeKey, setHomeProbeKey] = useState(0);
+  useEffect(() => {
+    if (active) setHomeProbeKey((k) => k + 1);
+  }, [active]);
   const [reattachRadius, setReattachRadius] = useState<number | null>(null);
   useEffect(() => {
     if (detached) {
@@ -223,6 +233,11 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   // fast scrubbing" behavior other TV UIs use for an identical reason - cuts that down to at most
   // one fetch per pause, not one per card passed through.
   const heroUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heroSwapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speedExperimentRef = useRef(speedExperiment);
+  speedExperimentRef.current = speedExperiment;
+  // Measurement only (no behavior change): a probe window each time Home comes back into view.
+  usePerfProbe("home", String(homeProbeKey), () => `rows=${rows.length} currentRow=${currentRowIndex}`);
 
   // Auto-rotating hero (restored per explicit request) - cycles through heroMovies on its own
   // whenever the viewer hasn't touched navigation for a while, the same "slider" behavior the
@@ -263,9 +278,18 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
       // between rows stutter.
       heroUpdateTimerRef.current = setTimeout(() => {
         setCurrentRowIndex(index);
-        setFocusedMovie(movie);
-        scheduleHeroAutoRotate();
+        if (!speedExperimentRef.current) {
+          setFocusedMovie(movie);
+          scheduleHeroAutoRotate();
+        }
       }, HERO_UPDATE_DEBOUNCE_MS);
+      if (heroSwapTimerRef.current) clearTimeout(heroSwapTimerRef.current);
+      if (speedExperimentRef.current) {
+        heroSwapTimerRef.current = setTimeout(() => {
+          setFocusedMovie(movie);
+          scheduleHeroAutoRotate();
+        }, HERO_SWAP_DELAY_MS);
+      }
     },
     [scrollToRow, scheduleHeroAutoRotate]
   );
