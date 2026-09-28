@@ -40,25 +40,24 @@ export default function LogoImage({ uri: markedUri, height, maxWidth, style }: P
   const uri = hashAt >= 0 ? markedUri.slice(0, hashAt) : markedUri;
   const isDark = hashAt >= 0 && markedUri.slice(hashAt + 1) === "dark";
   const [box, setBox] = useState({ width: maxWidth, height });
-
   useEffect(() => {
-    let cancelled = false;
-    Image.getSize(
-      uri,
-      (naturalW, naturalH) => {
-        if (cancelled || !naturalH) return;
-        setBox(logoBox(naturalW / naturalH, height, maxWidth));
-      },
-      () => {}
-    );
-    return () => {
-      cancelled = true;
-    };
+    setBox({ width: maxWidth, height });
   }, [uri, height, maxWidth]);
 
+  // Sized from the image's own load event: Image.getSize used to download and decode every logo a
+  // second time just to learn its dimensions - extra work right when a page is opening.
   return (
     <View style={[{ alignSelf: "flex-start" }, style]}>
-      <Image source={{ uri }} style={[box, isDark && styles.whiteTint]} resizeMode="contain" fadeDuration={0} />
+      <Image
+        source={{ uri }}
+        style={[box, isDark && styles.whiteTint]}
+        resizeMode="contain"
+        fadeDuration={0}
+        onLoad={(e) => {
+          const { width: naturalW, height: naturalH } = e.nativeEvent.source;
+          if (naturalW && naturalH) setBox(logoBox(naturalW / naturalH, height, maxWidth));
+        }}
+      />
     </View>
   );
 }

@@ -1579,7 +1579,7 @@ export async function fetchCollection(collectionId: string, excludeId: string): 
 // Mirrors the web app's getHighResImage bucket-swap logic (src/utils/imageUtils.ts) -
 // small rail/grid posters should request w342, not TMDB's full-size original; cast circles
 // only ever need TMDB's smallest profile bucket (w185).
-export function posterUrl(path?: string, size: "w185" | "w342" | "w780" | "w1280" = "w342"): string {
+export function posterUrl(path?: string, size: "w185" | "w342" | "w500" | "w780" | "w1280" = "w342"): string {
   if (!path) return "";
   if (path.includes("image.tmdb.org/t/p/")) {
     return path.replace(/\/t\/p\/(w\d+|original)\//, `/t/p/${size}/`);
