@@ -51,6 +51,10 @@ interface Props {
 // results themselves ever scroll, in their own FlatList, not the page as a whole.
 export default function SearchScreen({ lang, onSelect }: Props) {
   const [query, setQuery] = useState("");
+  // Stable, so the memoized keyboard doesn't re-render on every key press.
+  const typeChar = useCallback((ch: string) => setQuery((q) => q + ch), []);
+  const typeSpace = useCallback(() => setQuery((q) => q + " "), []);
+  const deleteChar = useCallback(() => setQuery((q) => q.slice(0, -1)), []);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [results, setResults] = useState<Movie[]>([]);
   const [loading, setLoading] = useState(false);
@@ -193,11 +197,7 @@ export default function SearchScreen({ lang, onSelect }: Props) {
 
       <View style={styles.body}>
         <View style={styles.keyboardCol}>
-          <VirtualKeyboard
-            onKey={(ch) => setQuery((q) => q + ch)}
-            onSpace={() => setQuery((q) => q + " ")}
-            onBackspace={() => setQuery((q) => q.slice(0, -1))}
-          />
+          <VirtualKeyboard onKey={typeChar} onSpace={typeSpace} onBackspace={deleteChar} />
         </View>
 
         <View style={styles.resultsCol}>

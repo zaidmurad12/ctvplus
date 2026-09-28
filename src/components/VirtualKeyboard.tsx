@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { Globe, Delete } from "lucide-react-native";
 import Focusable from "./Focusable";
@@ -59,9 +59,22 @@ const OUTER_RADIUS = s(12);
 // built as a real in-app D-pad-navigable keyboard instead so both Arabic and English are
 // always available from the remote regardless of which one the OS keyboard defaults to, and
 // regardless of the app's own current UI language (the toggle here is independent of it).
-export default function VirtualKeyboard({ onKey, onBackspace, onSpace }: Props) {
+// Memoized: typing changes the search query, and without this every key press re-rendered all of
+// the keyboard's ~45 keys - slow on the TV, and each re-render could re-apply the first key's
+// preferred focus, pulling focus back to it mid-typing ("control lost while typing").
+export default React.memo(VirtualKeyboard);
+
+function VirtualKeyboard({ onKey, onBackspace, onSpace }: Props) {
   const [kbLang, setKbLang] = useState<"ar" | "en">("ar");
   const [showSymbols, setShowSymbols] = useState(false);
+  // The first key asks for focus only briefly - when the keyboard first appears or its layout
+  // switches (the key that had focus is gone then) - never again while typing.
+  const [claimFocus, setClaimFocus] = useState(true);
+  useEffect(() => {
+    setClaimFocus(true);
+    const timer = setTimeout(() => setClaimFocus(false), 700);
+    return () => clearTimeout(timer);
+  }, [kbLang, showSymbols]);
   const rows = showSymbols ? SYMBOL_ROWS : kbLang === "ar" ? AR_ROWS : EN_ROWS;
   const rtl = !showSymbols && kbLang === "ar";
   const preferredKey = showSymbols ? "." : kbLang === "ar" ? "ا" : "A";
@@ -82,7 +95,7 @@ export default function VirtualKeyboard({ onKey, onBackspace, onSpace }: Props) 
             onKey={typeKey}
             rtl={rtl}
             lastRow={ri === rows.length - 1}
-            preferredKey={ri === 0 ? preferredKey : undefined}
+            preferredKey={ri === 0 && claimFocus ? preferredKey : undefined}
           />
         ))}
       </View>
