@@ -9,10 +9,6 @@ const TICK_MS = 100;
 // is slow on its own apart from one that's only slow while keys are being pressed.
 export const perfCounters = { focusEvents: 0 };
 
-// The Settings "experimental speed mode" switch, mirrored here so every probe line says which way it
-// was - the same page measured with it on and off is the comparison.
-export const experimentFlags = { speed: false };
-
 // Render counts per component during a probe window (App, Home, Home rows, Sidebar, every
 // Focusable call countRender) - says which part of the app keeps re-rendering while a details page
 // is open. React's own <Profiler> reports nothing in release builds, hence plain counters.
@@ -77,7 +73,7 @@ export function usePerfProbe(label: string, pageKey: string, extra: () => string
         kind: "perf_probe",
         message: label,
         detail:
-          `exp=${experimentFlags.speed ? 1 : 0} renders=${renders.current} focus=${perfCounters.focusEvents} ticks=${ticks}/${PROBE_MS / TICK_MS} ` +
+          `renders=${renders.current} focus=${perfCounters.focusEvents} ticks=${ticks}/${PROBE_MS / TICK_MS} ` +
           `avgLag=${Math.round(lagTotal / Math.max(1, ticks))}ms maxLag=${lagMax}ms ` +
           `lagPerSec=[${Array.from(lagBySecond, (v) => Math.round((v ?? 0) / 10) * 10).join(",")}] ` +
           `gc=${(end.js_numGCs ?? 0) - (startStats.js_numGCs ?? 0)} gcMs=${Math.round((end.js_gcTime ?? 0) - (startStats.js_gcTime ?? 0))} ` +

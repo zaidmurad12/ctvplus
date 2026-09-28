@@ -76,6 +76,11 @@ const PAGE_END_THRESHOLD = 1200;
 // comfortably beyond the visible rows without paying for a screenful of rows nobody's about to
 // see yet.
 const IMAGE_REVEAL_RADIUS = 3;
+// Rows more than WINDOW_RADIUS away from the focused row are replaced
+// by an empty box of the same measured height, so the grid stays the same size (scroll positions
+// unchanged) but no longer keeps every card of every page scrolled past - hundreds of them after a
+// few pages. Bigger than how far focus can travel before focusedRow catches up (ROW_SETTLE_MS).
+const WINDOW_RADIUS = 5;
 // How long after focus lands on a new row before the screen commits to it (see focusedRow above) -
 // about one native smooth-scroll animation.
 const ROW_SETTLE_MS = 300;
@@ -522,8 +527,10 @@ export default function BrowseScreen({ title, type, lang = "ar", emptyLabel, onS
     },
     [scrollToRow]
   );
-  const onRowLayout = useCallback((rowIndex: number, e: { nativeEvent: { layout: { y: number } } }) => {
+  const rowHeights = useRef<number[]>([]);
+  const onRowLayout = useCallback((rowIndex: number, e: { nativeEvent: { layout: { y: number; height?: number } } }) => {
     rowOffsets.current[rowIndex] = e.nativeEvent.layout.y;
+    if (e.nativeEvent.layout.height) rowHeights.current[rowIndex] = e.nativeEvent.layout.height;
   }, []);
 
   // loadPage itself closes over `type`, which can change without this screen ever remounting
@@ -547,7 +554,10 @@ export default function BrowseScreen({ title, type, lang = "ar", emptyLabel, onS
     [rows.length]
   );
 
-  const renderRow = (rowItems: Movie[], rowIndex: number) => (
+  const renderRow = (rowItems: Movie[], rowIndex: number) =>
+    Math.abs(rowIndex - focusedRow) > WINDOW_RADIUS && rowHeights.current[rowIndex] ? (
+      <View key={rowIndex} style={[styles.row, { height: rowHeights.current[rowIndex] }]} />
+    ) : (
     <Row
       key={rowIndex}
       items={rowItems}
@@ -561,7 +571,7 @@ export default function BrowseScreen({ title, type, lang = "ar", emptyLabel, onS
       firstCellRef={rowIndex === 0 ? firstCellRef : undefined}
       nextFocusUp={rowIndex === 0 ? filterBarHandle : undefined}
     />
-  );
+    );
 
   return (
     <View style={styles.root}>

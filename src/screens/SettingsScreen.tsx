@@ -32,8 +32,6 @@ interface Props {
   onChangeSubtitleSettings: (settings: SubtitleSettings) => void;
   uiScale: number;
   onChangeUiScale: (scale: number) => void;
-  speedExperiment: boolean;
-  onChangeSpeedExperiment: (on: boolean) => void;
   onBack: () => void;
   // True only while `section === "settings"` in App.tsx - this component actually stays mounted
   // (hidden via style, never unmounted) for as long as a video isn't playing, the same "keep it
@@ -88,13 +86,13 @@ function useHandleGroup<K extends string>(keys: readonly K[]) {
 }
 
 const NAV_KEYS = ["system", "subtitles"] as const;
-const SYSTEM_KEYS = ["lang", "uiSize", "update", "speedExperiment"] as const;
+const SYSTEM_KEYS = ["lang", "uiSize", "update"] as const;
 const SUBTITLE_KEYS = ["language", "font", "size", "color", "background"] as const;
 
 // Two-pane layout (a fixed nav rail + a scrollable content panel) instead of pill tabs across
 // the top - closer to how an actual TV settings app (or System Preferences) is organized, and
 // gives the tab list room to grow past two entries without crowding a single row.
-export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, onChangeSubtitleSettings, uiScale, onChangeUiScale, speedExperiment, onChangeSpeedExperiment, onBack, active }: Props) {
+export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, onChangeSubtitleSettings, uiScale, onChangeUiScale, onBack, active }: Props) {
   const [tab, setTab] = useState<Tab>("system");
   const patch = (partial: Partial<SubtitleSettings>) => onChangeSubtitleSettings({ ...subtitleSettings, ...partial });
 
@@ -230,32 +228,11 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
               ref={system.setRef("update")}
               lang={lang}
               nextFocusUp={system.handleOf("uiSize")}
-              nextFocusDown={system.handleOf("speedExperiment")}
+              // Last row: down stays here (was unset, and Android's own nearest-neighbor search
+              // jumped out to the sidebar). Only LEFT leaves the panel.
+              nextFocusDown={system.handleOf("update")}
               nextFocusLeft={nav.handleOf("system")}
             />
-
-            {/* Off by default. Speed changes are tried behind this first, and switching it off puts
-                the app straight back to normal - no update needed. */}
-            <SettingsCard
-              title={lang === "ar" ? "وضع السرعة التجريبي" : "Experimental speed mode"}
-              description={
-                lang === "ar"
-                  ? "يجرب تحسينات جديدة للسرعة. إذا صار التطبيق أبطأ أطفئه ليعود كما كان فوراً."
-                  : "Tries new speed improvements. If the app gets slower, switch it off to go straight back."
-              }
-            >
-              <SettingsRow>
-                <ToggleSwitch
-                  ref={system.setRef("speedExperiment")}
-                  value={speedExperiment}
-                  onChange={onChangeSpeedExperiment}
-                  nextFocusUp={system.handleOf("update")}
-                  // Last row: down stays here - only LEFT leaves the panel.
-                  nextFocusDown={system.handleOf("speedExperiment")}
-                  nextFocusLeft={nav.handleOf("system")}
-                />
-              </SettingsRow>
-            </SettingsCard>
           </ScrollView>
         ) : (
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>

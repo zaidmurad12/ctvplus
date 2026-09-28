@@ -64,13 +64,14 @@ const HERO_AUTO_ROTATE_MS = 7000;
 // BrowseScreen's own IMAGE_REVEAL_RADIUS was just tightened for. 1 still keeps both neighbors a
 // single up/down press could reach ready ahead of time, just without the second ring beyond that.
 const ROW_REVEAL_RADIUS = 1;
-// Experimental speed mode only: the banner's picture swaps once focus has settled on a row, after
-// the row scroll (~300ms) has finished, instead of in the same instant the next row's images start
-// loading. Behind the Settings switch until the TV's measurements show it's better.
+// The banner's picture swaps a second after focus settles, well after the row scroll (~300ms) has
+// finished, instead of in the same instant the next row's images start loading. Tried behind the
+// Settings experimental switch first (v179-v180) - smoother on the TV by its own measurements.
 const HERO_SWAP_DELAY_MS = 1000;
-// Experimental speed mode only: each row builds its first ROW_WINDOW_START cards and adds
+// Each row builds its first ROW_WINDOW_START cards and adds
 // ROW_WINDOW_STEP more as focus comes within ROW_WINDOW_AHEAD of the last built one - about 40
-// cards on Home instead of all 100 at once (5 rows x 20).
+// cards on Home instead of all 100 at once (5 rows x 20). Proven behind the experimental switch
+// (v180): Home went from 343-711 to 612-763 frames per 20s on the TV.
 const ROW_WINDOW_START = 8;
 const ROW_WINDOW_STEP = 6;
 const ROW_WINDOW_AHEAD = 3;
@@ -99,8 +100,6 @@ interface Props {
   // still walked all of Home's hundreds of cards and images underneath: measured on the TV as the
   // UI thread congested for the whole time a details page was open.
   detached?: boolean;
-  // Settings > experimental speed mode (see HERO_SWAP_DELAY_MS).
-  speedExperiment?: boolean;
 }
 
 export interface HomeScreenHandle {
@@ -124,7 +123,7 @@ export interface HomeScreenHandle {
 // satisfying "the transition between rows should be a smooth slide" without a bespoke animation of
 // its own to get wrong.
 const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen(
-  { heroMovies, categories, lang, onSelectMovie, onOpenCategory, active, detached = false, speedExperiment = false },
+  { heroMovies, categories, lang, onSelectMovie, onOpenCategory, active, detached = false },
   ref
 ) {
   countRender("home");
@@ -240,8 +239,6 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   // one fetch per pause, not one per card passed through.
   const heroUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heroSwapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const speedExperimentRef = useRef(speedExperiment);
-  speedExperimentRef.current = speedExperiment;
   // Measurement only (no behavior change): a probe window each time Home comes back into view.
   usePerfProbe("home", String(homeProbeKey), () => `rows=${rows.length} currentRow=${currentRowIndex}`);
 
@@ -284,18 +281,12 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
       // between rows stutter.
       heroUpdateTimerRef.current = setTimeout(() => {
         setCurrentRowIndex(index);
-        if (!speedExperimentRef.current) {
-          setFocusedMovie(movie);
-          scheduleHeroAutoRotate();
-        }
       }, HERO_UPDATE_DEBOUNCE_MS);
       if (heroSwapTimerRef.current) clearTimeout(heroSwapTimerRef.current);
-      if (speedExperimentRef.current) {
-        heroSwapTimerRef.current = setTimeout(() => {
-          setFocusedMovie(movie);
-          scheduleHeroAutoRotate();
-        }, HERO_SWAP_DELAY_MS);
-      }
+      heroSwapTimerRef.current = setTimeout(() => {
+        setFocusedMovie(movie);
+        scheduleHeroAutoRotate();
+      }, HERO_SWAP_DELAY_MS);
     },
     [scrollToRow, scheduleHeroAutoRotate]
   );
@@ -513,7 +504,7 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
             revealImages={Math.abs(index - currentRowIndex) <= (active ? ROW_REVEAL_RADIUS : 0)}
             firstCardRef={index === 0 ? firstCardRef : undefined}
             isCurrent={index === currentRowIndex}
-            windowed={speedExperiment}
+            windowed
             detached={detached || (reattachRadius != null && Math.abs(index - currentRowIndex) > reattachRadius)}
           />
         ))}
