@@ -1416,7 +1416,7 @@ function sectionsToCategories(sections: HomeSectionDto[], builtIn: Record<string
 // The new backend has no single "home" aggregate endpoint yet - this assembles the same shape
 // (hero + a few rails) from plain sorted movie/show lists instead.
 export async function fetchMovies(): Promise<MoviesResponse> {
-  const [newestMoviesRes, newestShowsRes, popular, topRated, shows, featured, homeSections] = await Promise.all([
+  const [newestMoviesRes, newestShowsRes, popular, topRated, shows, featured, homeSections, bannerMovies, bannerShows] = await Promise.all([
     // "newest" sorts by when the title was added to the catalog, not its actual release date -
     // this rail is labeled "الأحدث" (newest releases) to the viewer, so it needs releaseDate
     // (desc) instead: a movie imported today but released years ago shouldn't show up here.
@@ -1432,6 +1432,11 @@ export async function fetchMovies(): Promise<MoviesResponse> {
     apiGet<FeaturedItemDto[]>("/movies/featured"),
     // A failure here must never blank the home screen - no sections just means the four defaults.
     apiGet<HomeSectionDto[]>(withAvailable("/home/sections")).then((res) => res.data).catch(() => [] as HomeSectionDto[]),
+    // The banner's own picks when the admin hasn't chosen any: always the newest *available*
+    // titles (films and series together, by release date - the "Newest" row's own mix), whether or
+    // not the "available only" setting is on.
+    apiGet<MovieSummaryDto[]>("/movies?sort=releaseDate&limit=10&available=true").catch(() => ({ data: [] as MovieSummaryDto[] })),
+    apiGet<ShowSummaryDto[]>("/shows?sort=releaseDate&limit=10&available=true").catch(() => ({ data: [] as ShowSummaryDto[] })),
   ]);
   const newestMovies = newestMoviesRes.data.map(mapSummary);
   // Merged by each DTO's own raw releaseDate (not yet collapsed down to Movie.year, which only
@@ -1450,10 +1455,19 @@ export async function fetchMovies(): Promise<MoviesResponse> {
   // banner can mix movies and shows in one admin-ordered sequence, so each item needs routing to
   // the mapper matching its own shape (a show summary has no `runtime`, a movie has no
   // `numberOfSeasons`, etc.) rather than assuming they're all movies.
+  const newestAvailable = [
+    ...bannerMovies.data.map((m) => ({ date: m.releaseDate, item: mapSummary(m) })),
+    ...bannerShows.data.map((sh) => ({ date: sh.releaseDate, item: mapShowSummary(sh) })),
+  ]
+    .sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime())
+    .slice(0, 10)
+    .map((x) => x.item);
   const heroMovies =
     featured.data.length > 0
       ? featured.data.map((item) => (item.type === "show" ? mapShowSummary(item) : mapSummary(item)))
-      : newestMovies.slice(0, 10);
+      : newestAvailable.length > 0
+        ? newestAvailable
+        : newestMovies.slice(0, 10);
   const builtIn: Record<string, Movie[]> = {
     RECENT: newestCombined,
     POPULAR: popular.data.map(mapSummary),
