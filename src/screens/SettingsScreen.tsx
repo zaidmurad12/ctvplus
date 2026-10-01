@@ -137,6 +137,19 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
   // RIGHT from the nav rail always lands on the open tab's first row (was left to Android's
   // nearest-neighbor guess, which picked whichever row happened to sit level with the nav item).
   const firstRowHandle = tab === "system" ? system.handleOf("lang") : subtitle.handleOf("language");
+  // RIGHT from the nav rail still landed on the System tab's last row (the available-titles toggle)
+  // on the TV, despite the explicit nextFocusRight. Backstop: a row other than the first that takes
+  // focus straight from the nav rail hands it on to the first row.
+  const navLeftAt = useRef(0);
+  const onNavFocusChange = (focused: boolean) => {
+    if (!focused) navLeftAt.current = Date.now();
+  };
+  const toFirstRowIfFromNav = (focused: boolean) => {
+    if (focused && Date.now() - navLeftAt.current < 400) {
+      navLeftAt.current = 0;
+      system.focus("lang");
+    }
+  };
 
   // Entering Settings always starts on the first tab with focus on it. This screen stays mounted
   // (hidden) between visits, so the nav item's hasTVPreferredFocus only ever took effect on the
@@ -162,6 +175,7 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
           Icon={SettingsIcon}
           active={tab === "system"}
           onPress={() => setTab("system")}
+          onFocusChange={onNavFocusChange}
           hasTVPreferredFocus
           nextFocusUp={nav.handleOf("system")}
           nextFocusDown={nav.handleOf("subtitles")}
@@ -174,6 +188,7 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
           Icon={Captions}
           active={tab === "subtitles"}
           onPress={() => setTab("subtitles")}
+          onFocusChange={onNavFocusChange}
           nextFocusUp={nav.handleOf("system")}
           nextFocusDown={nav.handleOf("subtitles")}
           nextFocusLeft={homeHandle ?? undefined}
@@ -216,6 +231,7 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
                   valueLabel={`${Math.round(uiScale * 100)}%`}
                   confirm
                   labelFor={(i) => `${Math.round(UI_SCALE_OPTIONS[i] * 100)}%`}
+                  onFocusChange={toFirstRowIfFromNav}
                   nextFocusUp={system.handleOf("lang")}
                   nextFocusDown={system.handleOf("update")}
                   nextFocusLeft={nav.handleOf("system")}
@@ -231,6 +247,7 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
             <UpdateRow
               ref={system.setRef("update")}
               lang={lang}
+              onFocusChange={toFirstRowIfFromNav}
               nextFocusUp={system.handleOf("uiSize")}
               nextFocusDown={system.handleOf("onlyAvailable")}
               nextFocusLeft={nav.handleOf("system")}
@@ -249,6 +266,7 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
                   ref={system.setRef("onlyAvailable")}
                   value={onlyAvailable}
                   onChange={onChangeOnlyAvailable}
+                  onFocusChange={toFirstRowIfFromNav}
                   nextFocusUp={system.handleOf("update")}
                   // Last row: down stays here (was unset, and Android's own nearest-neighbor search
                   // jumped out to the sidebar). Only LEFT leaves the panel.
@@ -374,12 +392,14 @@ const NavItem = React.forwardRef<
     nextFocusDown?: number;
     nextFocusLeft?: number;
     nextFocusRight?: number;
+    onFocusChange?: (focused: boolean) => void;
   }
->(function NavItem({ label, Icon, active, onPress, hasTVPreferredFocus, nextFocusUp, nextFocusDown, nextFocusLeft, nextFocusRight }, ref) {
+>(function NavItem({ label, Icon, active, onPress, hasTVPreferredFocus, nextFocusUp, nextFocusDown, nextFocusLeft, nextFocusRight, onFocusChange }, ref) {
   return (
     <Focusable
       ref={ref}
       onPress={onPress}
+      onFocusChange={onFocusChange}
       hasTVPreferredFocus={hasTVPreferredFocus}
       nextFocusUp={nextFocusUp}
       nextFocusDown={nextFocusDown}
@@ -428,8 +448,8 @@ type UpdateState = "idle" | "checking" | "upToDate" | "available" | "downloading
 // risking for a background check nothing is currently waiting on.
 const UpdateRow = React.forwardRef<
   View,
-  { lang: Lang; nextFocusUp?: number; nextFocusDown?: number; nextFocusLeft?: number }
->(function UpdateRow({ lang, nextFocusUp, nextFocusDown, nextFocusLeft }, ref) {
+  { lang: Lang; nextFocusUp?: number; nextFocusDown?: number; nextFocusLeft?: number; onFocusChange?: (focused: boolean) => void }
+>(function UpdateRow({ lang, nextFocusUp, nextFocusDown, nextFocusLeft, onFocusChange }, ref) {
   const [state, setState] = useState<UpdateState>("idle");
   const [info, setInfo] = useState<AppUpdateInfo | null>(null);
   const [progress, setProgress] = useState(0);
@@ -568,6 +588,7 @@ const UpdateRow = React.forwardRef<
     <Focusable
       ref={ref}
       onPress={handlePress}
+      onFocusChange={onFocusChange}
       nextFocusUp={nextFocusUp}
       nextFocusDown={nextFocusDown}
       nextFocusLeft={nextFocusLeft}
@@ -764,8 +785,9 @@ const StopsSlider = React.forwardRef<
     // the app, so it shouldn't happen just by moving past the slider.
     confirm?: boolean;
     labelFor?: (i: number) => string;
+    onFocusChange?: (focused: boolean) => void;
   }
->(function StopsSlider({ count, index, onChange, valueLabel, nextFocusUp, nextFocusDown, nextFocusLeft, confirm, labelFor }, ref) {
+>(function StopsSlider({ count, index, onChange, valueLabel, nextFocusUp, nextFocusDown, nextFocusLeft, confirm, labelFor, onFocusChange }, ref) {
   const [editing, setEditing] = useState(false);
   const [pending, setPending] = useState(index);
   const shown = confirm && editing ? pending : index;
@@ -823,7 +845,10 @@ const StopsSlider = React.forwardRef<
   return (
     <Focusable
       ref={ref}
-      onFocusChange={setFocused}
+      onFocusChange={(f) => {
+        setFocused(f);
+        onFocusChange?.(f);
+      }}
       onPress={
         confirm
           ? () => {
@@ -859,12 +884,13 @@ const StopsSlider = React.forwardRef<
 
 const ToggleSwitch = React.forwardRef<
   View,
-  { value: boolean; onChange: (v: boolean) => void; nextFocusUp?: number; nextFocusDown?: number; nextFocusLeft?: number }
->(function ToggleSwitch({ value, onChange, nextFocusUp, nextFocusDown, nextFocusLeft }, ref) {
+  { value: boolean; onChange: (v: boolean) => void; nextFocusUp?: number; nextFocusDown?: number; nextFocusLeft?: number; onFocusChange?: (focused: boolean) => void }
+>(function ToggleSwitch({ value, onChange, nextFocusUp, nextFocusDown, nextFocusLeft, onFocusChange }, ref) {
   return (
     <Focusable
       ref={ref}
       onPress={() => onChange(!value)}
+      onFocusChange={onFocusChange}
       nextFocusUp={nextFocusUp}
       nextFocusDown={nextFocusDown}
       nextFocusLeft={nextFocusLeft}
