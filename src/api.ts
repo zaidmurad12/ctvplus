@@ -482,8 +482,10 @@ function stripVersionWords(title: string): string {
   return title.replace(/\(?\s*(مدبلج(ة)?|مترجم(ة)?|بالعربي(ة)?|النسخة المدبلجة|arabic dubbed|dubbed|subbed)\s*\)?/gi, " ").trim();
 }
 
-// Arabic dubs on the sources are essentially animation (films and series) and Turkish works - per
-// request, every other title skips the version lookup entirely, sparing its source searches.
+// Arabic dubs on the sources are mostly animation (films and series) and Turkish works - these get
+// the full lookup straight away. Any other title only checks the Cinemana results its matching
+// already fetched (cached) for an entry tagged "Arabic dubbed", and searches further only if one
+// is there - so widening the lookup to every title costs almost nothing.
 function mayHaveArabicDub(movie: Movie): boolean {
   if (movie.genres?.some((g) => /animation|anime|رسوم|انمي|أنمي/i.test(g))) return true;
   return movie.language === "tr" || /turk|تركي/i.test(movie.country ?? "");
@@ -492,10 +494,10 @@ function mayHaveArabicDub(movie: Movie): boolean {
 export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]> {
   // An admin-pinned title plays exactly what was pinned - never second-guessed here.
   if (movie.sourceLinks?.length) return [];
-  if (!mayHaveArabicDub(movie)) return [];
   const cached = versionCache.get(movie.id);
   if (cached) return cached;
   const type = movie.type === "series" ? "series" : "movie";
+  const likely = mayHaveArabicDub(movie);
   // A search that failed (timeout, blocked request) used to count as "no results", and the empty
   // answer was then cached for the whole session - so one slow moment on the TV's connection hid
   // the subtitled/dubbed button for that title until the app restarted. Failures are tracked now:
@@ -514,6 +516,14 @@ export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]>
     return { cin: cin.flat(), cee: cee.flat() as CinemanaSearchItem[] };
   };
   const baseQueries = [...new Set([movie.titleEn, movie.originalTitle, movie.titleAr].filter((t): t is string => !!t?.trim()))];
+  if (!likely) {
+    const quick = (await Promise.all(baseQueries.map((q) => searchCinemana(q, type).catch(onFail([] as CinemanaSearchItem[]))))).flat();
+    if (!quick.some(hasDubCategory)) {
+      if (failed) throw new Error("source search failed");
+      versionCache.set(movie.id, []);
+      return [];
+    }
+  }
   const first = await search(baseQueries);
   const best = matchTmdbWithCinemana(movie, first.cin) ?? matchTmdbWithCinemana(movie, first.cee);
   if (!best) {
