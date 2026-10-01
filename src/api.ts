@@ -134,6 +134,7 @@ interface SearchResultItemDto {
   partNumber?: number | null;
   originalTitle?: string | null;
   imdbId?: string | null;
+  hasSourceMatch?: boolean | null;
   imdbUrlRef?: string | null;
 }
 
@@ -1582,6 +1583,7 @@ export async function searchMovies(query: string): Promise<Movie[]> {
     year: r.releaseDate ? new Date(r.releaseDate).getUTCFullYear() : undefined,
     imdbId: extractImdbId(r.imdbId || r.imdbUrlRef),
     partNumber: r.partNumber ?? undefined,
+    hasSourceMatch: r.hasSourceMatch ?? null,
     servers: [],
   })) : [];
   const cinemanaCandidates = [
