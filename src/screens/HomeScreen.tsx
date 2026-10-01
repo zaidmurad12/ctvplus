@@ -244,22 +244,32 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   // from real navigation swaps instantly, exactly as before (an animation there competed with the
   // scroll/focus animation and read as choppy).
   const heroChangeIsAutoRef = useRef(false);
+  // Reads the banner list and "active" through refs and keeps one identity: a copy of this
+  // function captured earlier (by a row, before the banner had loaded or while Home was inactive)
+  // used to clear the running timer and then stop, seeing an empty list - the banner stood still
+  // until Home data happened to load again (which the "available only" setting did, hiding it there).
+  const heroRotateStateRef = useRef({ heroMovies, active });
+  heroRotateStateRef.current = { heroMovies, active };
   const scheduleHeroAutoRotate = useCallback(() => {
     if (heroAutoRotateTimerRef.current) clearTimeout(heroAutoRotateTimerRef.current);
-    if (heroMovies.length < 2 || !active) return;
+    heroAutoRotateTimerRef.current = null;
+    const { heroMovies: list, active: on } = heroRotateStateRef.current;
+    if (list.length < 2 || !on) return;
     heroAutoRotateTimerRef.current = setTimeout(() => {
-      heroRotateIndexRef.current = (heroRotateIndexRef.current + 1) % heroMovies.length;
+      const { heroMovies: current, active: stillOn } = heroRotateStateRef.current;
+      if (current.length < 2 || !stillOn) return;
+      heroRotateIndexRef.current = (heroRotateIndexRef.current + 1) % current.length;
       heroChangeIsAutoRef.current = true;
-      setFocusedMovie(heroMovies[heroRotateIndexRef.current]);
+      setFocusedMovie(current[heroRotateIndexRef.current]);
       scheduleHeroAutoRotate();
     }, HERO_AUTO_ROTATE_MS);
-  }, [heroMovies, active]);
+  }, []);
   useEffect(() => {
     scheduleHeroAutoRotate();
     return () => {
       if (heroAutoRotateTimerRef.current) clearTimeout(heroAutoRotateTimerRef.current);
     };
-  }, [scheduleHeroAutoRotate]);
+  }, [heroMovies, active, scheduleHeroAutoRotate]);
 
   const onRowFocusChange = useCallback(
     (index: number, movie: Movie) => {
