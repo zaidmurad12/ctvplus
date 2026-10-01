@@ -4,7 +4,7 @@ import type { SelectedPerson } from "./src/screens/PersonScreen";
 import type { Category } from "./src/api";
 import type { HomeScreenHandle } from "./src/screens/HomeScreen";
 import type { Section } from "./src/components/Sidebar";
-import { fetchMovies, fetchEpisodePlayback, movieUrl, posterUrl, Episode, Movie, MoviesResponse, Season, StreamServer } from "./src/api";
+import { fetchMovies, setAvailableOnly, fetchEpisodePlayback, movieUrl, posterUrl, Episode, Movie, MoviesResponse, Season, StreamServer } from "./src/api";
 import { pickBestServers } from "./src/streamSelect";
 import { font } from "./src/theme";
 import { Lang, t } from "./src/i18n";
@@ -99,12 +99,28 @@ export default function App() {
   // Settings > "show available titles only" (see availability.ts).
   const [onlyAvailable, setOnlyAvailableState] = useState(false);
   useEffect(() => {
-    loadJson<boolean>(storageKeys.onlyAvailable, false).then((v) => setOnlyAvailableState(!!v));
+    loadJson<boolean>(storageKeys.onlyAvailable, false).then((v) => {
+      setAvailableOnly(!!v);
+      setOnlyAvailableState(!!v);
+    });
   }, []);
   const setOnlyAvailable = useCallback((v: boolean) => {
+    setAvailableOnly(v);
     setOnlyAvailableState(v);
     saveJson(storageKeys.onlyAvailable, v);
   }, []);
+  // Home's rows re-fetched whenever the setting changes (after the first load), so they hold the
+  // newest/most popular available titles rather than a filtered-down 20.
+  const onlyAvailableLoaded = useRef(false);
+  useEffect(() => {
+    if (!onlyAvailableLoaded.current) {
+      onlyAvailableLoaded.current = true;
+      if (!onlyAvailable) return;
+    }
+    fetchMovies()
+      .then(setData)
+      .catch((err) => console.error("[App] fetchMovies (available setting) failed:", err));
+  }, [onlyAvailable]);
   const [data, setData] = useState<MoviesResponse | null>(null);
   // Home's banner and rows with unavailable titles taken out when the setting is on (a row left
   // empty is dropped; its "View more" list is filtered by CategoryScreen itself).
@@ -114,13 +130,7 @@ export default function App() {
     const kept = hero.filter(isAvailable);
     return kept.length ? kept : hero.slice(0, 0);
   }, [data, onlyAvailable]);
-  const homeCategories = useMemo(() => {
-    const categories = data?.categories ?? [];
-    if (!onlyAvailable) return categories;
-    return categories
-      .map((category) => ({ ...category, items: category.items.filter(isAvailable) }))
-      .filter((category) => category.items.length > 0);
-  }, [data, onlyAvailable]);
+  const homeCategories = data?.categories ?? [];
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [selectedPerson, setSelectedPerson] = useState<SelectedPerson | null>(null);
   // The full list behind a home row's "View more" card (its own screen, opened over Home like a details page).

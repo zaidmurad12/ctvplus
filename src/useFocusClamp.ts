@@ -64,7 +64,10 @@ export function useFocusClamp(count: number) {
   } | null>(null);
   if (!apiRef.current) {
     apiRef.current = {
-      setRef: (i: number) => setRefFns.current![i],
+      // A row that shrinks (the "available titles only" setting filtering it) rebuilds setRefFns at
+      // the new, shorter length - and the removed items' inline ref callbacks still ask for their
+      // old index while being detached, which crashed the app ("undefined is not a function").
+      setRef: (i: number) => setRefFns.current![i] ?? ((node: View | null) => { itemRefs.current[i] = node; }),
       // Pass straight into nextFocusLeft on a row's first item and nextFocusRight on its last -
       // self-referencing, so that direction becomes a no-op there instead of escaping the row.
       clampLeft: () => handleOf(0),

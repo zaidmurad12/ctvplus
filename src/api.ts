@@ -1304,13 +1304,25 @@ export interface Category {
 export const HOME_ROW_MAX_ITEMS = 20;
 const VIEW_MORE_LIMIT = 100;
 
+// Settings > "show available titles only": every catalog list request asks the server for available
+// titles directly, so a row still gets its full 20 (in the same order) and "View more" its full list,
+// instead of the app hiding most of a row after the fact. Set by App before Home is (re)fetched.
+let availableOnly = false;
+export function setAvailableOnly(on: boolean): void {
+  availableOnly = on;
+}
+function withAvailable(path: string): string {
+  if (!availableOnly) return path;
+  return path + (path.includes("?") ? "&" : "?") + "available=true";
+}
+
 // The full list behind each built-in row, for the "View more" screen - the same ordering the row itself uses,
 // just deeper (the home strip only fetches 20).
 const builtInLoaders: Record<string, () => Promise<Movie[]>> = {
   RECENT: async () => {
     const [movies, shows] = await Promise.all([
-      apiGet<MovieSummaryDto[]>(`/movies?sort=releaseDate&limit=${VIEW_MORE_LIMIT}`),
-      apiGet<ShowSummaryDto[]>(`/shows?sort=releaseDate&limit=${VIEW_MORE_LIMIT}`),
+      apiGet<MovieSummaryDto[]>(withAvailable(`/movies?sort=releaseDate&limit=${VIEW_MORE_LIMIT}`)),
+      apiGet<ShowSummaryDto[]>(withAvailable(`/shows?sort=releaseDate&limit=${VIEW_MORE_LIMIT}`)),
     ]);
     const now = Date.now();
     return [
@@ -1322,9 +1334,9 @@ const builtInLoaders: Record<string, () => Promise<Movie[]>> = {
       .slice(0, VIEW_MORE_LIMIT)
       .map((x) => x.item);
   },
-  POPULAR: async () => (await apiGet<MovieSummaryDto[]>(`/movies?sort=popularity&limit=${VIEW_MORE_LIMIT}`)).data.map(mapSummary),
-  TOP_RATED: async () => (await apiGet<MovieSummaryDto[]>(`/movies?sort=rating&limit=${VIEW_MORE_LIMIT}`)).data.map(mapSummary),
-  SERIES: async () => (await apiGet<ShowSummaryDto[]>(`/shows?sort=popularity&limit=${VIEW_MORE_LIMIT}`)).data.map(mapShowSummary),
+  POPULAR: async () => (await apiGet<MovieSummaryDto[]>(withAvailable(`/movies?sort=popularity&limit=${VIEW_MORE_LIMIT}`))).data.map(mapSummary),
+  TOP_RATED: async () => (await apiGet<MovieSummaryDto[]>(withAvailable(`/movies?sort=rating&limit=${VIEW_MORE_LIMIT}`))).data.map(mapSummary),
+  SERIES: async () => (await apiGet<ShowSummaryDto[]>(withAvailable(`/shows?sort=popularity&limit=${VIEW_MORE_LIMIT}`))).data.map(mapShowSummary),
 };
 
 // Admin-managed home rows (see the backend's home/sections endpoint). The four built-in kinds carry
@@ -1365,7 +1377,7 @@ export async function fetchAppUpdate(): Promise<AppUpdateInfo> {
 // only ever sends the row's own head; this asks for the fuller list past it (see homeSections.ts's
 // own fullItems on the backend).
 async function fetchHomeSectionItems(sectionId: string): Promise<Movie[]> {
-  const { data } = await apiGet<FeaturedItemDto[]>(`/home/sections/${sectionId}/items?limit=100`);
+  const { data } = await apiGet<FeaturedItemDto[]>(withAvailable(`/home/sections/${sectionId}/items?limit=100`));
   return data.map((item) => (item.type === "show" ? mapShowSummary(item) : mapSummary(item)));
 }
 
@@ -1408,18 +1420,18 @@ export async function fetchMovies(): Promise<MoviesResponse> {
     // "newest" sorts by when the title was added to the catalog, not its actual release date -
     // this rail is labeled "الأحدث" (newest releases) to the viewer, so it needs releaseDate
     // (desc) instead: a movie imported today but released years ago shouldn't show up here.
-    apiGet<MovieSummaryDto[]>("/movies?sort=releaseDate&limit=20"),
+    apiGet<MovieSummaryDto[]>(withAvailable("/movies?sort=releaseDate&limit=20")),
     // Fetched (and merged below) separately from the plain "series" rail further down, which is
     // popularity-sorted, not recency-sorted - without this, a recently-released series could never
     // appear under "الأحدث" at all, no matter how new, since that rail used to be built from
     // /movies alone. Reported as "recent series don't show up in the Newest list."
-    apiGet<ShowSummaryDto[]>("/shows?sort=releaseDate&limit=20"),
-    apiGet<MovieSummaryDto[]>("/movies?sort=popularity&limit=20"),
-    apiGet<MovieSummaryDto[]>("/movies?sort=rating&limit=20"),
-    apiGet<ShowSummaryDto[]>("/shows/popular"),
+    apiGet<ShowSummaryDto[]>(withAvailable("/shows?sort=releaseDate&limit=20")),
+    apiGet<MovieSummaryDto[]>(withAvailable("/movies?sort=popularity&limit=20")),
+    apiGet<MovieSummaryDto[]>(withAvailable("/movies?sort=rating&limit=20")),
+    apiGet<ShowSummaryDto[]>(availableOnly ? withAvailable("/shows?sort=popularity&limit=20") : "/shows/popular"),
     apiGet<FeaturedItemDto[]>("/movies/featured"),
     // A failure here must never blank the home screen - no sections just means the four defaults.
-    apiGet<HomeSectionDto[]>("/home/sections").then((res) => res.data).catch(() => [] as HomeSectionDto[]),
+    apiGet<HomeSectionDto[]>(withAvailable("/home/sections")).then((res) => res.data).catch(() => [] as HomeSectionDto[]),
   ]);
   const newestMovies = newestMoviesRes.data.map(mapSummary);
   // Merged by each DTO's own raw releaseDate (not yet collapsed down to Movie.year, which only
