@@ -127,8 +127,21 @@ export default function App() {
   const homeHero = useMemo(() => {
     const hero = data ? (data.heroMovies.length > 0 ? data.heroMovies : [data.hero]) : [];
     if (!onlyAvailable) return hero;
+    // The banner needs a few titles to rotate through: topped up from the rows' own (already
+    // available) titles when filtering leaves fewer than 5 - one or none left it standing still.
     const kept = hero.filter(isAvailable);
-    return kept.length ? kept : hero.slice(0, 0);
+    if (kept.length >= 5) return kept;
+    const seen = new Set(kept.map((m) => m.id));
+    for (const category of data?.categories ?? []) {
+      for (const item of category.items) {
+        if (kept.length >= 10) break;
+        if (isAvailable(item) && !seen.has(item.id) && item.backdrop) {
+          seen.add(item.id);
+          kept.push(item);
+        }
+      }
+    }
+    return kept;
   }, [data, onlyAvailable]);
   const homeCategories = data?.categories ?? [];
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);

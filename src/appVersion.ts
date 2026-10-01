@@ -3,5 +3,5 @@
 // own apps/backend/src/app-update/appVersion.ts (a different repo) currently offers. Forgetting to
 // bump this here means the update check either never notices a real new release, or nags about a
 // release that's actually this same build.
-export const CURRENT_VERSION_CODE = 185;
-export const CURRENT_VERSION_NAME = "1.24.25-available-rows";
+export const CURRENT_VERSION_CODE = 186;
+export const CURRENT_VERSION_NAME = "1.24.26-banner-fill";
