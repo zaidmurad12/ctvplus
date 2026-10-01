@@ -21,6 +21,7 @@ const KEYS = {
   watchProgress: "cinemana.watchProgress",
   // Movies/Series browse filters (genre, language, sort) - one entry per type, suffixed ".movie"/".series".
   browseFilters: "cinemana.browseFilters",
+  onlyAvailable: "cinemana.onlyAvailable",
 } as const;
 
 async function loadJson<T>(key: string, fallback: T): Promise<T> {

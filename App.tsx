@@ -15,6 +15,7 @@ import { DEFAULT_UI_SCALE, getUIScale, setUIScale, suggestInitialUIScale } from 
 import { dispatchBack, pushBackHandler } from "./src/backStack";
 import { FocusScopeContext, type FocusScope } from "./src/components/Focusable";
 import FocusBlockView from "./src/components/FocusBlockView";
+import { OnlyAvailableContext, isAvailable } from "./src/availability";
 import { countRender } from "./src/perfProbe";
 
 // Every screen (and Sidebar) is lazy-loaded, not statically imported - each one's own
@@ -95,7 +96,31 @@ export default function App() {
   // pickBestServers ranked first each time.
   const [preferredQuality, setPreferredQuality] = useState<string>(DEFAULT_PREFERRED_QUALITY);
   const [uiScale, setUiScaleState] = useState(DEFAULT_UI_SCALE);
+  // Settings > "show available titles only" (see availability.ts).
+  const [onlyAvailable, setOnlyAvailableState] = useState(false);
+  useEffect(() => {
+    loadJson<boolean>(storageKeys.onlyAvailable, false).then((v) => setOnlyAvailableState(!!v));
+  }, []);
+  const setOnlyAvailable = useCallback((v: boolean) => {
+    setOnlyAvailableState(v);
+    saveJson(storageKeys.onlyAvailable, v);
+  }, []);
   const [data, setData] = useState<MoviesResponse | null>(null);
+  // Home's banner and rows with unavailable titles taken out when the setting is on (a row left
+  // empty is dropped; its "View more" list is filtered by CategoryScreen itself).
+  const homeHero = useMemo(() => {
+    const hero = data ? (data.heroMovies.length > 0 ? data.heroMovies : [data.hero]) : [];
+    if (!onlyAvailable) return hero;
+    const kept = hero.filter(isAvailable);
+    return kept.length ? kept : hero.slice(0, 0);
+  }, [data, onlyAvailable]);
+  const homeCategories = useMemo(() => {
+    const categories = data?.categories ?? [];
+    if (!onlyAvailable) return categories;
+    return categories
+      .map((category) => ({ ...category, items: category.items.filter(isAvailable) }))
+      .filter((category) => category.items.length > 0);
+  }, [data, onlyAvailable]);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [selectedPerson, setSelectedPerson] = useState<SelectedPerson | null>(null);
   // The full list behind a home row's "View more" card (its own screen, opened over Home like a details page).
@@ -736,6 +761,7 @@ export default function App() {
   }
 
   return (
+    <OnlyAvailableContext.Provider value={onlyAvailable}>
     <View style={styles.root}>
       <StatusBar hidden />
 
@@ -833,8 +859,8 @@ export default function App() {
                   <Suspense fallback={<ScreenLoader />}>
                     <HomeScreen
                       ref={homeRef}
-                      heroMovies={data ? (data.heroMovies.length > 0 ? data.heroMovies : [data.hero]) : []}
-                      categories={data?.categories ?? []}
+                      heroMovies={homeHero}
+                      categories={homeCategories}
                       lang={lang}
                       onSelectMovie={setSelectedMovie}
                       onOpenCategory={setSelectedCategory}
@@ -893,6 +919,8 @@ export default function App() {
                       onChangeSubtitleSettings={setSubtitleSettings}
                       uiScale={uiScale}
                       onChangeUiScale={setUiScaleState}
+                      onlyAvailable={onlyAvailable}
+                      onChangeOnlyAvailable={setOnlyAvailable}
                       onBack={() => setSection("home")}
                       // See SettingsScreen's own comment on why this - not just being mounted -
                       // is what its back-handler push has to be gated on: it stays mounted
@@ -1004,6 +1032,7 @@ export default function App() {
         </View>
       )}
     </View>
+    </OnlyAvailableContext.Provider>
   );
 }
 

@@ -16,6 +16,7 @@ import { useFocusClamp } from "../useFocusClamp";
 import { useProgressiveReveal } from "../useProgressiveReveal";
 import { pushBackHandler } from "../backStack";
 import { usePerfProbe } from "../perfProbe";
+import { useAvailableOnly } from "../availability";
 
 // See playEpisode's own comment - a floor under how quickly the resolving spinner can disappear
 // again, so a cached/instant fetch still leaves it on screen long enough to actually be seen.
@@ -180,7 +181,8 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
     if (!activeSeason && movie.seasons?.length) setActiveSeason(movie.seasons[0]);
   }, [movie.seasons, activeSeason]);
   const [resolvingEpisodeId, setResolvingEpisodeId] = useState<string | null>(null);
-  const [parts, setParts] = useState<Movie[]>([]);
+  const [allParts, setParts] = useState<Movie[]>([]);
+  const parts = useAvailableOnly(allParts);
   const [resolvingMovie, setResolvingMovie] = useState(false);
   // The app previously had no way at all to look up a movie's other parts - it only ever had
   // the single Movie object the viewer tapped into, with nothing pointing at sibling entries

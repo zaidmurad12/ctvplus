@@ -9,6 +9,7 @@ import { colors, font, spacing } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, t, formatDate } from "../i18n";
 import { pushBackHandler } from "../backStack";
+import { useAvailableOnly } from "../availability";
 
 // A fixed 6 columns left a wide dead strip on the right on any screen wider than that assumed -
 // same fix, same reasoning as BrowseScreen's own NUM_COLUMNS: filling the actual row width,
@@ -125,7 +126,8 @@ export default function PersonScreen({ person, lang, onSelectMovie, onBack }: Pr
 
   const movieCount = useMemo(() => filmography.filter((m) => m.type === "movie").length, [filmography]);
   const seriesCount = useMemo(() => filmography.filter((m) => m.type === "series").length, [filmography]);
-  const filtered = useMemo(() => filmography.filter((m) => m.type === typeFilter), [filmography, typeFilter]);
+  const availableFilmography = useAvailableOnly(filmography);
+  const filtered = useMemo(() => availableFilmography.filter((m) => m.type === typeFilter), [availableFilmography, typeFilter]);
 
   const birthDate = person.birthday ? formatDate(person.birthday, lang) : null;
   const deathDate = person.deathday ? formatDate(person.deathday, lang) : null;

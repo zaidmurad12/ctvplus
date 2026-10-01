@@ -48,6 +48,7 @@ interface MovieSummaryDto {
   id: string;
   title: string;
   titleAr?: string | null;
+  hasSourceMatch?: boolean | null;
   overview?: string | null;
   overviewAr?: string | null;
   // Now sent on every summary/detail response, not just search results - see
@@ -142,6 +143,7 @@ interface ShowSummaryDto {
   id: string;
   title: string;
   titleAr?: string | null;
+  hasSourceMatch?: boolean | null;
   overview?: string | null;
   overviewAr?: string | null;
   imdbId?: string | null;
@@ -187,6 +189,7 @@ interface PersonCreditDto {
   type: "movie" | "show";
   title: string;
   titleAr?: string | null;
+  hasSourceMatch?: boolean | null;
   poster?: string | null;
   rating?: number | null;
   releaseDate?: string | null;
@@ -734,6 +737,7 @@ function mapSummary(m: MovieSummaryDto): Movie {
     // affordance immediately, without waiting on the per-movie detail fetch that actually
     // resolves `servers` (see mapDetail/fetchMovieDetail below).
     hasPlayableStream: m.hasPlayableStream,
+    hasSourceMatch: m.hasSourceMatch ?? null,
     servers: [],
   };
 }
@@ -828,6 +832,7 @@ function mapShowSummary(s: ShowSummaryDto): Movie {
     genres: s.genres,
     ageRating: s.ageRating ?? undefined,
     language: s.originalLanguage ?? undefined,
+    hasSourceMatch: s.hasSourceMatch ?? null,
     servers: [],
   };
 }
@@ -1197,6 +1202,8 @@ export interface Movie {
   // on their own card/hero), so Play vs "Coming Soon" is correct immediately on Home/Browse/
   // Search without waiting on the per-movie detail fetch that actually resolves `servers`.
   hasPlayableStream?: boolean;
+  // The admin panel's source-compatibility check: true = plays from a source (see availability.ts).
+  hasSourceMatch?: boolean | null;
   seasons?: Season[];
   logoUrl?: string;
   titleLogo?: string;
@@ -1478,10 +1485,11 @@ export async function fetchMoviesPage(
   limit = 50,
   sort: "newest" | "releaseDate" | "rating" | "popularity" = "newest",
   language?: string,
-  genre?: string
+  genre?: string,
+  availableOnly = false
 ): Promise<MoviesPage> {
   const languageParam = language ? `&language=${encodeURIComponent(language)}` : "";
-  const genreParam = genre ? `&genre=${encodeURIComponent(genre)}` : "";
+  const genreParam = (genre ? `&genre=${encodeURIComponent(genre)}` : "") + (availableOnly ? "&available=true" : "");
   if (type === "series") {
     const { data, meta } = await apiGet<ShowSummaryDto[]>(`/shows?sort=${sort}&page=${page}&limit=${limit}${languageParam}${genreParam}`);
     const total = Number(meta?.total ?? data.length);
@@ -1560,6 +1568,7 @@ export async function fetchByPerson(personId: string): Promise<Movie[]> {
   return data.filmography.map((c) => ({
     id: c.id,
     titleAr: c.titleAr?.trim() || c.title,
+    hasSourceMatch: c.hasSourceMatch ?? null,
     titleEn: c.title,
     poster: c.poster ?? undefined,
     rating: c.rating ?? undefined,

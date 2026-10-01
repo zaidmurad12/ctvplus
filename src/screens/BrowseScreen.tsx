@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   View,
@@ -22,6 +22,7 @@ import { colors, font, SIDEBAR_LOGO } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, languageName, genreName } from "../i18n";
 import { useSidebarHomeHandle } from "../focusRefs";
+import { OnlyAvailableContext } from "../availability";
 import { loadJson, saveJson, storageKeys } from "../storage";
 
 const ROW_GAP = s(30);
@@ -130,6 +131,7 @@ interface Props {
 // filtering or globally sorting a set that's only partially loaded would silently miss titles
 // still sitting on later pages, so those two actions load whatever pages remain first.
 export default function BrowseScreen({ title, type, lang = "ar", emptyLabel, onSelect }: Props) {
+  const onlyAvailable = useContext(OnlyAvailableContext);
   const homeHandle = useSidebarHomeHandle();
   // Same big landscape banner the home screen's own hero uses, showing whichever card in the
   // grid below currently has focus (see MovieCard's own onFocusChange further down) - a big
@@ -300,7 +302,7 @@ export default function BrowseScreen({ title, type, lang = "ar", emptyLabel, onS
       const isFirstFetch = pageRef.current === 0;
       const limit = isFirstFetch ? FIRST_PAGE_LIMIT : PAGE_LIMIT;
       const page = isFirstFetch ? 1 : pageRef.current + 1;
-      const data = await fetchMoviesPage(type, page, limit, SORT_KEY_TO_BACKEND[sortBy], language ?? undefined, genre ?? undefined);
+      const data = await fetchMoviesPage(type, page, limit, SORT_KEY_TO_BACKEND[sortBy], language ?? undefined, genre ?? undefined, onlyAvailable);
       // A newer filter/sort/type change reset everything for a different request while this one
       // was still in flight - this response no longer belongs to what's on screen, discard it.
       if (epoch !== fetchEpochRef.current) return;
@@ -381,7 +383,7 @@ export default function BrowseScreen({ title, type, lang = "ar", emptyLabel, onS
     }
     loadPage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, genre, language, sortBy, filtersType]);
+  }, [type, genre, language, sortBy, filtersType, onlyAvailable]);
 
   // Discovers new genres/languages as pages load, adding them to the accumulating sets above
   // rather than replacing them - see those refs' own comment for why.

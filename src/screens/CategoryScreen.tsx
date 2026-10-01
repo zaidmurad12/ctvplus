@@ -8,6 +8,7 @@ import { useSidebarHomeHandle } from "../focusRefs";
 import { s, fs } from "../scale";
 import { Lang, pickText } from "../i18n";
 import { pushBackHandler } from "../backStack";
+import { useAvailableOnly } from "../availability";
 
 // Same grid as Movies/Series (gridLayout.ts): same column count and card size, filling the row.
 const ROW_GAP = s(26);
@@ -83,11 +84,12 @@ export default function CategoryScreen({ category, lang, onSelectMovie, onBack }
     [scrollToRow]
   );
 
+  const shownItems = useAvailableOnly(items);
   const rows = useMemo(() => {
     const out: Movie[][] = [];
-    for (let i = 0; i < items.length; i += NUM_COLUMNS) out.push(items.slice(i, i + NUM_COLUMNS));
+    for (let i = 0; i < shownItems.length; i += NUM_COLUMNS) out.push(shownItems.slice(i, i + NUM_COLUMNS));
     return out;
-  }, [items]);
+  }, [shownItems]);
 
   // `items` can jump from a short head (~20) to the full list (up to 100) in one synchronous state
   // update the instant loadAll() resolves - up to ~17 rows' worth of real MovieCard components

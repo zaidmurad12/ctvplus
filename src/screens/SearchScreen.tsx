@@ -9,6 +9,7 @@ import Focusable from "../components/Focusable";
 import { colors, font, radius, spacing } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, t } from "../i18n";
+import { useAvailableOnly } from "../availability";
 
 // Matches the search bar's own width above it (see searchBar.maxWidth) - sharing one constant
 // makes that alignment deliberate instead of coincidental. The results grid gets whatever width
@@ -128,10 +129,11 @@ export default function SearchScreen({ lang, onSelect }: Props) {
     };
   }, []);
 
+  const availableResults = useAvailableOnly(results);
   const filtered = useMemo(() => {
-    const list = typeFilter === "all" ? results : results.filter((m) => m.type === typeFilter);
+    const list = typeFilter === "all" ? availableResults : availableResults.filter((m) => m.type === typeFilter);
     return list.slice(0, visibleCount);
-  }, [results, typeFilter, visibleCount]);
+  }, [availableResults, typeFilter, visibleCount]);
 
   const filterLabels: Record<TypeFilter, string> = {
     all: lang === "ar" ? "الكل" : "All",

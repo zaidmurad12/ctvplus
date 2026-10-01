@@ -32,6 +32,8 @@ interface Props {
   onChangeSubtitleSettings: (settings: SubtitleSettings) => void;
   uiScale: number;
   onChangeUiScale: (scale: number) => void;
+  onlyAvailable: boolean;
+  onChangeOnlyAvailable: (on: boolean) => void;
   onBack: () => void;
   // True only while `section === "settings"` in App.tsx - this component actually stays mounted
   // (hidden via style, never unmounted) for as long as a video isn't playing, the same "keep it
@@ -86,13 +88,13 @@ function useHandleGroup<K extends string>(keys: readonly K[]) {
 }
 
 const NAV_KEYS = ["system", "subtitles"] as const;
-const SYSTEM_KEYS = ["lang", "uiSize", "update"] as const;
+const SYSTEM_KEYS = ["lang", "uiSize", "update", "onlyAvailable"] as const;
 const SUBTITLE_KEYS = ["language", "font", "size", "color", "background"] as const;
 
 // Two-pane layout (a fixed nav rail + a scrollable content panel) instead of pill tabs across
 // the top - closer to how an actual TV settings app (or System Preferences) is organized, and
 // gives the tab list room to grow past two entries without crowding a single row.
-export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, onChangeSubtitleSettings, uiScale, onChangeUiScale, onBack, active }: Props) {
+export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, onChangeSubtitleSettings, uiScale, onChangeUiScale, onlyAvailable, onChangeOnlyAvailable, onBack, active }: Props) {
   const [tab, setTab] = useState<Tab>("system");
   const patch = (partial: Partial<SubtitleSettings>) => onChangeSubtitleSettings({ ...subtitleSettings, ...partial });
 
@@ -228,11 +230,31 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
               ref={system.setRef("update")}
               lang={lang}
               nextFocusUp={system.handleOf("uiSize")}
-              // Last row: down stays here (was unset, and Android's own nearest-neighbor search
-              // jumped out to the sidebar). Only LEFT leaves the panel.
-              nextFocusDown={system.handleOf("update")}
+              nextFocusDown={system.handleOf("onlyAvailable")}
               nextFocusLeft={nav.handleOf("system")}
             />
+
+            <SettingsCard
+              title={lang === "ar" ? "عرض الأعمال المتوفرة فقط" : "Show available titles only"}
+              description={
+                lang === "ar"
+                  ? "يخفي من كل القوائم الأعمال غير المتوفرة على مصادر التشغيل (حسب فحص التوافق في لوحة التحكم)."
+                  : "Hides titles that aren't on the playback sources from every list (per the admin panel's compatibility check)."
+              }
+            >
+              <SettingsRow>
+                <ToggleSwitch
+                  ref={system.setRef("onlyAvailable")}
+                  value={onlyAvailable}
+                  onChange={onChangeOnlyAvailable}
+                  nextFocusUp={system.handleOf("update")}
+                  // Last row: down stays here (was unset, and Android's own nearest-neighbor search
+                  // jumped out to the sidebar). Only LEFT leaves the panel.
+                  nextFocusDown={system.handleOf("onlyAvailable")}
+                  nextFocusLeft={nav.handleOf("system")}
+                />
+              </SettingsRow>
+            </SettingsCard>
           </ScrollView>
         ) : (
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
