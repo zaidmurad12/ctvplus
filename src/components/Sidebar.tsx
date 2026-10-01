@@ -5,7 +5,7 @@ import Focusable from "./Focusable";
 import Logo from "./Logo";
 import { colors, SIDEBAR_LOGO } from "../theme";
 import { s } from "../scale";
-import { registerSidebarHome } from "../focusRefs";
+import { registerSidebarHome, useSettingsEntryHandle } from "../focusRefs";
 
 // "favorites" (Watch Later) and "history" (Watch History) used to be two separate icons/
 // screens here - merged into one "library" entry/screen since they're both just "things this
@@ -55,6 +55,7 @@ export default function Sidebar({ active, onSelect }: Props) {
     });
   }
 
+  const settingsEntry = useSettingsEntryHandle();
   const handleOf = (i: number) => {
     const node = itemRefs.current[i];
     return node ? findNodeHandle(node) ?? undefined : undefined;
@@ -80,6 +81,7 @@ export default function Sidebar({ active, onSelect }: Props) {
             // is a no-op instead of wrapping around.
             nextFocusUp={i > 0 ? handleOf(i - 1) : handleOf(0)}
             nextFocusDown={i < ITEMS.length - 1 ? handleOf(i + 1) : handleOf(ITEMS.length - 1)}
+            nextFocusRight={section === "settings" && active === "settings" ? settingsEntry ?? undefined : undefined}
             focusRadius={s(12)}
             clipFocusOverflow
           >

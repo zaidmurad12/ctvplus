@@ -6,7 +6,7 @@ import { useFocusClamp } from "../useFocusClamp";
 import { colors, font, focusShadowTight, radius, spacing, SIDEBAR_LOGO } from "../theme";
 import { s, fs, UI_SCALE_OPTIONS } from "../scale";
 import { Lang, t } from "../i18n";
-import { useSidebarHomeHandle } from "../focusRefs";
+import { registerSettingsEntry, useSidebarHomeHandle } from "../focusRefs";
 import { pushBackHandler } from "../backStack";
 import { fetchAppUpdate, AppUpdateInfo } from "../api";
 import { CURRENT_VERSION_CODE, CURRENT_VERSION_NAME } from "../appVersion";
@@ -140,6 +140,10 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
   // RIGHT from the nav rail still landed on the System tab's last row (the available-titles toggle)
   // on the TV, despite the explicit nextFocusRight. Backstop: a row other than the first that takes
   // focus straight from the nav rail hands it on to the first row.
+  const systemNavRef = useRef((node: View | null) => {
+    nav.setRef("system")(node);
+    registerSettingsEntry(node);
+  }).current;
   const navLeftAt = useRef(0);
   const onNavFocusChange = (focused: boolean) => {
     if (!focused) navLeftAt.current = Date.now();
@@ -170,7 +174,7 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
           <Text style={styles.pageTitle}>{t("settings", lang)}</Text>
         </View>
         <NavItem
-          ref={nav.setRef("system")}
+          ref={systemNavRef}
           label={t("settingsTabSystem", lang)}
           Icon={SettingsIcon}
           active={tab === "system"}

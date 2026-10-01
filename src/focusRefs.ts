@@ -49,3 +49,26 @@ export function useSidebarHomeHandle(): number | null {
   }, []);
   return sidebarFocus.homeHandle;
 }
+
+// Settings' first nav item ("إعدادات النظام") - RIGHT from the sidebar's Settings icon goes here.
+// That icon sits low in the sidebar, level with Settings' last row, so Android's geometric guess
+// picked that row (the available-titles toggle) instead of the top of the page.
+export const settingsFocus: { entryHandle: number | null } = { entryHandle: null };
+const settingsListeners = new Set<() => void>();
+export function registerSettingsEntry(instance: unknown) {
+  const handle = instance ? findNodeHandle(instance as any) ?? null : null;
+  if (handle === settingsFocus.entryHandle) return;
+  settingsFocus.entryHandle = handle;
+  settingsListeners.forEach((fn) => fn());
+}
+export function useSettingsEntryHandle(): number | null {
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    const fn = () => rerender((t) => t + 1);
+    settingsListeners.add(fn);
+    return () => {
+      settingsListeners.delete(fn);
+    };
+  }, []);
+  return settingsFocus.entryHandle;
+}
