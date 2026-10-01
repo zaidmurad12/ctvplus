@@ -466,15 +466,20 @@ function isArabicOnlyEntry(item: { en_title?: string; ar_title?: string }): bool
 // films - marked in its title ("Moana Dubbed" / "موانا مدبلج", "Toy Story 5 Dubbed"), which the
 // Arabic-only check alone missed, so films never showed the subtitled/dubbed choice.
 const DUB_MARKER = /dubbed|مدبلج/i;
-function isDubbedEntry(item: { en_title?: string; ar_title?: string; other_title?: string }): boolean {
-  return isArabicOnlyEntry(item) || [item.en_title, item.ar_title, item.other_title].some((t) => !!t && DUB_MARKER.test(t));
+// Cinemana and CEE tag every dubbed release with their "Arabic dubbed" category - the reliable mark,
+// since some dubbed entries carry exactly the original's title with no "Dubbed" in it at all.
+function hasDubCategory(item: CinemanaSearchItem): boolean {
+  return !!item.categories?.some((c) => DUB_MARKER.test(c.en_title ?? "") || DUB_MARKER.test(c.ar_title ?? ""));
+}
+function isDubbedEntry(item: CinemanaSearchItem & { other_title?: string }): boolean {
+  return hasDubCategory(item) || isArabicOnlyEntry(item) || [item.en_title, item.ar_title, item.other_title].some((t) => !!t && DUB_MARKER.test(t));
 }
 
 const versionCache = new Map<string, SourceVersion[]>();
 
 // Wording sources add to a version's title ("... مدبلج", "(مترجم)") - not part of the work's name.
 function stripVersionWords(title: string): string {
-  return title.replace(/\(?\s*(مدبلج(ة)?|مترجم(ة)?|بالعربي(ة)?|النسخة المدبلجة)\s*\)?/g, " ").trim();
+  return title.replace(/\(?\s*(مدبلج(ة)?|مترجم(ة)?|بالعربي(ة)?|النسخة المدبلجة|arabic dubbed|dubbed|subbed)\s*\)?/gi, " ").trim();
 }
 
 // Arabic dubs on the sources are essentially animation (films and series) and Turkish works - per
@@ -531,6 +536,11 @@ export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]>
   // with the same Arabic title once dub/sub wording is set aside, and the same year (+/-1). An
   // entry carrying a *different* reference is never grouped in.
   const wantedArabic = normalizeTitle(stripVersionWords(arabicTitle || ""));
+  // A dubbed entry tagged by the source's category may keep the original (Latin) title unchanged -
+  // it's grouped in when that title matches the work's own or the matched entry's.
+  const wantedTitles = new Set(
+    [movie.titleEn, movie.originalTitle, best.en_title].map((t) => normalizeTitle(stripVersionWords(t ?? ""))).filter(Boolean)
+  );
   const year = movie.year ?? cinemanaNumber(best.year);
   const belongs = (item: CinemanaSearchItem) => {
     if (String(item.nb) === String(best.nb)) return true;
@@ -539,7 +549,9 @@ export async function findSourceVersions(movie: Movie): Promise<SourceVersion[]>
     if (itemKey) return false;
     const itemYear = cinemanaNumber(item.year);
     if (!year || !itemYear || Math.abs(itemYear - year) > 1) return false;
-    return !!wantedArabic && isDubbedEntry(item) && normalizeTitle(stripVersionWords(item.ar_title || item.en_title || "")) === wantedArabic;
+    if (!isDubbedEntry(item)) return false;
+    if (wantedArabic && normalizeTitle(stripVersionWords(item.ar_title || item.en_title || "")) === wantedArabic) return true;
+    return hasDubCategory(item) && [item.en_title, item.ar_title].some((t) => !!t && wantedTitles.has(normalizeTitle(stripVersionWords(t))));
   };
   const add = (items: CinemanaSearchItem[], provider: "cinemana" | "cee") => {
     for (const item of items) {

@@ -13,6 +13,8 @@ export interface CinemanaSearchItem {
   imgObjUrl?: string;
   type?: string;
   kind?: string | number;
+  // The source's own tags - its "Arabic dubbed" / "مدبلج عربي" category marks the dubbed releases.
+  categories?: Array<{ en_title?: string; ar_title?: string }>;
 }
 
 export interface CinemanaInfo extends CinemanaSearchItem {
