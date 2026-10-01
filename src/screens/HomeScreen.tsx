@@ -329,8 +329,34 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
     },
   }));
 
-  const heroUri = focusedMovie ? posterUrl(focusedMovie.backdrop || focusedMovie.poster, "w1280") : "";
+  // A backdrop that fails to load falls back to the poster rather than leaving the banner black.
+  const [failedHeroUri, setFailedHeroUri] = useState<string | null>(null);
+  const backdropUri = focusedMovie ? posterUrl(focusedMovie.backdrop || focusedMovie.poster, "w1280") : "";
+  const heroUri =
+    backdropUri && backdropUri === failedHeroUri && focusedMovie?.poster ? posterUrl(focusedMovie.poster, "w1280") : backdropUri;
   const lastHeroUriRef = useRef(heroUri);
+  // Banner pictures downloaded ahead (disk cache only, no decoding), so a rotation never waits on
+  // the network - the banner showed black on titles whose picture was still downloading.
+  useEffect(() => {
+    const timers = heroMovies.slice(0, 10).map((m, i) =>
+      setTimeout(() => {
+        const uri = posterUrl(m.backdrop || m.poster, "w1280");
+        if (uri) Image.prefetch(uri).catch(() => {});
+      }, 1500 + i * 400)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [heroMovies]);
+  // The crossfade starts once the new picture has actually loaded (onLoad below) - it used to start
+  // at once and drop the previous picture after 700ms whether or not the new one had arrived.
+  const heroFadePendingRef = useRef(false);
+  const startHeroFade = useCallback(() => {
+    if (!heroFadePendingRef.current) return;
+    heroFadePendingRef.current = false;
+    Animated.timing(heroFade, { toValue: 1, duration: 700, useNativeDriver: true }).start(({ finished }) => {
+      if (finished) setPrevHeroUri(null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [prevHeroUri, setPrevHeroUri] = useState<string | null>(null);
   const heroFade = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -338,6 +364,7 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
     const previous = lastHeroUriRef.current;
     lastHeroUriRef.current = heroUri;
     if (!heroChangeIsAutoRef.current || !previous) {
+      heroFadePendingRef.current = false;
       heroFade.setValue(1);
       setPrevHeroUri(null);
       return;
@@ -345,10 +372,11 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
     heroChangeIsAutoRef.current = false;
     setPrevHeroUri(previous);
     heroFade.setValue(0);
-    Animated.timing(heroFade, { toValue: 1, duration: 700, useNativeDriver: true }).start(({ finished }) => {
-      if (finished) setPrevHeroUri(null);
-    });
-  }, [heroUri, heroFade]);
+    heroFadePendingRef.current = true;
+    // Never stuck on the previous picture if onLoad doesn't come (e.g. an already-shown source).
+    const fallback = setTimeout(startHeroFade, 4000);
+    return () => clearTimeout(fallback);
+  }, [heroUri, heroFade, startHeroFade]);
 
   // App.tsx no longer waits for the catalog fetch to resolve before letting a guest reach this
   // screen (see its own comment on why) - this is the gap that closes: a real loading state
@@ -389,6 +417,11 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
               style={[styles.heroPicture, { opacity: heroFade }]}
               resizeMode="cover"
               fadeDuration={0}
+              onLoad={startHeroFade}
+              onError={() => {
+                if (heroUri === backdropUri) setFailedHeroUri(backdropUri);
+                else startHeroFade();
+              }}
             />
             <LinearGradient
               // Many stops on an ease-out curve (not 4-5 straight segments): a few linear segments each read as
