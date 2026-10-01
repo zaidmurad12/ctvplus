@@ -15,7 +15,6 @@ import LogoImage from "../components/LogoImage";
 import { useFocusClamp } from "../useFocusClamp";
 import { useProgressiveReveal } from "../useProgressiveReveal";
 import { pushBackHandler } from "../backStack";
-import { usePerfProbe } from "../perfProbe";
 import { useAvailableOnly } from "../availability";
 
 // See playEpisode's own comment - a floor under how quickly the resolving spinner can disappear
@@ -468,10 +467,6 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   // self-referencing the first/last item's nextFocusLeft/Right (see useFocusClamp) makes that
   // direction a no-op there instead, so only up/down ever actually leaves a row.
   const castCount = crewAndCast.length;
-  usePerfProbe("details", movie.id, () =>
-    `title="${movie.titleEn}" type=${movie.type} parts=${parts.length} seasons=${movie.seasons?.length ?? 0} ` +
-    `episodes=${activeSeason?.episodes.length ?? 0} cast=${castCount} logo=${movie.logoUrl || movie.titleLogo ? 1 : 0}`
-  );
   const castClamp = useFocusClamp(castCount);
   const partsClamp = useFocusClamp(parts.length);
   const episodesClamp = useFocusClamp(activeSeason?.episodes.length ?? 0);

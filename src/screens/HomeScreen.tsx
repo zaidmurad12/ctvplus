@@ -9,7 +9,6 @@ import { colors, font, focusShadow, spacing } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, countryName, genreName, pickText, t } from "../i18n";
 import { useSidebarHomeHandle } from "../focusRefs";
-import { countRender, usePerfProbe } from "../perfProbe";
 import { useFocusClamp } from "../useFocusClamp";
 import { useProgressiveReveal } from "../useProgressiveReveal";
 
@@ -126,7 +125,6 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   { heroMovies, categories, lang, onSelectMovie, onOpenCategory, active, detached = false },
   ref
 ) {
-  countRender("home");
   const homeHandle = useSidebarHomeHandle();
 
   // "recent" kept first (matching the emphasis it had as this screen's own hero before), every
@@ -177,10 +175,6 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   // lastScrolledTo ref, which exists purely to guard against redundant scrollTo calls and isn't
   // itself something a render can react to).
   const [currentRowIndex, setCurrentRowIndex] = useState(0);
-  const [homeProbeKey, setHomeProbeKey] = useState(0);
-  useEffect(() => {
-    if (active) setHomeProbeKey((k) => k + 1);
-  }, [active]);
   const [reattachRadius, setReattachRadius] = useState<number | null>(null);
   useEffect(() => {
     if (detached) {
@@ -239,8 +233,6 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   // one fetch per pause, not one per card passed through.
   const heroUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heroSwapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Measurement only (no behavior change): a probe window each time Home comes back into view.
-  usePerfProbe("home", String(homeProbeKey), () => `rows=${rows.length} currentRow=${currentRowIndex}`);
 
   // Auto-rotating hero (restored per explicit request) - cycles through heroMovies on its own
   // whenever the viewer hasn't touched navigation for a while, the same "slider" behavior the
@@ -316,6 +308,11 @@ const HomeScreen = React.forwardRef<HomeScreenHandle, Props>(function HomeScreen
   useImperativeHandle(ref, () => ({
     scrollToTop: () => {
       lastScrolledTo.current = 0;
+      // The top rows are the ones on screen now - their images are revealed around currentRowIndex,
+      // which still pointed at whatever row had focus before (a row far down), so the top rows came
+      // back as black cards until focus moved into them.
+      if (heroUpdateTimerRef.current) clearTimeout(heroUpdateTimerRef.current);
+      setCurrentRowIndex(0);
       scrollRef.current?.scrollTo({ y: 0, animated: true });
       retryFocusRef.current?.();
       retryFocusRef.current = retryFocus(firstCardRef);
@@ -561,7 +558,6 @@ const CategoryRow = React.memo(function CategoryRow({
   detached: boolean;
   windowed: boolean;
 }) {
-  countRender("homeRow");
   // The strip's own height, kept while it's detached so the page doesn't reflow (row offsets and
   // the scroll position stay exactly where they were).
   const stripHeight = useRef(0);

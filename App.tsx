@@ -16,7 +16,6 @@ import { dispatchBack, pushBackHandler } from "./src/backStack";
 import { FocusScopeContext, type FocusScope } from "./src/components/Focusable";
 import FocusBlockView from "./src/components/FocusBlockView";
 import { OnlyAvailableContext, isAvailable } from "./src/availability";
-import { countRender } from "./src/perfProbe";
 
 // Every screen (and Sidebar) is lazy-loaded, not statically imported - each one's own
 // `StyleSheet.create({...})` calls s()/fs() (see scale.ts) at the moment that module is first
@@ -85,7 +84,6 @@ const MAX_WATCHED_EPISODES = 2000;
 const MIN_RESOLVE_MS = 200;
 
 export default function App() {
-  countRender("app");
   const [screen, setScreen] = useState<Screen>("splash");
   const [section, setSection] = useState<Section>("home");
   const [lang, setLang] = useState<Lang>("ar");

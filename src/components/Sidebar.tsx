@@ -6,7 +6,6 @@ import Logo from "./Logo";
 import { colors, SIDEBAR_LOGO } from "../theme";
 import { s } from "../scale";
 import { registerSidebarHome } from "../focusRefs";
-import { countRender } from "../perfProbe";
 
 // "favorites" (Watch Later) and "history" (Watch History) used to be two separate icons/
 // screens here - merged into one "library" entry/screen since they're both just "things this
@@ -29,7 +28,6 @@ interface Props {
 }
 
 export default function Sidebar({ active, onSelect }: Props) {
-  countRender("sidebar");
   const itemRefs = useRef<Array<View | null>>([]);
   // Refs aren't known until after the first mount, so nextFocusUp/Down (which need a real
   // node handle, not a ref object) can't be set on that first render - this just forces one

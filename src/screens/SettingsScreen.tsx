@@ -214,6 +214,8 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
                   index={Math.max(0, UI_SCALE_OPTIONS.indexOf(uiScale))}
                   onChange={(i) => onChangeUiScale(UI_SCALE_OPTIONS[i])}
                   valueLabel={`${Math.round(uiScale * 100)}%`}
+                  confirm
+                  labelFor={(i) => `${Math.round(UI_SCALE_OPTIONS[i] * 100)}%`}
                   nextFocusUp={system.handleOf("lang")}
                   nextFocusDown={system.handleOf("update")}
                   nextFocusLeft={nav.handleOf("system")}
@@ -222,8 +224,8 @@ export default function SettingsScreen({ lang, onChangeLang, subtitleSettings, o
             </SettingsCard>
             <Text style={styles.uiScaleNote}>
               {lang === "ar"
-                ? "سيقوم التطبيق بإعادة التشغيل تلقائيًا عند الخروج من الإعدادات لتطبيق الحجم الجديد."
-                : "The app will restart automatically when you leave Settings to apply the new size."}
+                ? "اضغط OK على الشريط لتعديل الحجم، ثم يمين ويسار، ثم OK للتطبيق. يعيد التطبيق التشغيل تلقائيًا عند الخروج من الإعدادات لتطبيق الحجم الجديد."
+                : "Press OK on the bar to adjust, then left/right, then OK to apply. The app restarts automatically when you leave Settings to apply the new size."}
             </Text>
 
             <UpdateRow
@@ -757,13 +759,21 @@ const StopsSlider = React.forwardRef<
     nextFocusUp?: number;
     nextFocusDown?: number;
     nextFocusLeft?: number;
+    // Confirm mode (the interface size): left/right do nothing until OK is pressed; then they move a
+    // pending value, and OK again applies it (leaving the slider cancels). A size change restarts
+    // the app, so it shouldn't happen just by moving past the slider.
+    confirm?: boolean;
+    labelFor?: (i: number) => string;
   }
->(function StopsSlider({ count, index, onChange, valueLabel, nextFocusUp, nextFocusDown, nextFocusLeft }, ref) {
-  const pct = count > 1 ? (index / (count - 1)) * 100 : 0;
+>(function StopsSlider({ count, index, onChange, valueLabel, nextFocusUp, nextFocusDown, nextFocusLeft, confirm, labelFor }, ref) {
+  const [editing, setEditing] = useState(false);
+  const [pending, setPending] = useState(index);
+  const shown = confirm && editing ? pending : index;
+  const pct = count > 1 ? (shown / (count - 1)) * 100 : 0;
   const indexRef = useRef(index);
   useEffect(() => {
-    indexRef.current = index;
-  }, [index]);
+    indexRef.current = confirm && editing ? pending : index;
+  }, [index, pending, editing, confirm]);
   const countRef = useRef(count);
   useEffect(() => {
     countRef.current = count;
@@ -775,7 +785,11 @@ const StopsSlider = React.forwardRef<
 
   const [focused, setFocused] = useState(false);
   useEffect(() => {
-    if (!focused) return;
+    if (!focused) setEditing(false);
+  }, [focused]);
+  const capturing = focused && (!confirm || editing);
+  useEffect(() => {
+    if (!capturing) return;
     const { KeyEventBridge } = NativeModules;
     // Renamed on the native side (see KeyEventBridgeModule.kt) when VideoPlayer's own left/right
     // capture became conditional on which of its controls is focused - this call site only ever
@@ -787,7 +801,13 @@ const StopsSlider = React.forwardRef<
       if (action !== "down") return;
       const delta = direction === "right" ? 1 : -1;
       const next = Math.max(0, Math.min(countRef.current - 1, indexRef.current + delta));
-      if (next !== indexRef.current) onChangeRef.current(next);
+      if (next === indexRef.current) return;
+      if (confirmRef.current) {
+        indexRef.current = next;
+        setPending(next);
+      } else {
+        onChangeRef.current(next);
+      }
     });
     return () => {
       sub.remove();
@@ -796,12 +816,27 @@ const StopsSlider = React.forwardRef<
     // Deliberately only depends on `focused` - the ref mirrors above keep this listener reading
     // the latest index/count/onChange without needing to tear it down and resubscribe on every
     // value change, which held-repeat presses would otherwise do many times a second.
-  }, [focused]);
+  }, [capturing]);
+  const confirmRef = useRef(confirm);
+  confirmRef.current = confirm;
 
   return (
     <Focusable
       ref={ref}
       onFocusChange={setFocused}
+      onPress={
+        confirm
+          ? () => {
+              if (!editing) {
+                setPending(index);
+                setEditing(true);
+              } else {
+                setEditing(false);
+                if (pending !== index) onChange(pending);
+              }
+            }
+          : undefined
+      }
       nextFocusUp={nextFocusUp}
       nextFocusDown={nextFocusDown}
       nextFocusLeft={nextFocusLeft}
@@ -810,7 +845,7 @@ const StopsSlider = React.forwardRef<
     >
       {(visualFocused: boolean) => (
         <View style={styles.sliderRow}>
-          <Text style={styles.sliderValue}>{valueLabel}</Text>
+          <Text style={styles.sliderValue}>{confirm && editing && labelFor ? labelFor(pending) : valueLabel}</Text>
           <View style={styles.sliderTrack}>
             <View style={styles.sliderTrackBg} pointerEvents="none" />
             <View style={[styles.sliderTrackFill, visualFocused && styles.sliderTrackFillFocused, { width: `${pct}%` }]} pointerEvents="none" />
