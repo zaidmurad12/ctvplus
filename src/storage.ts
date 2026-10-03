@@ -22,6 +22,10 @@ const KEYS = {
   // Movies/Series browse filters (genre, language, sort) - one entry per type, suffixed ".movie"/".series".
   browseFilters: "cinemana.browseFilters",
   onlyAvailable: "cinemana.onlyAvailable",
+  // Title id -> the Cinemana entry number once found for it (see api.ts findCinemanaMatch).
+  savedMatches: "cinemana.savedMatches",
+  // When this TV last sent the sources' newly added titles to the server (see sourceSync.ts).
+  latestSyncAt: "cinemana.latestSyncAt",
 } as const;
 
 async function loadJson<T>(key: string, fallback: T): Promise<T> {

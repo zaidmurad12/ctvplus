@@ -224,6 +224,19 @@ class KeyEventBridgeModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  // Drops the decoded images Fresco keeps in memory (Home/details posters and backdrops). On
+  // Android 8+ bitmaps live in native memory, and the player screen needs almost none of them -
+  // freeing them when playback starts (and now and then during it) gives the video that headroom
+  // instead of the TV's memory killer ending the app mid-film.
+  @ReactMethod
+  fun clearImageMemory() {
+    UiThreadUtil.runOnUiThread {
+      try {
+        com.facebook.drawee.backends.pipeline.Fresco.getImagePipeline().clearMemoryCaches()
+      } catch (_: Throwable) {}
+    }
+  }
+
   @ReactMethod
   fun setDigitCaptureActive(active: Boolean) {
     digitCaptureActive = active

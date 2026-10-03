@@ -129,3 +129,12 @@ export function fetchCinemanaEpisodes(id: string): Promise<CinemanaEpisode[]> {
 export function fetchCinemanaEpisodeVideos(id: string): Promise<CinemanaVideo[]> {
   return fetchCinemanaVideos(id);
 }
+
+// The source's own "newly added" lists - films and series (series as their root entry).
+export interface CinemanaLatestItem extends CinemanaSearchItem {
+  other_title?: string;
+}
+export function fetchCinemanaLatest(kind: "movie" | "series", page = 0): Promise<CinemanaLatestItem[]> {
+  const method = kind === "series" ? "latestSeries" : "latestMovies";
+  return request<CinemanaLatestItem[] | { data?: CinemanaLatestItem[] }>(`/${method}/level/0/itemsPerPage/24/page/${page}`).then(asArray);
+}

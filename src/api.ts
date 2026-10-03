@@ -18,6 +18,7 @@ import {
 } from "./providers/cinemana";
 import { searchCee, makeCeeId, fetchCeeEpisodes, fetchCeeInfo, fetchCeeVideos, type CeeSearchItem, type CeeInfo } from "./providers/cee";
 import { qualityRank, qualityLabel } from "./quality";
+import { loadJson, saveJson, storageKeys } from "./storage";
 
 const NEW_API_BASE = "https://ctv-platform-backend-afcem6ospa-ww.a.run.app/api/v1";
 export const API_BASE = NEW_API_BASE;
@@ -273,6 +274,28 @@ function cacheMatch(key: string, value: PlaybackMapping): void {
   cinemanaMatchCache.set(key, value);
 }
 
+// Matches found once are kept on the device: some titles drop out of the sources' search from
+// time to time (reported: "وقفة رجالة" played once, then showed no play button on the next visit)
+// while the entry itself still plays - a failed search now falls back to the entry found before.
+const SAVED_MATCHES_MAX = 600;
+type SavedMatch = { nb: string; kind?: "movie" | "series" };
+let savedMatches: Record<string, SavedMatch> | null = null;
+let savedMatchesLoad: Promise<Record<string, SavedMatch>> | null = null;
+function loadSavedMatches(): Promise<Record<string, SavedMatch>> {
+  if (savedMatches) return Promise.resolve(savedMatches);
+  savedMatchesLoad ??= loadJson<Record<string, SavedMatch>>(storageKeys.savedMatches, {}).then((v) => (savedMatches = v ?? {}));
+  return savedMatchesLoad;
+}
+async function rememberMatch(id: string, nb: string, kind?: "movie" | "series"): Promise<void> {
+  const all = await loadSavedMatches();
+  if (all[id]?.nb === nb) return;
+  delete all[id];
+  all[id] = { nb, kind };
+  const keys = Object.keys(all);
+  for (let i = 0; i < keys.length - SAVED_MATCHES_MAX; i++) delete all[keys[i]];
+  saveJson(storageKeys.savedMatches, all);
+}
+
 export function normalizeTitle(value?: string | null): string {
   return (value ?? "")
     .toLocaleLowerCase()
@@ -417,14 +440,22 @@ export async function findCinemanaMatch(movie: Movie): Promise<PlaybackMapping |
   const cached = cinemanaMatchCache.get(movie.id);
   if (cached) return cached;
   const type = movie.type === "series" ? "series" : "movie";
-  try {
-    const match = await searchAndMatch(movie, (query) => searchCinemana(query, type));
-    if (!match || match.nb == null) return null;
-    const playback: PlaybackMapping = { provider: "cinemana", cinemanaId: makeCinemanaId(match.nb), available: true };
+  const fromSaved = async (): Promise<PlaybackMapping | null> => {
+    const saved = (await loadSavedMatches().catch(() => ({}) as Record<string, SavedMatch>))[movie.id];
+    if (!saved) return null;
+    const playback: PlaybackMapping = { provider: "cinemana", cinemanaId: makeCinemanaId(saved.nb), kind: saved.kind, available: true };
     cacheMatch(movie.id, playback);
     return playback;
+  };
+  try {
+    const match = await searchAndMatch(movie, (query) => searchCinemana(query, type));
+    if (!match || match.nb == null) return await fromSaved();
+    const playback: PlaybackMapping = { provider: "cinemana", cinemanaId: makeCinemanaId(match.nb), available: true };
+    cacheMatch(movie.id, playback);
+    rememberMatch(movie.id, String(match.nb)).catch(() => {});
+    return playback;
   } catch {
-    return null;
+    return await fromSaved();
   }
 }
 

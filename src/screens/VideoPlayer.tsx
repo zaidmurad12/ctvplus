@@ -216,6 +216,18 @@ export default function VideoPlayerScreen({
   // work that sat directly on the path of every control press. Now they only change when the link
   // or its 4K-ness actually does.
   const videoSource = React.useMemo(() => ({ uri: url }), [url]);
+  // Frees the decoded posters/backdrops cached from browsing as playback starts, and every few
+  // minutes during it - the memory killer was ending the app mid-film on the 1.5GB TV (native
+  // memory climbing ~13MB a minute into playback). See KeyEventBridgeModule.clearImageMemory.
+  useEffect(() => {
+    const clear = () => NativeModules.KeyEventBridge?.clearImageMemory?.();
+    const first = setTimeout(clear, 1500);
+    const every = setInterval(clear, 3 * 60 * 1000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(every);
+    };
+  }, []);
   const videoBufferConfig = React.useMemo(
     () => ({
       minBufferMs: 15000,

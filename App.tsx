@@ -1,3 +1,4 @@
+import { syncLatestFromSources } from "./src/sourceSync";
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, AppState, BackHandler, Image, NativeModules, findNodeHandle, StatusBar, Text, ToastAndroid, View, StyleSheet } from "react-native";
 import type { SelectedPerson } from "./src/screens/PersonScreen";
@@ -109,12 +110,14 @@ export default function App() {
   }, []);
   // Home's rows re-fetched whenever the setting changes (after the first load), so they hold the
   // newest/most popular available titles rather than a filtered-down 20.
-  const onlyAvailableLoaded = useRef(false);
+  // The value Home's data was last fetched with (null until the startup fetch, which reads the
+  // saved setting itself). Home used to load twice at launch with the setting on - unfiltered,
+  // then filtered - and focus, already on the first card, stayed on that card as it moved down
+  // the "Newest" row (reported as launch focus landing far from the first card).
+  const fetchedWithAvailable = useRef<boolean | null>(null);
   useEffect(() => {
-    if (!onlyAvailableLoaded.current) {
-      onlyAvailableLoaded.current = true;
-      if (!onlyAvailable) return;
-    }
+    if (fetchedWithAvailable.current === null || fetchedWithAvailable.current === onlyAvailable) return;
+    fetchedWithAvailable.current = onlyAvailable;
     fetchMovies()
       .then(setData)
       .catch((err) => console.error("[App] fetchMovies (available setting) failed:", err));
@@ -324,7 +327,13 @@ export default function App() {
     const ceiling = setTimeout(() => {
       if (!cancelled) setDataReady(true);
     }, 12000);
-    fetchMovies()
+    loadJson<boolean>(storageKeys.onlyAvailable, false)
+      .catch(() => false)
+      .then((v) => {
+        setAvailableOnly(!!v);
+        fetchedWithAvailable.current = !!v;
+        return fetchMovies();
+      })
       .then((d) => {
         if (cancelled) return;
         setData(d);
@@ -350,6 +359,18 @@ export default function App() {
   // until someone force-killed and reopened the app. Refetching on a periodic timer covers a
   // long-lived foreground session; refetching when the app comes back to the foreground covers
   // the more common case of the viewer backgrounding it (home button) and returning later.
+  // The sources' newly added titles, sent to the server once a day from this TV (see sourceSync.ts) -
+  // two minutes after launch so it never competes with startup, then rechecked hourly (it only
+  // actually runs once a day).
+  useEffect(() => {
+    const run = () => syncLatestFromSources().catch(() => {});
+    const first = setTimeout(run, 120_000);
+    const hourly = setInterval(run, 60 * 60 * 1000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(hourly);
+    };
+  }, []);
   useEffect(() => {
     const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
     const refresh = () => {

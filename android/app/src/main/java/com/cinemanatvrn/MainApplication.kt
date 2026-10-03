@@ -29,6 +29,17 @@ class MainApplication : Application(), ReactApplication {
     )
   }
 
+  // The system asking for memory back (the TV running low, typically mid-video): decoded images
+  // cached in memory are the cheapest thing to give up - they reload from disk when next shown.
+  override fun onTrimMemory(level: Int) {
+    super.onTrimMemory(level)
+    if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+      try {
+        com.facebook.drawee.backends.pipeline.Fresco.getImagePipeline().clearMemoryCaches()
+      } catch (_: Throwable) {}
+    }
+  }
+
   override fun onCreate() {
     super.onCreate()
     installCrashRecorder()
