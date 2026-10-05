@@ -230,6 +230,8 @@ export default function VideoPlayerScreen({
   // work that sat directly on the path of every control press. Now they only change when the link
   // or its 4K-ness actually does.
   const videoSource = React.useMemo(() => ({ uri: url }), [url]);
+  const subtitleEnabledRef = useRef(subtitleSettings.enabled);
+  subtitleEnabledRef.current = subtitleSettings.enabled;
   // Frees the decoded posters/backdrops cached from browsing as playback starts, and every few
   // minutes during it - the memory killer was ending the app mid-film on the 1.5GB TV (native
   // memory climbing ~13MB a minute into playback). See KeyEventBridgeModule.clearImageMemory.
@@ -1088,7 +1090,17 @@ export default function VideoPlayerScreen({
   // again, the next launch's report shows what was growing (see crashReporter.ts).
   useEffect(() => {
     const trimTimer = setTimeout(trimImageMemory, 1500);
-    const memTimer = setInterval(() => recordPlaybackMemory(`t=${Math.round(currentTimeRef.current / 60)}m`), 60000);
+    // The JS heap is added to each snapshot - native memory kept climbing ~5MB a minute through
+    // playback even with images trimmed, and this tells the next report whether it is JS.
+    const jsHeap = () => {
+      try {
+        const stats = (globalThis as any).HermesInternal?.getInstrumentedStats?.();
+        return stats ? ` js=${Math.round((stats.js_heapSize ?? 0) / 1048576)}/${Math.round((stats.js_allocatedBytes ?? 0) / 1048576)}` : "";
+      } catch {
+        return "";
+      }
+    };
+    const memTimer = setInterval(() => recordPlaybackMemory(`t=${Math.round(currentTimeRef.current / 60)}m${jsHeap()} sub=${subtitleEnabledRef.current ? 1 : 0}`), 60000);
     return () => {
       clearTimeout(trimTimer);
       clearInterval(memTimer);
@@ -1955,7 +1967,10 @@ export default function VideoPlayerScreen({
         // against a currentTime that's at most ~250ms stale instead of up to a full second -
         // reported as subtitles still reading as "not synced" even with a correct offset, since
         // a cue could sit on screen up to a second past where it should have already changed.
-        progressUpdateInterval={250}
+        // 250ms only while subtitles show (cue timing), 1s otherwise: progress events are the one
+        // thing arriving several times a second for the whole film, and native memory climbed
+        // steadily with playback time.
+        progressUpdateInterval={subtitleSettings.enabled ? 500 : 1000}
         // The real streaming URLs are HLS (.m3u8, see server.ts's getRealStreamingServers) -
         // if that playlist actually offers more than one rendition, ExoPlayer's default
         // adaptive selection can pick one higher than this device's decoder or the network can
