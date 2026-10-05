@@ -1362,8 +1362,16 @@ const VIEW_MORE_LIMIT = 100;
 // titles directly, so a row still gets its full 20 (in the same order) and "View more" its full list,
 // instead of the app hiding most of a row after the fact. Set by App before Home is (re)fetched.
 let availableOnly = false;
+// Resolved once App has read the saved setting - every Home load waits for it (at most 3s), so no
+// load at launch (an app-became-active refresh racing the setting's read) can fetch the unfiltered
+// lists and show unavailable titles that then vanish when the filtered ones arrive.
+let markAvailableReady: () => void = () => {};
+const availableReady = new Promise<void>((resolve) => {
+  markAvailableReady = resolve;
+});
 export function setAvailableOnly(on: boolean): void {
   availableOnly = on;
+  markAvailableReady();
 }
 function withAvailable(path: string): string {
   if (!availableOnly) return path;
@@ -1470,6 +1478,7 @@ function sectionsToCategories(sections: HomeSectionDto[], builtIn: Record<string
 // The new backend has no single "home" aggregate endpoint yet - this assembles the same shape
 // (hero + a few rails) from plain sorted movie/show lists instead.
 export async function fetchMovies(): Promise<MoviesResponse> {
+  await Promise.race([availableReady, new Promise<void>((resolve) => setTimeout(resolve, 3000))]);
   const [newestMoviesRes, newestShowsRes, popular, topRated, shows, featured, homeSections, bannerMovies, bannerShows] = await Promise.all([
     // "newest" sorts by when the title was added to the catalog, not its actual release date -
     // this rail is labeled "الأحدث" (newest releases) to the viewer, so it needs releaseDate

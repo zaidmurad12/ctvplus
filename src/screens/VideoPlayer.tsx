@@ -112,6 +112,20 @@ function formatTime(totalSeconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+// The resume-point map, read from storage once and then kept in memory: saving during playback
+// used to re-read and re-parse the whole (ever-growing) map from storage every 10 seconds.
+interface WatchProgressEntry {
+  positionSeconds: number;
+  durationSeconds: number;
+  updatedAt: number;
+}
+const WATCH_PROGRESS_MAX = 300;
+let watchProgressMap: Record<string, WatchProgressEntry> | null = null;
+function loadWatchProgressMap(): Promise<Record<string, WatchProgressEntry>> {
+  if (watchProgressMap) return Promise.resolve(watchProgressMap);
+  return loadJson<Record<string, WatchProgressEntry>>(storageKeys.watchProgress, {}).then((map) => (watchProgressMap = watchProgressMap ?? map ?? {}));
+}
+
 export default function VideoPlayerScreen({
   servers,
   movie,
@@ -521,11 +535,6 @@ export default function VideoPlayerScreen({
   // by the player's own onLoad below (seeking has to wait for a real duration to sanity-check
   // against - see there); saved periodically from onProgress and once more on unmount so the
   // last few seconds before closing the player aren't lost between saves.
-  interface WatchProgressEntry {
-    positionSeconds: number;
-    durationSeconds: number;
-    updatedAt: number;
-  }
   const pendingResumeRef = useRef<WatchProgressEntry | null>(null);
   const lastProgressSaveRef = useRef(0);
   // See progressUpdateInterval's own comment below - the *state* update that re-renders the
@@ -544,7 +553,7 @@ export default function VideoPlayerScreen({
   const [cueText, setCueText] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    loadJson<Record<string, WatchProgressEntry>>(storageKeys.watchProgress, {}).then((map) => {
+    loadWatchProgressMap().then((map) => {
       if (cancelled) return;
       pendingResumeRef.current = map[syncStorageKey] ?? null;
     });
@@ -557,14 +566,15 @@ export default function VideoPlayerScreen({
     // near-the-end position) is what makes a completed title start over next time instead of
     // resuming one scene from its own credits.
     const nearEnd = durationSeconds > 0 && (positionSeconds > durationSeconds * 0.98 || positionSeconds > durationSeconds - 30);
-    loadJson<Record<string, WatchProgressEntry>>(storageKeys.watchProgress, {}).then((map) => {
-      const next = { ...map };
-      if (nearEnd || positionSeconds < 10) {
-        delete next[syncStorageKey];
-      } else {
-        next[syncStorageKey] = { positionSeconds, durationSeconds, updatedAt: Date.now() };
+    loadWatchProgressMap().then((map) => {
+      delete map[syncStorageKey];
+      if (!nearEnd && positionSeconds >= 10) {
+        map[syncStorageKey] = { positionSeconds, durationSeconds, updatedAt: Date.now() };
       }
-      saveJson(storageKeys.watchProgress, next);
+      // Oldest entries dropped past the cap - the map is rewritten on every save during playback.
+      const keys = Object.keys(map);
+      for (let i = 0; i < keys.length - WATCH_PROGRESS_MAX; i++) delete map[keys[i]];
+      saveJson(storageKeys.watchProgress, map);
     });
   };
   useEffect(() => {
@@ -1847,7 +1857,7 @@ export default function VideoPlayerScreen({
           // Throttled to roughly once every 10s of real time, independent of how often
           // onProgress itself now fires - far more often than a resume point needs to be this
           // fresh for.
-          if (now - lastProgressSaveRef.current >= 10000) {
+          if (now - lastProgressSaveRef.current >= 30000) {
             lastProgressSaveRef.current = now;
             saveWatchProgress(data.currentTime, data.seekableDuration);
           }

@@ -585,8 +585,12 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
             Sizing the image to its real 16:9 aspect ratio and pinning it to top:0 means any
             excess height only ever comes off the bottom (clipped by `hero`'s own overflow:hidden
             below) instead of the top edge ever moving. */}
+        {/* While the player (or the artist page) covers this page, its big pictures are let go -
+            they stayed decoded in memory for the whole film, part of what the TV's memory killer
+            ended the app over mid-playback. The page itself stays built, so leaving the player
+            is as quick as before; the pictures reload from the disk cache. */}
         <Image
-          source={{ uri: posterUrl(movie.backdrop || movie.poster, "w1280") }}
+          source={covered ? undefined : { uri: posterUrl(movie.backdrop || movie.poster, "w1280") }}
           style={styles.heroBackdrop}
           resizeMode="cover"
           fadeDuration={0}
@@ -597,7 +601,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
           style={StyleSheet.absoluteFill}
         />
 
-        <Image source={{ uri: posterUrl(movie.poster || movie.backdrop, "w780") }} style={[styles.poster, movie.type === "series" && styles.posterSeries]} fadeDuration={0} />
+        <Image source={covered ? undefined : { uri: posterUrl(movie.poster || movie.backdrop, "w780") }} style={[styles.poster, movie.type === "series" && styles.posterSeries]} fadeDuration={0} />
 
         <View style={[styles.infoCol, movie.type === "series" && styles.infoColSeries]}>
           {movie.logoUrl || movie.titleLogo ? (
@@ -790,7 +794,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                   resolvingEpisodeId={resolvingEpisodeId}
                   clamp={episodesClamp}
                   scrollRef={episodeScrollRef}
-                  visibleImages={visibleEpisodeImages}
+                  visibleImages={covered ? 0 : visibleEpisodeImages}
                   onPlayEpisode={stablePlayEpisode}
                   onFocusScroll={stableScrollToBottom}
                   isEpisodeWatched={isEpisodeWatched}
