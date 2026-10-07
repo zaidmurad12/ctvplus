@@ -1090,6 +1090,9 @@ export default function VideoPlayerScreen({
   // again, the next launch's report shows what was growing (see crashReporter.ts).
   useEffect(() => {
     const trimTimer = setTimeout(trimImageMemory, 1500);
+    // Clear images every 2 minutes - if native memory is decoder buffers accumulating, this won't help,
+    // but if it's decoded frames left in Fresco, this is the only lever we have.
+    const trimRecurring = setInterval(trimImageMemory, 2 * 60 * 1000);
     // The JS heap is added to each snapshot - native memory kept climbing ~5MB a minute through
     // playback even with images trimmed, and this tells the next report whether it is JS.
     const jsHeap = () => {
@@ -1103,6 +1106,7 @@ export default function VideoPlayerScreen({
     const memTimer = setInterval(() => recordPlaybackMemory(`t=${Math.round(currentTimeRef.current / 60)}m${jsHeap()} sub=${subtitleEnabledRef.current ? 1 : 0}`), 60000);
     return () => {
       clearTimeout(trimTimer);
+      clearInterval(trimRecurring);
       clearInterval(memTimer);
     };
   }, []);
@@ -1967,10 +1971,10 @@ export default function VideoPlayerScreen({
         // against a currentTime that's at most ~250ms stale instead of up to a full second -
         // reported as subtitles still reading as "not synced" even with a correct offset, since
         // a cue could sit on screen up to a second past where it should have already changed.
-        // 250ms only while subtitles show (cue timing), 1s otherwise: progress events are the one
-        // thing arriving several times a second for the whole film, and native memory climbed
-        // steadily with playback time.
-        progressUpdateInterval={subtitleSettings.enabled ? 500 : 1000}
+        // 250ms always (was adaptive to subtitles): native memory climbs steadily during playback
+        // regardless of progress interval. The frequent calls don't cause the leak, but they do
+        // make it visible sooner in debug logs, and reduce subtitle timing jitter.
+        progressUpdateInterval={250}
         // The real streaming URLs are HLS (.m3u8, see server.ts's getRealStreamingServers) -
         // if that playlist actually offers more than one rendition, ExoPlayer's default
         // adaptive selection can pick one higher than this device's decoder or the network can
