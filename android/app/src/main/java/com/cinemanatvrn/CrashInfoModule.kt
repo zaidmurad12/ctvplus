@@ -92,8 +92,12 @@ class CrashInfoModule(private val reactContext: ReactApplicationContext) :
    * trail survives, and collect() hands it to the next launch's crash report - showing which part
    * (Java heap, native heap, graphics) was growing before the kill.
    */
+  // Resolves with the native heap in MB (0 if unreadable) - the player's memory guard acts on it.
+  // thr/fd/sock/rx/nalloc tell apart what the native heap's steady climb during playback is:
+  // leaked threads or connections, retained downloaded data (grows with rx), or freed-but-unreturned
+  // heap (nalloc flat while native grows).
   @ReactMethod
-  fun recordMemory(label: String) {
+  fun recordMemory(label: String, promise: Promise) {
     try {
       val mi = Debug.MemoryInfo()
       Debug.getMemoryInfo(mi)
@@ -101,13 +105,21 @@ class CrashInfoModule(private val reactContext: ReactApplicationContext) :
       val sys = ActivityManager.MemoryInfo()
       am.getMemoryInfo(sys)
       fun mb(kb: String?): Long = (kb?.toLongOrNull() ?: 0L) / 1024
+      val native = mb(mi.getMemoryStat("summary.native-heap"))
+      val threads = File("/proc/self/task").list()?.size ?: -1
+      val fds = File("/proc/self/fd").listFiles()
+      val sockets = fds?.count { f -> try { android.system.Os.readlink(f.path).startsWith("socket:") } catch (_: Exception) { false } } ?: -1
+      val rx = android.net.TrafficStats.getUidRxBytes(android.os.Process.myUid()) / (1024 * 1024)
       val line = "$label pss=${mi.totalPss / 1024} java=${mb(mi.getMemoryStat("summary.java-heap"))} " +
-          "native=${mb(mi.getMemoryStat("summary.native-heap"))} gfx=${mb(mi.getMemoryStat("summary.graphics"))} " +
+          "native=$native nalloc=${Debug.getNativeHeapAllocatedSize() / (1024 * 1024)} " +
+          "thr=$threads fd=${fds?.size ?: -1} sock=$sockets rx=${rx}MB " +
           "sysAvail=${sys.availMem / (1024 * 1024)}/${sys.totalMem / (1024 * 1024)}MB low=${sys.lowMemory}"
       val prefs = reactContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
       val trail = (prefs.getString(KEY_MEMORY_TRAIL, "") ?: "").split("\n").filter { it.isNotBlank() }
       prefs.edit().putString(KEY_MEMORY_TRAIL, (trail + line).takeLast(MAX_TRAIL).joinToString("\n")).apply()
+      promise.resolve(native.toDouble())
     } catch (_: Exception) {
+      promise.resolve(0.0)
     }
   }
 
@@ -148,6 +160,6 @@ class CrashInfoModule(private val reactContext: ReactApplicationContext) :
     private const val PREFS = "crash_info"
     private const val KEY_LAST_EXIT = "last_exit_timestamp"
     private const val KEY_MEMORY_TRAIL = "memory_trail"
-    private const val MAX_TRAIL = 15
+    private const val MAX_TRAIL = 20
   }
 }

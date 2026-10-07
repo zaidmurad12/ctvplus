@@ -66,8 +66,12 @@ export function installCrashReporting(): void {
 
 // Called once a minute while a video plays (see VideoPlayer): appends a memory snapshot to a short
 // local trail that the next launch reports if this session gets killed.
-export function recordPlaybackMemory(label: string): void {
-  NativeModules.CrashInfo?.recordMemory?.(label);
+// Resolves with the native heap in MB (0 when unknown).
+export function recordPlaybackMemory(label: string): Promise<number> {
+  const call = NativeModules.CrashInfo?.recordMemory?.(label);
+  return Promise.resolve(call)
+    .then((mb) => (typeof mb === "number" ? mb : 0))
+    .catch(() => 0);
 }
 
 // Drops decoded images from memory (see CrashInfoModule.trimImageMemory) - called as playback starts.

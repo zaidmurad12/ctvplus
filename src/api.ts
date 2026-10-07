@@ -934,7 +934,7 @@ function cumulativeOffsets(counts: Map<number, number>): Map<number, number> {
 function pickEpisodeLookup(
   providerEpisodes: ProviderEpisodeRow[],
   seasons: Season[],
-): (seasonNumber: number, episodeNumber: number) => ProviderEpisodeRow | undefined {
+): ((seasonNumber: number, episodeNumber: number) => ProviderEpisodeRow | undefined) & { absolute: boolean } {
   const direct = new Map<string, ProviderEpisodeRow>();
   const providerCounts = new Map<number, number>();
   for (const row of providerEpisodes) {
@@ -964,7 +964,78 @@ function pickEpisodeLookup(
       if (byAbsolute(season.number, episode.number)) absoluteHits += 1;
     }
   }
-  return absoluteHits > directHits ? byAbsolute : byDirect;
+  return absoluteHits > directHits ? Object.assign(byAbsolute, { absolute: true }) : Object.assign(byDirect, { absolute: false });
+}
+
+// Episodes a source has that our catalog doesn't (TMDB hasn't listed them yet, or importing them
+// failed) - shown anyway, built from the source's own title/image/story, instead of being dropped.
+// Same layout as the matching above: the source's own season:episode when that layout matched, or
+// continued after our last episode when the source numbers the whole run continuously.
+function addSourceOnlyEpisodes(
+  providerEpisodes: ProviderEpisodeRow[],
+  seasons: Season[],
+  claimed: Set<ProviderEpisodeRow>,
+  provider: "cee" | "cinemana",
+  absoluteLayout: boolean,
+  showId: string,
+): void {
+  const ownTotal = seasons.filter((x) => x.number > 0).reduce((n, x) => n + x.episodes.length, 0);
+  const providerCounts = new Map<number, number>();
+  for (const row of providerEpisodes) {
+    const sn = cinemanaNumber(row.season) ?? 1;
+    if (sn > 0) providerCounts.set(sn, (providerCounts.get(sn) ?? 0) + 1);
+  }
+  const providerOffsets = cumulativeOffsets(providerCounts);
+  const sorted = [...providerEpisodes].sort(
+    (a, b) =>
+      (cinemanaNumber(a.season) ?? 1) - (cinemanaNumber(b.season) ?? 1) ||
+      (cinemanaNumber(a.episodeNummer) ?? 0) - (cinemanaNumber(b.episodeNummer) ?? 0),
+  );
+  for (const row of sorted) {
+    if (claimed.has(row) || row.nb == null) continue;
+    const rowSeason = cinemanaNumber(row.season) ?? 1;
+    const rowEpisode = cinemanaNumber(row.episodeNummer) ?? 0;
+    if (rowSeason <= 0 || rowEpisode <= 0) continue;
+    let seasonNumber = rowSeason;
+    let episodeNumber = rowEpisode;
+    if (absoluteLayout) {
+      const position = (providerOffsets.get(rowSeason) ?? 0) + rowEpisode;
+      const last = seasons.filter((x) => x.number > 0).sort((a, b) => b.number - a.number)[0];
+      if (!last || position <= ownTotal) continue;
+      seasonNumber = last.number;
+      episodeNumber = Math.max(0, ...last.episodes.map((e) => e.number)) + 1;
+    }
+    let season = seasons.find((x) => x.number === seasonNumber);
+    if (!season) {
+      season = {
+        id: `${showId}:source-season:${seasonNumber}`,
+        number: seasonNumber,
+        titleAr: `الموسم ${seasonNumber}`,
+        titleEn: `Season ${seasonNumber}`,
+        episodes: [],
+      };
+      seasons.push(season);
+      seasons.sort((a, b) => a.number - b.number);
+    }
+    if (season.episodes.some((e) => e.number === episodeNumber)) continue;
+    const sourceId = provider === "cee" ? makeCeeId(row.nb) : makeCinemanaId(row.nb);
+    season.episodes.push({
+      id: `source:${sourceId}`,
+      number: episodeNumber,
+      titleAr: row.ar_title?.trim() || row.en_title?.trim() || `الحلقة ${episodeNumber}`,
+      titleEn: row.en_title?.trim() || `Episode ${episodeNumber}`,
+      thumbnail: row.imgThumbObjUrl || row.imgObjUrl,
+      storyAr: row.ar_content,
+      storyEn: row.en_content,
+      hasPlayableStream: true,
+      servers: [],
+      ...(provider === "cee" ? { ceeId: sourceId } : { cinemanaId: sourceId }),
+      subtitles: (row.translations ?? [])
+        .map((track) => ({ language: track.name || "", url: track.file || track.url || "", defaultOffsetMs: 0, defaultSpeed: 1 }))
+        .filter((track) => !!track.url),
+    });
+    season.episodes.sort((a, b) => a.number - b.number);
+  }
 }
 
 // MovieDetailsScreen renders the active season's full episode list (titles/thumbnails/runtime)
@@ -1041,11 +1112,13 @@ export async function fetchShowDetail(id: string, playback?: PlaybackMapping, pl
     try {
       const providerEpisodes = source.provider === "cee" ? await fetchCeeEpisodes(sourceId) : await fetchCinemanaEpisodes(sourceId);
       const lookupEpisode = pickEpisodeLookup(providerEpisodes, seasons);
+      const claimed = new Set<ProviderEpisodeRow>();
       for (const season of seasons) {
         for (const episode of season.episodes) {
+          const providerEpisode = lookupEpisode(season.number, episode.number);
+          if (providerEpisode) claimed.add(providerEpisode);
           const alreadyHasThisSource = source.provider === "cee" ? !!episode.ceeId : !!episode.cinemanaId;
           if (alreadyHasThisSource) continue;
-          const providerEpisode = lookupEpisode(season.number, episode.number);
           if (providerEpisode?.nb != null) {
             if (source.provider === "cee") episode.ceeId = makeCeeId(providerEpisode.nb);
             else episode.cinemanaId = makeCinemanaId(providerEpisode.nb);
@@ -1061,6 +1134,7 @@ export async function fetchShowDetail(id: string, playback?: PlaybackMapping, pl
           }
         }
       }
+      addSourceOnlyEpisodes(providerEpisodes, seasons, claimed, source.provider === "cee" ? "cee" : "cinemana", lookupEpisode.absolute, id);
     } catch {
       // One source being unavailable/mismatched shouldn't block the others.
     }

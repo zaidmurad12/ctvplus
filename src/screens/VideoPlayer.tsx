@@ -90,6 +90,8 @@ const AGE_RATING_DISPLAY_MS = 6000;
 // the unavailable screen, and how long each pause is.
 const MAX_MIDSTREAM_RETRIES = 6;
 const MIDSTREAM_RETRY_DELAY_MS = 2000;
+// Native heap (MB) past which the playing <Video> is rebuilt in place - see the memory guard.
+const NATIVE_RELOAD_MB = 230;
 // How far the episode row's own dark scrim extends above its measured height (see its own
 // comment) - gives the fade-to-transparent room to finish above the season indicator instead of
 // still visibly fading right behind it.
@@ -1083,6 +1085,8 @@ export default function VideoPlayerScreen({
   // updated every tick is immune to that: `.current` is always the latest value regardless of
   // which render's closure is reading it.
   const currentTimeRef = useRef(0);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   // Memory during playback. Reported: the app killed every ~10 minutes mid-film, at the same
   // ~250-275MB each time, by the TV's own memory killer (exit reason SIGNALED, foreground) - the
   // video decoder needs room and the biggest process goes. Images decoded while browsing are
@@ -1103,7 +1107,36 @@ export default function VideoPlayerScreen({
         return "";
       }
     };
-    const memTimer = setInterval(() => recordPlaybackMemory(`t=${Math.round(currentTimeRef.current / 60)}m${jsHeap()} sub=${subtitleEnabledRef.current ? 1 : 0}`), 60000);
+    // Memory guard. The native heap climbs ~6MB per minute of playback whatever is on screen (JS and
+    // Java heaps stay flat, image trims change nothing) until the TV kills the app at ~300MB, 20-30
+    // minutes in. Past NATIVE_RELOAD_MB the player is rebuilt in place at the same position - a
+    // second of loading - which releases everything the playback engine and its connections hold.
+    // If a rebuild didn't bring the native heap down, it isn't repeated (the trail shows that too).
+    let lastReloadAt = 0;
+    let nativeBeforeReload = 0;
+    let reloadHelps = true;
+    const memTimer = setInterval(() => {
+      const label = `t=${Math.round(currentTimeRef.current / 60)}m${jsHeap()} sub=${subtitleEnabledRef.current ? 1 : 0}`;
+      recordPlaybackMemory(label).then((nativeMb) => {
+        if (!nativeMb) return;
+        if (nativeBeforeReload && Date.now() - lastReloadAt < 3 * 60 * 1000) {
+          if (nativeMb > nativeBeforeReload - 30) reloadHelps = false;
+          nativeBeforeReload = 0;
+        }
+        if (!reloadHelps || nativeMb < NATIVE_RELOAD_MB || Date.now() - lastReloadAt < 8 * 60 * 1000) return;
+        if (!hasEverPlayedRef.current || pausedRef.current || loadingRef.current) return;
+        if (subtitlePanelOpenRef.current || qualityPanelOpenRef.current || episodeRowOpenRef.current) return;
+        lastReloadAt = Date.now();
+        nativeBeforeReload = nativeMb;
+        recordPlaybackMemory(`reload@${nativeMb}MB`);
+        pendingResumeRef.current = {
+          positionSeconds: currentTimeRef.current,
+          durationSeconds: latestProgressRef.current?.seekableDuration ?? 0,
+          updatedAt: Date.now(),
+        };
+        setRetryToken((t) => t + 1);
+      });
+    }, 60000);
     return () => {
       clearTimeout(trimTimer);
       clearInterval(trimRecurring);
@@ -1971,10 +2004,9 @@ export default function VideoPlayerScreen({
         // against a currentTime that's at most ~250ms stale instead of up to a full second -
         // reported as subtitles still reading as "not synced" even with a correct offset, since
         // a cue could sit on screen up to a second past where it should have already changed.
-        // 250ms always (was adaptive to subtitles): native memory climbs steadily during playback
-        // regardless of progress interval. The frequent calls don't cause the leak, but they do
-        // make it visible sooner in debug logs, and reduce subtitle timing jitter.
-        progressUpdateInterval={250}
+        // 500ms while subtitles show (cue timing), 1s otherwise - fewer events crossing the bridge
+        // over a whole film.
+        progressUpdateInterval={subtitleSettings.enabled ? 500 : 1000}
         // The real streaming URLs are HLS (.m3u8, see server.ts's getRealStreamingServers) -
         // if that playlist actually offers more than one rendition, ExoPlayer's default
         // adaptive selection can pick one higher than this device's decoder or the network can
