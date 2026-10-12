@@ -99,10 +99,12 @@ const NATIVE_RELOAD_MB = 230;
 const EPISODE_SCRIM_EXTRA_TOP = s(110);
 // Repeat delay for press-and-hold seeking - fast enough to read as continuous seeking, not
 // individual disconnected 10s jumps.
-const HOLD_SEEK_INTERVAL_MS = 350;
+// A quarter-second repeat makes held remote keys feel continuous while keeping native seek calls
+// below four per second (important for HLS streams, where each seek may trigger a new segment).
+const HOLD_SEEK_INTERVAL_MS = 250;
 // Seconds jumped per tick, indexed by how many ticks the hold has already run for (last value
 // repeats once the hold outlasts the array) - see startHoldSeek.
-const HOLD_SEEK_STEPS = [10, 10, 10, 20, 20, 30, 30, 45, 60];
+const HOLD_SEEK_STEPS = [10, 10, 10, 15, 20, 25, 30, 40, 50];
 
 function formatTime(totalSeconds: number): string {
   if (!isFinite(totalSeconds) || totalSeconds < 0) return "0:00";
@@ -900,6 +902,7 @@ export default function VideoPlayerScreen({
   const [ytPaused, setYtPaused] = useState(false);
   const [ytCurrentTime, setYtCurrentTime] = useState(0);
   const [ytDuration, setYtDuration] = useState(0);
+  const ytDurationRef = useRef(0);
   // Purely diagnostic - the last "diag:"/"error:" message this page's own WebView bridge reported
   // (see the html script's own comment on why this needed adding at all), shown as a small line on
   // the shared "not available" screen only while this was actually a YouTube playback, specifically
@@ -1199,7 +1202,11 @@ export default function VideoPlayerScreen({
       // correction, but covering a long movie's runtime doesn't take forever either.
       const step = HOLD_SEEK_STEPS[Math.min(seekHoldTickRef.current, HOLD_SEEK_STEPS.length - 1)];
       seekHoldTickRef.current += 1;
-      const next = Math.max(0, (seekHoldTargetRef.current ?? 0) + direction * step);
+      const seekDuration = youtubeIdRef.current
+        ? ytDurationRef.current
+        : latestProgressRef.current?.seekableDuration ?? 0;
+      const requested = (seekHoldTargetRef.current ?? 0) + direction * step;
+      const next = Math.max(0, seekDuration > 0 ? Math.min(seekDuration, requested) : requested);
       seekHoldTargetRef.current = next;
       wake();
       // YouTube's own 250ms getCurrentTime() poll (see onMessage's own "time" handling) turns out
@@ -1578,6 +1585,7 @@ export default function VideoPlayerScreen({
                   lastYtProgressStateRef.current = Date.now();
                   setYtCurrentTime(t);
                   setYtDuration(data.duration || 0);
+                  ytDurationRef.current = data.duration || 0;
                 }
                 const nextCue = subtitleSettings.enabled
                   ? activeCueText(cues, (t - subtitleOffsetMs / 1000) / subtitleSpeed)
