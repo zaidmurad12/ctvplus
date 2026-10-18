@@ -1301,7 +1301,7 @@ export default function VideoPlayerScreen({
         // The seek bar's own hold-to-seek still needs the "up" (key-release) half of a left/right
         // press even while the episode row is open - the row itself has nothing analogous to
         // release-handle, so only forward this when the row isn't the one currently active.
-        if (!episodeRowOpenRef.current && activeControlRef.current === "seekBar") {
+        if (!episodeRowOpenRef.current && (activeControlRef.current === "seekBar" || activeControlRef.current === "playPause")) {
           if (direction === "left" || direction === "right") stopHoldSeek();
         }
         return;
@@ -1341,22 +1341,26 @@ export default function VideoPlayerScreen({
       }
 
       const current = activeControlRef.current;
-      // Real seeking only ever happens while the seek bar itself is the active control -
-      // everywhere else left/right just move between play/pause and the subtitles button below.
-      if (current === "seekBar" && (direction === "left" || direction === "right")) {
+      // On the lower player controls, left/right always seek. Settings are reached vertically
+      // from the seek bar so moving across the video never unexpectedly jumps to a top corner.
+      if ((current === "seekBar" || current === "playPause") && (direction === "left" || direction === "right")) {
         startHoldSeek(direction === "right" ? 1 : -1);
         return;
       }
       wake();
-      if (direction === "up" && current !== "seekBar") setActiveControl("seekBar");
+      if (direction === "up" && current === "playPause") setActiveControl("seekBar");
+      else if (direction === "up" && current === "seekBar") {
+        setActiveControl(qualityOptions.length > 0 ? "quality" : "subtitles");
+      }
+      else if (direction === "down" && (current === "quality" || current === "subtitles")) setActiveControl("seekBar");
       else if (direction === "down" && current === "seekBar") setActiveControl("playPause");
       // Spatial order left-to-right is playPause, quality, subtitles (see qualityBtnFloat's own
       // comment on why it sits one button-width-plus-gap left of the subtitles button) - left/
       // right walk that same order regardless of which of the three is currently active.
       else if (direction === "left" && current === "subtitles") setActiveControl("quality");
-      else if (direction === "left" && current === "quality") setActiveControl("playPause");
+      else if (direction === "left" && current === "quality") setActiveControl("subtitles");
       else if (direction === "right" && current === "playPause") setActiveControl("quality");
-      else if (direction === "right" && current === "quality") setActiveControl("subtitles");
+      else if (direction === "right" && current === "subtitles") setActiveControl("quality");
       // Down from play/pause opens the row instead of being a no-op, exactly like pressing down
       // to reveal a video's description/playlist below it - guarded by hasEpisodesListRef so a
       // movie (no seasons) never does anything on this press.
