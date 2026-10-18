@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { View, Text, Image, ScrollView, ActivityIndicator, Pressable, StyleSheet, Animated } from "react-native";
+import { View, Text, Image, ScrollView, ActivityIndicator, Pressable, StyleSheet, Animated, useWindowDimensions } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import { Check, Play, ChevronUp, ChevronDown } from "lucide-react-native";
 import type { Episode, Season } from "../api";
@@ -28,8 +28,8 @@ interface Props {
   onHeightChange?: (height: number) => void;
 }
 
-const CARD_WIDTH = 300;
-const CARD_GAP = 18;
+const CARD_WIDTH = 270;
+const CARD_GAP = 14;
 // Widened (was 24) - a focused card's own border had nowhere to grow into right at either edge
 // of this row, reading as the highlight getting clipped there (the same fix already applied to
 // MovieDetailsScreen's own season/episode/cast rows, which don't share this component).
@@ -63,11 +63,33 @@ function EpisodeRow({
   onHeightChange,
 }: Props) {
   const scrollRef = useRef<any>(null);
+  const scrollXRef = useRef(0);
+  const previousSeasonIdRef = useRef(season.id);
+  const { width: viewportWidth } = useWindowDimensions();
 
   useEffect(() => {
-    const x = Math.max(0, LIST_PADDING + activeIndex * (s(CARD_WIDTH) + s(CARD_GAP)) - s(24));
-    scrollRef.current?.scrollTo({ x, animated: true });
-  }, [activeIndex, season.id]);
+    if (previousSeasonIdRef.current !== season.id) {
+      previousSeasonIdRef.current = season.id;
+      scrollXRef.current = 0;
+      scrollRef.current?.scrollTo({ x: 0, animated: false });
+      return;
+    }
+
+    const cardLeft = s(LIST_PADDING) + activeIndex * (s(CARD_WIDTH) + s(CARD_GAP));
+    const cardRight = cardLeft + s(CARD_WIDTH);
+    const visibleLeft = scrollXRef.current + s(LIST_PADDING);
+    const visibleRight = scrollXRef.current + viewportWidth - s(LIST_PADDING);
+    let nextX = scrollXRef.current;
+    if (cardLeft < visibleLeft) nextX = Math.max(0, cardLeft - s(LIST_PADDING));
+    else if (cardRight > visibleRight) nextX = cardRight - viewportWidth + s(LIST_PADDING);
+
+    // Keep focus movement inside the visible cards free of scroll animation. Only scroll at the
+    // row edges, so held D-pad input doesn't queue a separate full-card animation per press.
+    if (nextX !== scrollXRef.current) {
+      scrollXRef.current = nextX;
+      scrollRef.current?.scrollTo({ x: nextX, animated: true });
+    }
+  }, [activeIndex, season.id, viewportWidth]);
 
   // Slides the whole card row in from below (moving to a later/"down" season) or from above
   // (moving to an earlier/"up" one) instead of just hard-cutting to the new season's cards -
@@ -111,6 +133,7 @@ function EpisodeRow({
           horizontal
           showsHorizontalScrollIndicator={false}
           scrollEnabled={false}
+          removeClippedSubviews
           contentContainerStyle={styles.list}
         >
           {season.episodes.map((ep, i) => {
