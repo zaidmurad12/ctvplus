@@ -3155,10 +3155,12 @@ const styles = StyleSheet.create({
   // both the control bar and (once open) the episode row, instead of each drawing its own.
   bottomScrim: { position: "absolute", left: 0, right: 0, bottom: 0 },
   hidden: { opacity: 0 },
-  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: s(20) },
-  headerLeft: { flex: 1 },
+  // Pin each group to a physical screen corner; relying on row order/flex direction made the
+  // logo and settings swap sides on some Arabic TV builds.
+  headerRow: { position: "relative", width: "100%", height: s(60) },
+  headerLeft: { position: "absolute", left: 0, top: 0 },
   topSettingsRow: { flexDirection: "row", alignItems: "center", gap: s(12) },
-  headerRight: { alignItems: "flex-end", gap: s(6), maxWidth: "60%" },
+  headerRight: { position: "absolute", right: 0, top: 0, alignItems: "flex-end", gap: s(6), maxWidth: "60%" },
   playerLogo: { marginBottom: s(4) },
   // Stands in for a missing title logo (s(50) tall) - enlarged from fs(18), then 26, then 30, per request.
   title: { color: "#fff", fontSize: fs(32), fontFamily: font.extraBold },
