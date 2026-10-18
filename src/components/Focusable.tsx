@@ -115,8 +115,8 @@ const Focusable = React.forwardRef<View, Props>(function Focusable(
       Animated.spring(scale, {
         toValue: value,
         useNativeDriver: true,
-        speed: 24,
-        bounciness: 6,
+        speed: 28,
+        bounciness: 4,
       }).start();
     },
     [onFocusChange, scale, scaleTo]

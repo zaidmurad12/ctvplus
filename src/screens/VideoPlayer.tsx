@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, ActivityIndicator, StyleSheet, NativeEventEmitter, NativeModules, findNodeHandle, Animated, ToastAndroid } from "react-native";
+import { View, Text, Image, ActivityIndicator, StyleSheet, NativeEventEmitter, NativeModules, findNodeHandle, Animated, ToastAndroid } from "react-native";
 import { WebView } from "react-native-webview";
 import LinearGradient from "react-native-linear-gradient";
 import Video, { BufferingStrategyType, OnLoadData, OnProgressData, VideoRef } from "react-native-video";
@@ -27,7 +27,7 @@ import { isRtlText } from "../rtl";
 import { pushBackHandler } from "../backStack";
 import { loadJson, saveJson, storageKeys } from "../storage";
 import { recordPlaybackMemory, trimImageMemory } from "../crashReporter";
-import { Lang, ageRatingDescription, ageRatingColor, countryName, languageName, genreName } from "../i18n";
+import { Lang, ageRatingDescription, ageRatingColor } from "../i18n";
 
 interface Props {
   servers: StreamServer[];
@@ -101,10 +101,10 @@ const EPISODE_SCRIM_EXTRA_TOP = s(110);
 // individual disconnected 10s jumps.
 // A quarter-second repeat makes held remote keys feel continuous while keeping native seek calls
 // below four per second (important for HLS streams, where each seek may trigger a new segment).
-const HOLD_SEEK_INTERVAL_MS = 250;
+const HOLD_SEEK_INTERVAL_MS = 200;
 // Seconds jumped per tick, indexed by how many ticks the hold has already run for (last value
 // repeats once the hold outlasts the array) - see startHoldSeek.
-const HOLD_SEEK_STEPS = [10, 10, 10, 15, 20, 25, 30, 40, 50];
+const HOLD_SEEK_STEPS = [10, 15, 20, 30, 45, 60, 90];
 
 function formatTime(totalSeconds: number): string {
   if (!isFinite(totalSeconds) || totalSeconds < 0) return "0:00";
@@ -1492,8 +1492,8 @@ export default function VideoPlayerScreen({
   // whether or not there's an episode name to show alongside them.
   const metaText = episode
     ? lang === "ar"
-      ? `${season ? `الموسم ${season.number} • ` : ""}الحلقة ${episode.number}${episode.titleAr ? ": " + episode.titleAr : ""}`
-      : `${season ? `Season ${season.number} • ` : ""}Episode ${episode.number}${episode.titleEn ? ": " + episode.titleEn : ""}`
+      ? `${season ? `الموسم ${season.number} • ` : ""}الحلقة ${episode.number}`
+      : `${season ? `Season ${season.number} • ` : ""}Episode ${episode.number}`
     : null;
 
   // !unavailable matters: this branch used to run unconditionally whenever the URL merely
@@ -1638,45 +1638,30 @@ export default function VideoPlayerScreen({
         />
         <View style={[styles.topBar, barsHidden && styles.hidden]} pointerEvents="box-none">
           <View style={styles.headerRow}>
-            <View style={styles.headerLeft}>
+            <View style={[styles.headerLeft, styles.topSettingsRow]}>
+              <CtrlButton
+                ref={setSubtitlesBtnRef}
+                Icon={Subtitles}
+                forceFocused={activeControl === "subtitles"}
+                onFocus={() => {
+                  if (subtitlePanelOpenRef.current) { closeSubtitlePanel(); return; }
+                  setActiveControl("subtitles");
+                  wake();
+                }}
+                onPress={() => controlsVisible ? openSubtitlePanel() : wake()}
+              />
+            </View>
+            <View style={styles.headerRight}>
               {movie.logoUrl || movie.titleLogo ? (
                 <LogoImage uri={posterUrl(movie.logoUrl || movie.titleLogo, "w780")} height={s(50)} maxWidth={s(280)} style={styles.playerLogo} />
               ) : (
                 <Text style={styles.title} numberOfLines={1}>{title}</Text>
               )}
-            </View>
-            <View style={styles.headerRight}>
-              {/* Season/episode/title - back above the facts row (age/year/genre/...), its
-                  original place, per explicit request reverting an earlier move to under the logo. */}
               {!!metaText && (
                 <Text style={styles.metaText} numberOfLines={1}>
                   {metaText}
                 </Text>
               )}
-              <View style={styles.factsRow}>
-                {!!movie.ageRating && (
-                  <View style={styles.ageBadge}>
-                    <Text style={styles.ageBadgeText}>{movie.ageRating}</Text>
-                  </View>
-                )}
-                {!!movie.year && <Text style={styles.factText}>{movie.year}</Text>}
-                {!!movie.country && <Text style={styles.factText}>{countryName(movie.country, lang)}</Text>}
-                {!!movie.language && <Text style={styles.factText}>{languageName(movie.language, lang)}</Text>}
-                {!!movie.genres?.length && (
-                  <Text style={styles.factText} numberOfLines={1}>
-                    {movie.genres.map((g) => genreName(g, lang)).join(", ")}
-                  </Text>
-                )}
-                {!!movie.quality && <Text style={styles.factText}>{movie.quality}</Text>}
-                {movie.rating != null && (
-                  <View style={styles.imdbRow}>
-                    <View style={styles.imdbBadgeWhite}>
-                      <Text style={styles.imdbBadgeWhiteText}>IMDb</Text>
-                    </View>
-                    <Text style={styles.factRating}>{movie.rating}</Text>
-                  </View>
-                )}
-              </View>
             </View>
           </View>
         </View>
@@ -1756,6 +1741,7 @@ export default function VideoPlayerScreen({
             currentTime={holdSeekPreview ?? ytCurrentTime}
             duration={ytDuration}
             isSeeking={holdSeekPreview != null}
+            previewUri={episode?.thumbnail ? posterUrl(episode.thumbnail, "w342") : undefined}
             focusable={!subtitlePanelOpen}
             forceFocused={activeControl === "seekBar"}
             onFocus={() => {
@@ -1801,29 +1787,6 @@ export default function VideoPlayerScreen({
             background settings and manual offset/speed steppers all apply identically, since both
             branches draw the exact same custom subtitle overlay from the exact same `cues`/
             subtitleOffsetMs/subtitleSpeed. */}
-        <Animated.View style={[styles.subtitlesBtnFloat, barsHidden && styles.hidden]}>
-          <CtrlButton
-            ref={setSubtitlesBtnRef}
-            Icon={Subtitles}
-            forceFocused={activeControl === "subtitles"}
-            onFocus={() => {
-              if (subtitlePanelOpenRef.current) {
-                closeSubtitlePanel();
-                return;
-              }
-              setActiveControl("subtitles");
-              wake();
-            }}
-            onPress={() => {
-              if (!controlsVisible) {
-                wake();
-                return;
-              }
-              openSubtitlePanel();
-            }}
-          />
-        </Animated.View>
-
         {subtitlePanelOpen && (
           <SubtitlePanel
             lang={lang}
@@ -2064,49 +2027,45 @@ export default function VideoPlayerScreen({
       <View style={[styles.topBar, barsHidden && styles.hidden]} pointerEvents="box-none">
         <LinearGradient colors={["rgba(0,0,0,0.7)", "transparent"]} style={StyleSheet.absoluteFill} pointerEvents="none" />
         <View style={styles.headerRow}>
-          <View style={styles.headerLeft}>
+          <View style={[styles.headerLeft, styles.topSettingsRow]}>
+            {qualityOptions.length > 0 && (
+              <CtrlButton
+                ref={setQualityBtnRef}
+                Icon={Settings}
+                forceFocused={activeControl === "quality"}
+                focusable={!subtitlePanelOpen}
+                onFocus={() => {
+                  if (qualityPanelOpenRef.current) { closeQualityPanel(); return; }
+                  setActiveControl("quality");
+                  wake();
+                }}
+                onPress={() => controlsVisible ? openQualityPanel() : wake()}
+              />
+            )}
+            <CtrlButton
+              ref={setSubtitlesBtnRef}
+              Icon={Subtitles}
+              forceFocused={activeControl === "subtitles"}
+              focusable={!qualityPanelOpen}
+              onFocus={() => {
+                if (subtitlePanelOpenRef.current) { closeSubtitlePanel(); return; }
+                setActiveControl("subtitles");
+                wake();
+              }}
+              onPress={() => controlsVisible ? openSubtitlePanel() : wake()}
+            />
+          </View>
+          <View style={styles.headerRight}>
             {movie.logoUrl || movie.titleLogo ? (
               <LogoImage uri={posterUrl(movie.logoUrl || movie.titleLogo, "w780")} height={s(50)} maxWidth={s(280)} style={styles.playerLogo} />
             ) : (
               <Text style={styles.title} numberOfLines={1}>{title}</Text>
             )}
-          </View>
-          <View style={styles.headerRight}>
-            {/* Season/episode/title - back above the facts row, its original place, per explicit
-                request reverting an earlier move to under the logo. */}
             {!!metaText && (
               <Text style={styles.metaText} numberOfLines={1}>
                 {metaText}
               </Text>
             )}
-            {/* Everything folds into this single second line - age rating included, right next
-                to year+country (kept adjacent per request) rather than off on its own. */}
-            <View style={styles.factsRow}>
-              {!!movie.ageRating && (
-                <View style={styles.ageBadge}>
-                  <Text style={styles.ageBadgeText}>{movie.ageRating}</Text>
-                </View>
-              )}
-              {!!movie.year && <Text style={styles.factText}>{movie.year}</Text>}
-              {!!movie.country && <Text style={styles.factText}>{countryName(movie.country, lang)}</Text>}
-              {!!movie.language && <Text style={styles.factText}>{languageName(movie.language, lang)}</Text>}
-              {!!movie.genres?.length && (
-                <Text style={styles.factText} numberOfLines={1}>
-                  {movie.genres.map((g) => genreName(g, lang)).join(", ")}
-                </Text>
-              )}
-              {!!movie.quality && <Text style={styles.factText}>{movie.quality}</Text>}
-              {movie.rating != null && (
-                <View style={styles.imdbRow}>
-                  {/* Same IMDb badge used elsewhere in the app, just recolored white instead
-                      of the brand yellow to match this screen's own black/white palette. */}
-                  <View style={styles.imdbBadgeWhite}>
-                    <Text style={styles.imdbBadgeWhiteText}>IMDb</Text>
-                  </View>
-                  <Text style={styles.factRating}>{movie.rating}</Text>
-                </View>
-              )}
-            </View>
           </View>
         </View>
       </View>
@@ -2160,6 +2119,7 @@ export default function VideoPlayerScreen({
           currentTime={holdSeekPreview ?? currentTime}
           duration={duration}
           isSeeking={holdSeekPreview != null}
+          previewUri={episode?.thumbnail ? posterUrl(episode.thumbnail, "w342") : undefined}
           focusable={!subtitlePanelOpen && !qualityPanelOpen}
           forceFocused={activeControl === "seekBar"}
           onFocus={() => {
@@ -2224,72 +2184,12 @@ export default function VideoPlayerScreen({
           closes it - see onFocus below. That's the one place in this screen real Android focus
           still does meaningful work, since it's about exiting the panel's own real-focus-driven
           navigation, not about moving between the three main controls. */}
-      <Animated.View
-        style={[
-          styles.subtitlesBtnFloat,
-          (barsHidden || episodeRowSeasonNumber !== null) && styles.hidden,
-        ]}
-      >
-        <CtrlButton
-          ref={setSubtitlesBtnRef}
-          Icon={Subtitles}
-          forceFocused={activeControl === "subtitles"}
-          focusable={!qualityPanelOpen}
-          onFocus={() => {
-            if (subtitlePanelOpenRef.current) {
-              closeSubtitlePanel();
-              return;
-            }
-            setActiveControl("subtitles");
-            wake();
-          }}
-          onPress={() => {
-            if (!controlsVisible) {
-              wake();
-              return;
-            }
-            openSubtitlePanel();
-          }}
-        />
-      </Animated.View>
-
       {/* Same floating treatment as the subtitles button above, one button-width-plus-gap to its
           left (see qualityBtnFloat) - manual quality picking, same reasoning throughout for why
           this stays JS-nav-driven and only this button itself keeps real focus while its own
           panel is open. Shown for any title with at least one real playback link of our own (even
           just a single quality - the panel then just confirms which one, per explicit request) -
           only hidden for a YouTube-embedded title, which has no `servers` list to begin with. */}
-      {qualityOptions.length > 0 && (
-        <Animated.View
-          style={[
-            styles.qualityBtnFloat,
-            (barsHidden || episodeRowSeasonNumber !== null) && styles.hidden,
-          ]}
-        >
-          <CtrlButton
-            ref={setQualityBtnRef}
-            Icon={Settings}
-            forceFocused={activeControl === "quality"}
-            focusable={!subtitlePanelOpen}
-            onFocus={() => {
-              if (qualityPanelOpenRef.current) {
-                closeQualityPanel();
-                return;
-              }
-              setActiveControl("quality");
-              wake();
-            }}
-            onPress={() => {
-              if (!controlsVisible) {
-                wake();
-                return;
-              }
-              openQualityPanel();
-            }}
-          />
-        </Animated.View>
-      )}
-
       {/* No button at all - opened by pressing down from play/pause (see onNavKey above),
           literally the same "down reveals what's below the player" gesture YouTube uses, not a
           persistent fourth control. Takes over the bottom bar's own space while open (see
@@ -3058,6 +2958,7 @@ const FocusableSeekBar = React.forwardRef<View, {
   currentTime: number;
   duration: number;
   isSeeking: boolean;
+  previewUri?: string;
   onFocus?: () => void;
   onPress?: () => void;
   nextFocusUp?: number;
@@ -3069,7 +2970,7 @@ const FocusableSeekBar = React.forwardRef<View, {
   // False while the subtitle panel is open - see the panel's own containment comment in
   // VideoPlayerScreen.
   focusable?: boolean;
-}>(function FocusableSeekBar({ currentTime, duration, isSeeking, onFocus, onPress, nextFocusUp, nextFocusDown, forceFocused, focusable }, ref) {
+}>(function FocusableSeekBar({ currentTime, duration, isSeeking, previewUri, onFocus, onPress, nextFocusUp, nextFocusDown, forceFocused, focusable }, ref) {
   const playedPct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   return (
@@ -3090,11 +2991,16 @@ const FocusableSeekBar = React.forwardRef<View, {
             <View style={styles.seekTrack}>
               <View style={styles.seekTrackBg} pointerEvents="none" />
               <View style={[styles.seekTrackFill, focused && styles.seekTrackFillFocused, { width: `${playedPct}%` }]} pointerEvents="none" />
-              {isSeeking && (
+              {isSeeking && previewUri ? (
+                <View style={[styles.seekPreviewWrap, { left: `${playedPct}%` }]} pointerEvents="none">
+                  <Image source={{ uri: previewUri }} style={styles.seekPreviewImage} resizeMode="cover" fadeDuration={0} />
+                  <View style={styles.seekPreviewTime}><Text style={styles.seekBubbleText}>{formatTime(currentTime)}</Text></View>
+                </View>
+              ) : isSeeking ? (
                 <View style={[styles.seekBubble, { left: `${playedPct}%` }]} pointerEvents="none">
                   <Text style={styles.seekBubbleText}>{formatTime(currentTime)}</Text>
                 </View>
-              )}
+              ) : null}
               <View
                 style={[styles.seekThumb, (isSeeking || focused) && styles.seekThumbActive, { left: `${playedPct}%` }]}
                 pointerEvents="none"
@@ -3249,8 +3155,9 @@ const styles = StyleSheet.create({
   // both the control bar and (once open) the episode row, instead of each drawing its own.
   bottomScrim: { position: "absolute", left: 0, right: 0, bottom: 0 },
   hidden: { opacity: 0 },
-  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: s(20) },
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: s(20) },
   headerLeft: { flex: 1 },
+  topSettingsRow: { flexDirection: "row", alignItems: "center", gap: s(12) },
   headerRight: { alignItems: "flex-end", gap: s(6), maxWidth: "60%" },
   playerLogo: { marginBottom: s(4) },
   // Stands in for a missing title logo (s(50) tall) - enlarged from fs(18), then 26, then 30, per request.
@@ -3307,6 +3214,29 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     alignItems: "center",
   },
+  seekPreviewWrap: {
+    position: "absolute",
+    bottom: "100%",
+    marginBottom: s(12),
+    marginLeft: -s(84),
+    width: s(168),
+    height: s(96),
+    borderRadius: s(8),
+    borderWidth: 2,
+    borderColor: "#fff",
+    backgroundColor: "#111",
+    overflow: "hidden",
+  },
+  seekPreviewImage: { width: "100%", height: "100%" },
+  seekPreviewTime: {
+    position: "absolute",
+    right: s(5),
+    bottom: s(5),
+    paddingHorizontal: s(6),
+    paddingVertical: s(3),
+    borderRadius: s(4),
+    backgroundColor: "rgba(0,0,0,0.82)",
+  },
   seekBubbleText: { color: "#000", fontSize: fs(11), fontFamily: font.black },
   controlsRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", marginTop: s(4) },
   episodeHint: { alignItems: "center", marginTop: s(2) },
@@ -3315,10 +3245,10 @@ const styles = StyleSheet.create({
   // play/pause's big circle (s(34)) is how far up from the screen's bottom edge that circle's
   // center sits; this button's own (smaller, non-big) half-height (s(26)) is subtracted back off
   // so its center lands on that same line instead of its top edge.
-  subtitlesBtnFloat: { position: "absolute", right: s(24), bottom: s(32) + s(34) - s(26) },
+  subtitlesBtnFloat: { position: "absolute", left: s(32), top: s(32) },
   // One button-width-plus-gap to the left of the subtitles button (which sits at s(24)) - same
   // row, same floating/independent treatment.
-  qualityBtnFloat: { position: "absolute", right: s(24) + s(52) + s(12), bottom: s(32) + s(34) - s(26) },
+  qualityBtnFloat: { position: "absolute", left: s(32), top: s(32) },
   ctrlBtn: {
     width: s(52),
     height: s(52),
@@ -3338,10 +3268,10 @@ const styles = StyleSheet.create({
   // `bottom` here clears the button's own full height (see subtitlesBtnFloat's own math) plus a
   // small gap, so the panel's content (bottom-aligned via flex-end) grows up and away from it
   // instead of overlapping it.
-  subtitlePanelWrap: { position: "absolute", right: s(24), top: s(32), bottom: s(32) + s(34) - s(26) + s(52) + s(8), justifyContent: "flex-end" },
+  subtitlePanelWrap: { position: "absolute", left: s(96), top: s(92), justifyContent: "flex-start" },
   // Same anchoring as subtitlePanelWrap, just lined up over qualityBtnFloat instead - opens
   // upward from the quality button the same way the subtitle panel does from its own button.
-  qualityPanelWrap: { position: "absolute", right: s(24) + s(52) + s(12), top: s(32), bottom: s(32) + s(34) - s(26) + s(52) + s(8), justifyContent: "flex-end" },
+  qualityPanelWrap: { position: "absolute", left: s(32), top: s(92), justifyContent: "flex-start" },
   // Same fill/border/radius recipe as SettingsScreen's own `card`, but noticeably more see-
   // through - a page-level card can afford to be a near-opaque surface; a panel sitting on top
   // of the video itself reads better staying visibly a layer *over* the picture, not a solid
