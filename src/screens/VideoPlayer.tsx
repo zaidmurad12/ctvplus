@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { View, Text, Image, ActivityIndicator, StyleSheet, NativeEventEmitter, NativeModules, findNodeHandle, Animated, ToastAndroid } from "react-native";
 import { WebView } from "react-native-webview";
 import LinearGradient from "react-native-linear-gradient";
-import Video, { BufferingStrategyType, OnLoadData, OnProgressData, VideoRef } from "react-native-video";
+import Video, { BufferingStrategyType, OnLoadData, OnProgressData, VideoRef, ViewType } from "react-native-video";
 import { Play, Pause, ShieldAlert, Subtitles, Settings, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Check } from "lucide-react-native";
 import EpisodeRow from "../components/EpisodeRow";
 import type { Movie, Season, Episode, StreamServer } from "../api";
@@ -1088,8 +1088,17 @@ export default function VideoPlayerScreen({
   // updated every tick is immune to that: `.current` is always the latest value regardless of
   // which render's closure is reading it.
   const currentTimeRef = useRef(0);
+  const lastNativeProgressAtRef = useRef(Date.now());
+  const lastNativePositionRef = useRef<number | null>(null);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (youtubeIdRef.current || !hasEverPlayedRef.current || pausedRef.current || endedRef.current) return;
+      if (Date.now() - lastNativeProgressAtRef.current >= 4000) setLoading(true);
+    }, 800);
+    return () => clearInterval(timer);
+  }, []);
   // Memory during playback. Reported: the app killed every ~10 minutes mid-film, at the same
   // ~250-275MB each time, by the TV's own memory killer (exit reason SIGNALED, foreground) - the
   // video decoder needs room and the biggest process goes. Images decoded while browsing are
@@ -1358,9 +1367,8 @@ export default function VideoPlayerScreen({
       // comment on why it sits one button-width-plus-gap left of the subtitles button) - left/
       // right walk that same order regardless of which of the three is currently active.
       else if (direction === "left" && current === "subtitles") setActiveControl("quality");
-      else if (direction === "left" && current === "quality") setActiveControl("subtitles");
       else if (direction === "right" && current === "playPause") setActiveControl("quality");
-      else if (direction === "right" && current === "subtitles") setActiveControl("quality");
+      else if (direction === "right" && current === "quality") setActiveControl("subtitles");
       // Down from play/pause opens the row instead of being a no-op, exactly like pressing down
       // to reveal a video's description/playlist below it - guarded by hasEpisodesListRef so a
       // movie (no seasons) never does anything on this press.
@@ -1745,7 +1753,7 @@ export default function VideoPlayerScreen({
             currentTime={holdSeekPreview ?? ytCurrentTime}
             duration={ytDuration}
             isSeeking={holdSeekPreview != null}
-            previewUri={episode?.thumbnail ? posterUrl(episode.thumbnail, "w342") : undefined}
+            previewUri={posterUrl(episode?.thumbnail || movie.backdrop || movie.poster, episode?.thumbnail ? "w342" : "w780") || undefined}
             focusable={!subtitlePanelOpen}
             forceFocused={activeControl === "seekBar"}
             onFocus={() => {
@@ -1857,8 +1865,14 @@ export default function VideoPlayerScreen({
         resizeMode="contain"
         paused={paused}
         onProgress={(data) => {
-          currentTimeRef.current = data.currentTime;
           const now = Date.now();
+          const previousPosition = lastNativePositionRef.current;
+          if (previousPosition != null && Math.abs(data.currentTime - previousPosition) > 0.05) {
+            lastNativeProgressAtRef.current = now;
+            setLoading(false);
+          }
+          lastNativePositionRef.current = data.currentTime;
+          currentTimeRef.current = data.currentTime;
           // The state update that re-renders the whole screen (seek bar, time labels, etc.)
           // stays throttled to roughly once a second - see progressUpdateInterval's own comment
           // on why re-rendering all of that 4x/second is itself a real cost on weaker TV
@@ -1889,6 +1903,8 @@ export default function VideoPlayerScreen({
         onLoadStart={() => setLoading(true)}
         onLoad={(data: OnLoadData) => {
           setLoading(false);
+          lastNativeProgressAtRef.current = Date.now();
+          lastNativePositionRef.current = data.currentTime ?? 0;
           if (pendingEpisodeSelectRef.current && pendingEpisodeSelectRef.current === playingKey) {
             clearPendingEpisode();
             closeEpisodeRow();
@@ -1970,6 +1986,9 @@ export default function VideoPlayerScreen({
         // real heap limit (memoryClass), so a heavy stream just buffers fewer seconds instead of
         // killing the app; a normal-bitrate one still gets the full time window below.
         bufferingStrategy={BufferingStrategyType.DEPENDING_ON_MEMORY}
+        // TextureView keeps React Native overlays above the Android video surface while a
+        // rebuffer is active; SurfaceView can cover sibling views and look like a black screen.
+        viewType={ViewType.TEXTURE}
         bufferConfig={videoBufferConfig}
         // Was 1000 (once a second) - re-rendering the whole screen (seek bar, header,
         // everything) at whatever rate this fires is still only actually done once a second,
@@ -1993,6 +2012,15 @@ export default function VideoPlayerScreen({
 
       {loading && (
         <View style={styles.loadingWrap} pointerEvents="none">
+          {!!(movie.backdrop || movie.poster) && (
+            <Image
+              source={{ uri: posterUrl(movie.backdrop || movie.poster, "w1280") }}
+              style={styles.loadingBackdrop}
+              resizeMode="cover"
+              fadeDuration={0}
+            />
+          )}
+          <View style={styles.loadingScrim} />
           <ActivityIndicator size="large" color="#fff" />
         </View>
       )}
@@ -2123,7 +2151,7 @@ export default function VideoPlayerScreen({
           currentTime={holdSeekPreview ?? currentTime}
           duration={duration}
           isSeeking={holdSeekPreview != null}
-          previewUri={episode?.thumbnail ? posterUrl(episode.thumbnail, "w342") : undefined}
+          previewUri={posterUrl(episode?.thumbnail || movie.backdrop || movie.poster, episode?.thumbnail ? "w342" : "w780") || undefined}
           focusable={!subtitlePanelOpen && !qualityPanelOpen}
           forceFocused={activeControl === "seekBar"}
           onFocus={() => {
@@ -3100,7 +3128,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.08)",
   },
   unavailableBackBtnText: { color: "#fff", fontSize: fs(13), fontFamily: font.bold },
-  loadingWrap: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center" },
+  loadingWrap: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", zIndex: 20, elevation: 20, backgroundColor: "#080808" },
+  loadingBackdrop: { ...StyleSheet.absoluteFillObject, opacity: 0.7 },
+  loadingScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.35)" },
   subtitleWrap: { position: "absolute", left: 0, right: 0, bottom: s(130), alignItems: "center", paddingHorizontal: s(40) },
   subtitleText: {
     textAlign: "center",
