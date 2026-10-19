@@ -2012,15 +2012,6 @@ export default function VideoPlayerScreen({
 
       {loading && (
         <View style={styles.loadingWrap} pointerEvents="none">
-          {!!(movie.backdrop || movie.poster) && (
-            <Image
-              source={{ uri: posterUrl(movie.backdrop || movie.poster, "w1280") }}
-              style={styles.loadingBackdrop}
-              resizeMode="cover"
-              fadeDuration={0}
-            />
-          )}
-          <View style={styles.loadingScrim} />
           <ActivityIndicator size="large" color="#fff" />
         </View>
       )}
@@ -3128,9 +3119,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.08)",
   },
   unavailableBackBtnText: { color: "#fff", fontSize: fs(13), fontFamily: font.bold },
-  loadingWrap: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", zIndex: 20, elevation: 20, backgroundColor: "#080808" },
-  loadingBackdrop: { ...StyleSheet.absoluteFillObject, opacity: 0.7 },
-  loadingScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.35)" },
+  // Transparent overlay: keep the decoder's last TextureView frame visible during rebuffering.
+  // The loading indicator must never replace the video with a full-screen background.
+  loadingWrap: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", zIndex: 20, elevation: 20, backgroundColor: "transparent" },
   subtitleWrap: { position: "absolute", left: 0, right: 0, bottom: s(130), alignItems: "center", paddingHorizontal: s(40) },
   subtitleText: {
     textAlign: "center",

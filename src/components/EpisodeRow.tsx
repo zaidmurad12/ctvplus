@@ -28,7 +28,7 @@ interface Props {
   onHeightChange?: (height: number) => void;
 }
 
-const CARD_WIDTH = 270;
+const CARD_WIDTH = 286;
 const CARD_GAP = 14;
 // Widened (was 24) - a focused card's own border had nowhere to grow into right at either edge
 // of this row, reading as the highlight getting clipped there (the same fix already applied to
