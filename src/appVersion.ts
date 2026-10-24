@@ -3,5 +3,5 @@
 // own apps/backend/src/app-update/appVersion.ts (a different repo) currently offers. Forgetting to
 // bump this here means the update check either never notices a real new release, or nags about a
 // release that's actually this same build.
-export const CURRENT_VERSION_CODE = 206;
-export const CURRENT_VERSION_NAME = "1.24.46-player-buffer-spinner";
+export const CURRENT_VERSION_CODE = 207;
+export const CURRENT_VERSION_NAME = "1.24.47-episode-art-fallback";

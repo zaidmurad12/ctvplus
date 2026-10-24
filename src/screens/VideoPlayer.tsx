@@ -1753,7 +1753,7 @@ export default function VideoPlayerScreen({
             currentTime={holdSeekPreview ?? ytCurrentTime}
             duration={ytDuration}
             isSeeking={holdSeekPreview != null}
-            previewUri={posterUrl(episode?.thumbnail || movie.backdrop || movie.poster, episode?.thumbnail ? "w342" : "w780") || undefined}
+            previewUri={episode?.thumbnail ? posterUrl(episode.thumbnail, "w342") : undefined}
             focusable={!subtitlePanelOpen}
             forceFocused={activeControl === "seekBar"}
             onFocus={() => {
@@ -2142,7 +2142,7 @@ export default function VideoPlayerScreen({
           currentTime={holdSeekPreview ?? currentTime}
           duration={duration}
           isSeeking={holdSeekPreview != null}
-          previewUri={posterUrl(episode?.thumbnail || movie.backdrop || movie.poster, episode?.thumbnail ? "w342" : "w780") || undefined}
+          previewUri={episode?.thumbnail ? posterUrl(episode.thumbnail, "w342") : undefined}
           focusable={!subtitlePanelOpen && !qualityPanelOpen}
           forceFocused={activeControl === "seekBar"}
           onFocus={() => {
@@ -2995,6 +2995,8 @@ const FocusableSeekBar = React.forwardRef<View, {
   focusable?: boolean;
 }>(function FocusableSeekBar({ currentTime, duration, isSeeking, previewUri, onFocus, onPress, nextFocusUp, nextFocusDown, forceFocused, focusable }, ref) {
   const playedPct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+  const [previewFailed, setPreviewFailed] = useState(false);
+  useEffect(() => setPreviewFailed(false), [previewUri, isSeeking]);
 
   return (
     <Focusable
@@ -3014,14 +3016,14 @@ const FocusableSeekBar = React.forwardRef<View, {
             <View style={styles.seekTrack}>
               <View style={styles.seekTrackBg} pointerEvents="none" />
               <View style={[styles.seekTrackFill, focused && styles.seekTrackFillFocused, { width: `${playedPct}%` }]} pointerEvents="none" />
-              {isSeeking && previewUri ? (
+              {isSeeking && previewUri && !previewFailed ? (
                 <View style={[styles.seekPreviewWrap, { left: `${playedPct}%` }]} pointerEvents="none">
-                  <Image source={{ uri: previewUri }} style={styles.seekPreviewImage} resizeMode="cover" fadeDuration={0} />
+                  <Image source={{ uri: previewUri }} style={styles.seekPreviewImage} resizeMode="cover" fadeDuration={0} onError={() => setPreviewFailed(true)} />
                   <View style={styles.seekPreviewTime}><Text style={styles.seekBubbleText}>{formatTime(currentTime)}</Text></View>
                 </View>
               ) : isSeeking ? (
-                <View style={[styles.seekBubble, { left: `${playedPct}%` }]} pointerEvents="none">
-                  <Text style={styles.seekBubbleText}>{formatTime(currentTime)}</Text>
+                <View style={[styles.seekPreviewWrap, styles.seekPreviewFallback, { left: `${playedPct}%` }]} pointerEvents="none">
+                  <Text style={styles.seekPreviewFallbackText}>{formatTime(currentTime)}</Text>
                 </View>
               ) : null}
               <View
@@ -3255,6 +3257,8 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   seekPreviewImage: { width: "100%", height: "100%" },
+  seekPreviewFallback: { alignItems: "center", justifyContent: "center" },
+  seekPreviewFallbackText: { color: "#fff", fontSize: fs(26), fontFamily: font.black, textShadowColor: "rgba(255,255,255,0.25)", textShadowRadius: s(8) },
   seekPreviewTime: {
     position: "absolute",
     right: s(5),

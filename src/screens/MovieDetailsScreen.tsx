@@ -898,7 +898,6 @@ const EpisodeRail = React.memo(function EpisodeRail({
             watched={isEpisodeWatched(movieId, season.number, ep.number)}
             showImage={i < visibleImages}
             resolving={resolvingEpisodeId === ep.id}
-            backdrop={backdrop}
             setRef={clamp.setRef(i)}
             nextFocusLeft={i === 0 ? clamp.clampLeft() : undefined}
             nextFocusRight={i === count - 1 ? clamp.clampRight() : undefined}
@@ -943,7 +942,6 @@ const EpisodeCard = React.memo(function EpisodeCard({
   watched,
   showImage,
   resolving,
-  backdrop,
   setRef,
   nextFocusLeft,
   nextFocusRight,
@@ -957,7 +955,6 @@ const EpisodeCard = React.memo(function EpisodeCard({
   watched: boolean;
   showImage: boolean;
   resolving: boolean;
-  backdrop?: string;
   setRef: (node: View | null) => void;
   nextFocusLeft?: number;
   nextFocusRight?: number;
@@ -965,6 +962,9 @@ const EpisodeCard = React.memo(function EpisodeCard({
   onPlay: (ep: Episode) => void;
   onFocusEpisode: (ep: Episode, index: number) => void;
 }) {
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  useEffect(() => setThumbnailFailed(false), [ep.id, ep.thumbnail]);
+  const hasEpisodeThumbnail = showImage && !!ep.thumbnail && !thumbnailFailed;
   const handlePress = useCallback(() => onPlay(ep), [onPlay, ep]);
   const handleFocusChange = useCallback(
     (f: boolean) => {
@@ -988,14 +988,18 @@ const EpisodeCard = React.memo(function EpisodeCard({
       {(focused: boolean) => (
         <View style={[styles.episodeCard, focused && styles.episodeCardFocused, focused && focusShadowTight]}>
           <View style={styles.episodeThumbBox}>
-            {showImage && (
-              // Not every episode has its own thumbnail from the source - the show's own landscape
-              // backdrop reads far better than the plain black box posterUrl(undefined) would give.
-              <Image source={{ uri: posterUrl(ep.thumbnail || backdrop, "w342") }} style={styles.episodeThumb} fadeDuration={0} />
+            {hasEpisodeThumbnail ? (
+              <Image source={{ uri: posterUrl(ep.thumbnail, "w342") }} style={styles.episodeThumb} fadeDuration={0} onError={() => setThumbnailFailed(true)} />
+            ) : null}
+            {hasEpisodeThumbnail ? (
+              <View style={styles.episodeNumberBadge}>
+                <Text style={styles.episodeNumberText}>{ep.number}</Text>
+              </View>
+            ) : (
+              <View style={styles.episodeNumberFallback}>
+                <Text style={styles.episodeNumberFallbackText}>{ep.number}</Text>
+              </View>
             )}
-            <View style={styles.episodeNumberBadge}>
-              <Text style={styles.episodeNumberText}>{ep.number}</Text>
-            </View>
             {watched && (
               <View style={styles.episodeWatchedBadge}>
                 <Check size={s(13)} color="#000" strokeWidth={3.5} />
@@ -1439,6 +1443,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   episodeNumberText: { color: "#fff", fontSize: fs(14), fontFamily: font.black },
+  episodeNumberFallback: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  episodeNumberFallbackText: { color: "#fff", fontSize: fs(46), fontFamily: font.black, textShadowColor: "rgba(255,255,255,0.18)", textShadowRadius: s(8) },
   // Filled white circle (not just an outline) so a black check reads clearly regardless of
   // whatever's behind it in the thumbnail - same treatment as the color-swatch checkmarks in
   // SettingsScreen.
