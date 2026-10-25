@@ -790,6 +790,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                   season={activeSeason}
                   movieId={movie.id}
                   backdrop={movie.backdrop}
+                  poster={movie.poster}
                   lang={lang}
                   resolvingEpisodeId={resolvingEpisodeId}
                   clamp={episodesClamp}
@@ -822,6 +823,7 @@ const EpisodeRail = React.memo(function EpisodeRail({
   season,
   movieId,
   backdrop,
+  poster,
   lang,
   resolvingEpisodeId,
   clamp,
@@ -836,6 +838,7 @@ const EpisodeRail = React.memo(function EpisodeRail({
   season: Season;
   movieId: string;
   backdrop?: string;
+  poster?: string;
   lang: Lang;
   resolvingEpisodeId: string | null;
   clamp: ReturnType<typeof useFocusClamp>;
@@ -898,6 +901,8 @@ const EpisodeRail = React.memo(function EpisodeRail({
             watched={isEpisodeWatched(movieId, season.number, ep.number)}
             showImage={i < visibleImages}
             resolving={resolvingEpisodeId === ep.id}
+            backdrop={backdrop}
+            poster={poster}
             setRef={clamp.setRef(i)}
             nextFocusLeft={i === 0 ? clamp.clampLeft() : undefined}
             nextFocusRight={i === count - 1 ? clamp.clampRight() : undefined}
@@ -942,6 +947,8 @@ const EpisodeCard = React.memo(function EpisodeCard({
   watched,
   showImage,
   resolving,
+  backdrop,
+  poster,
   setRef,
   nextFocusLeft,
   nextFocusRight,
@@ -955,6 +962,8 @@ const EpisodeCard = React.memo(function EpisodeCard({
   watched: boolean;
   showImage: boolean;
   resolving: boolean;
+  backdrop?: string;
+  poster?: string;
   setRef: (node: View | null) => void;
   nextFocusLeft?: number;
   nextFocusRight?: number;
@@ -962,9 +971,14 @@ const EpisodeCard = React.memo(function EpisodeCard({
   onPlay: (ep: Episode) => void;
   onFocusEpisode: (ep: Episode, index: number) => void;
 }) {
-  const [thumbnailFailed, setThumbnailFailed] = useState(false);
-  useEffect(() => setThumbnailFailed(false), [ep.id, ep.thumbnail]);
-  const hasEpisodeThumbnail = showImage && !!ep.thumbnail && !thumbnailFailed;
+  const [failedArtworkUris, setFailedArtworkUris] = useState<string[]>([]);
+  useEffect(() => setFailedArtworkUris([]), [ep.id, ep.thumbnail, backdrop, poster]);
+  const artworkCandidates = [ep.thumbnail, backdrop, poster]
+    .filter((uri): uri is string => !!uri)
+    .map((uri) => posterUrl(uri, "w342"))
+    .filter((uri, candidateIndex, all) => all.indexOf(uri) === candidateIndex);
+  const artworkUri = showImage ? artworkCandidates.find((uri) => !failedArtworkUris.includes(uri)) : undefined;
+  const hasEpisodeThumbnail = !!artworkUri && artworkUri === artworkCandidates[0];
   const handlePress = useCallback(() => onPlay(ep), [onPlay, ep]);
   const handleFocusChange = useCallback(
     (f: boolean) => {
@@ -988,9 +1002,19 @@ const EpisodeCard = React.memo(function EpisodeCard({
       {(focused: boolean) => (
         <View style={[styles.episodeCard, focused && styles.episodeCardFocused, focused && focusShadowTight]}>
           <View style={styles.episodeThumbBox}>
-            {hasEpisodeThumbnail ? (
-              <Image source={{ uri: posterUrl(ep.thumbnail, "w342") }} style={styles.episodeThumb} fadeDuration={0} onError={() => setThumbnailFailed(true)} />
+            {artworkUri ? (
+              <Image
+                source={{ uri: artworkUri }}
+                style={styles.episodeThumb}
+                resizeMode="cover"
+                blurRadius={hasEpisodeThumbnail ? 0 : s(10)}
+                fadeDuration={0}
+                onError={() =>
+                  setFailedArtworkUris((current) => [...current, artworkUri])
+                }
+              />
             ) : null}
+            {!hasEpisodeThumbnail && artworkUri ? <View style={styles.episodeArtworkScrim} pointerEvents="none" /> : null}
             {hasEpisodeThumbnail ? (
               <View style={styles.episodeNumberBadge}>
                 <Text style={styles.episodeNumberText}>{ep.number}</Text>
@@ -1443,7 +1467,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   episodeNumberText: { color: "#fff", fontSize: fs(14), fontFamily: font.black },
-  episodeNumberFallback: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  episodeNumberFallback: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", zIndex: 1 },
+  episodeArtworkScrim: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.48)" },
   episodeNumberFallbackText: { color: "#fff", fontSize: fs(46), fontFamily: font.black, textShadowColor: "rgba(255,255,255,0.18)", textShadowRadius: s(8) },
   // Filled white circle (not just an outline) so a black check reads clearly regardless of
   // whatever's behind it in the thumbnail - same treatment as the color-swatch checkmarks in

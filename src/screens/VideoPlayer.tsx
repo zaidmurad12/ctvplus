@@ -699,7 +699,7 @@ export default function VideoPlayerScreen({
     onSelectEpisodeRef.current = onSelectEpisode;
   });
 
-  const title = episode ? `${movie.titleAr || movie.titleEn} - ${episode.titleAr || episode.titleEn}` : movie.titleAr || movie.titleEn;
+  const title = movie.titleAr || movie.titleEn;
 
   // Pushed onto the shared backStack (see src/backStack.ts's own top comment) instead of calling
   // BackHandler.addEventListener directly - same reasoning as MovieDetailsScreen's identical
@@ -1614,7 +1614,7 @@ export default function VideoPlayerScreen({
           // boxes); without this the dead WebView just sat there as a frozen black screen.
           onRenderProcessGone={() => setUnavailable(true)}
         />
-        {loading && (
+        {loading && !exiting && (
           <View style={styles.youtubeLoadingOverlay} pointerEvents="none">
             <ActivityIndicator size="large" color="#fff" />
           </View>
@@ -1754,6 +1754,8 @@ export default function VideoPlayerScreen({
             duration={ytDuration}
             isSeeking={holdSeekPreview != null}
             previewUri={episode?.thumbnail ? posterUrl(episode.thumbnail, "w342") : undefined}
+            fallbackUri={posterUrl(movie.backdrop, "w780") || undefined}
+            posterFallbackUri={posterUrl(movie.poster, "w780") || undefined}
             focusable={!subtitlePanelOpen}
             forceFocused={activeControl === "seekBar"}
             onFocus={() => {
@@ -2010,7 +2012,7 @@ export default function VideoPlayerScreen({
         maxBitRate={4000000}
       />
 
-      {loading && (
+      {loading && !exiting && (
         <View style={styles.loadingWrap} pointerEvents="none">
           <ActivityIndicator size="large" color="#fff" />
         </View>
@@ -2143,6 +2145,8 @@ export default function VideoPlayerScreen({
           duration={duration}
           isSeeking={holdSeekPreview != null}
           previewUri={episode?.thumbnail ? posterUrl(episode.thumbnail, "w342") : undefined}
+          fallbackUri={posterUrl(movie.backdrop, "w780") || undefined}
+          posterFallbackUri={posterUrl(movie.poster, "w780") || undefined}
           focusable={!subtitlePanelOpen && !qualityPanelOpen}
           forceFocused={activeControl === "seekBar"}
           onFocus={() => {
@@ -2220,10 +2224,12 @@ export default function VideoPlayerScreen({
       {episodeRowSeasonNumber !== null && episodeRowSeason && (
         <EpisodeRow
           season={episodeRowSeason}
+          backdrop={movie.backdrop}
+          poster={movie.poster}
           activeIndex={episodeRowIndex}
-          hidden={barsHidden}
+          hidden={barsHidden || exiting}
           currentEpisodeId={episode?.id}
-          resolvingEpisodeId={resolvingEpisodeId ?? pendingEpisodeId}
+          resolvingEpisodeId={exiting ? null : resolvingEpisodeId ?? pendingEpisodeId}
           isEpisodeWatched={handleEpisodeRowWatched}
           lang={lang}
           onHeightChange={setEpisodeRowHeight}
@@ -2982,6 +2988,8 @@ const FocusableSeekBar = React.forwardRef<View, {
   duration: number;
   isSeeking: boolean;
   previewUri?: string;
+  fallbackUri?: string;
+  posterFallbackUri?: string;
   onFocus?: () => void;
   onPress?: () => void;
   nextFocusUp?: number;
@@ -2993,10 +3001,18 @@ const FocusableSeekBar = React.forwardRef<View, {
   // False while the subtitle panel is open - see the panel's own containment comment in
   // VideoPlayerScreen.
   focusable?: boolean;
-}>(function FocusableSeekBar({ currentTime, duration, isSeeking, previewUri, onFocus, onPress, nextFocusUp, nextFocusDown, forceFocused, focusable }, ref) {
+}>(function FocusableSeekBar({ currentTime, duration, isSeeking, previewUri, fallbackUri, posterFallbackUri, onFocus, onPress, nextFocusUp, nextFocusDown, forceFocused, focusable }, ref) {
   const playedPct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
   const [previewFailed, setPreviewFailed] = useState(false);
-  useEffect(() => setPreviewFailed(false), [previewUri, isSeeking]);
+  const [failedFallbackUris, setFailedFallbackUris] = useState<string[]>([]);
+  useEffect(() => {
+    setPreviewFailed(false);
+    setFailedFallbackUris([]);
+  }, [previewUri, fallbackUri, posterFallbackUri, isSeeking]);
+  const fallbackUris = [fallbackUri, posterFallbackUri].filter((uri): uri is string => !!uri);
+  const displayFallbackUri = fallbackUris.find((uri) => !failedFallbackUris.includes(uri));
+  const displayUri = previewUri && !previewFailed ? previewUri : displayFallbackUri;
+  const showingArtworkFallback = !!displayUri && (previewFailed || displayUri !== previewUri);
 
   return (
     <Focusable
@@ -3016,14 +3032,28 @@ const FocusableSeekBar = React.forwardRef<View, {
             <View style={styles.seekTrack}>
               <View style={styles.seekTrackBg} pointerEvents="none" />
               <View style={[styles.seekTrackFill, focused && styles.seekTrackFillFocused, { width: `${playedPct}%` }]} pointerEvents="none" />
-              {isSeeking && previewUri && !previewFailed ? (
+              {isSeeking ? (
                 <View style={[styles.seekPreviewWrap, { left: `${playedPct}%` }]} pointerEvents="none">
-                  <Image source={{ uri: previewUri }} style={styles.seekPreviewImage} resizeMode="cover" fadeDuration={0} onError={() => setPreviewFailed(true)} />
-                  <View style={styles.seekPreviewTime}><Text style={styles.seekBubbleText}>{formatTime(currentTime)}</Text></View>
-                </View>
-              ) : isSeeking ? (
-                <View style={[styles.seekPreviewWrap, styles.seekPreviewFallback, { left: `${playedPct}%` }]} pointerEvents="none">
-                  <Text style={styles.seekPreviewFallbackText}>{formatTime(currentTime)}</Text>
+                  {displayUri ? (
+                    <Image
+                      source={{ uri: displayUri }}
+                      style={styles.seekPreviewImage}
+                      resizeMode="cover"
+                      blurRadius={showingArtworkFallback ? s(10) : 0}
+                      fadeDuration={0}
+                      onError={() =>
+                        displayUri === previewUri
+                          ? setPreviewFailed(true)
+                          : setFailedFallbackUris((current) => [...current, displayUri])
+                      }
+                    />
+                  ) : null}
+                  {showingArtworkFallback ? <View style={styles.seekPreviewDarkScrim} /> : null}
+                  {showingArtworkFallback || !displayUri ? (
+                    <Text style={[styles.seekPreviewFallbackText, StyleSheet.absoluteFill]}>{formatTime(currentTime)}</Text>
+                  ) : (
+                    <View style={styles.seekPreviewTime}><Text style={styles.seekBubbleText}>{formatTime(currentTime)}</Text></View>
+                  )}
                 </View>
               ) : null}
               <View
@@ -3257,8 +3287,8 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   seekPreviewImage: { width: "100%", height: "100%" },
-  seekPreviewFallback: { alignItems: "center", justifyContent: "center" },
-  seekPreviewFallbackText: { color: "#fff", fontSize: fs(26), fontFamily: font.black, textShadowColor: "rgba(255,255,255,0.25)", textShadowRadius: s(8) },
+  seekPreviewDarkScrim: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.5)" },
+  seekPreviewFallbackText: { color: "#fff", fontSize: fs(26), fontFamily: font.black, textShadowColor: "rgba(255,255,255,0.25)", textShadowRadius: s(8), textAlign: "center", textAlignVertical: "center", includeFontPadding: false },
   seekPreviewTime: {
     position: "absolute",
     right: s(5),

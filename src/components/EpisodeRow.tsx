@@ -10,6 +10,8 @@ import { Lang, pickText, upcomingLabel } from "../i18n";
 
 interface Props {
   season: Season;
+  backdrop?: string;
+  poster?: string;
   // Which card is highlighted - driven entirely by the parent's own JS state (VideoPlayer's
   // dpadNavActive-routed left/right, same philosophy as the player's other three controls), not
   // real Android focus. There is nothing else in this row for Android's own focus engine to find
@@ -53,6 +55,8 @@ const SEASON_SLIDE_DISTANCE = 36;
 // changing. Real, measurable cost matching "the app became heavy," not a micro-optimization.
 function EpisodeRow({
   season,
+  backdrop,
+  poster,
   activeIndex,
   hidden,
   currentEpisodeId,
@@ -63,6 +67,7 @@ function EpisodeRow({
   onHeightChange,
 }: Props) {
   const scrollRef = useRef<any>(null);
+  const [failedImages, setFailedImages] = React.useState<Record<string, string[]>>({});
   const scrollXRef = useRef(0);
   const previousSeasonIdRef = useRef(season.id);
   const { width: viewportWidth } = useWindowDimensions();
@@ -140,11 +145,33 @@ function EpisodeRow({
             const isActive = i === activeIndex;
             const isPlayingNow = ep.id === currentEpisodeId;
             const watched = isEpisodeWatched(season.number, ep.number);
+            const artworkCandidates = [ep.thumbnail, backdrop, poster]
+              .filter((uri): uri is string => !!uri)
+              .map((uri) => posterUrl(uri, "w342"))
+              .filter((uri, index, all) => all.indexOf(uri) === index);
+            const failedForEpisode = failedImages[ep.id] ?? [];
+            const artwork = artworkCandidates.find((uri) => !failedForEpisode.includes(uri));
+            const hasEpisodeImage = !!artwork && artwork === artworkCandidates[0];
             return (
               <Pressable key={ep.id} onPress={() => onSelectEpisode(ep)}>
                 <View style={[styles.card, (isActive || isPlayingNow) && styles.cardFocused]}>
                   <View style={styles.thumbBox}>
-                    <Image source={{ uri: posterUrl(ep.thumbnail, "w342") }} style={styles.thumb} fadeDuration={0} />
+                    {artwork ? (
+                      <Image
+                        source={{ uri: artwork }}
+                        style={styles.thumb}
+                        resizeMode="cover"
+                        blurRadius={hasEpisodeImage ? 0 : s(10)}
+                        fadeDuration={0}
+                        onError={() =>
+                          setFailedImages((current) => ({
+                            ...current,
+                            [ep.id]: [...(current[ep.id] ?? []), artwork],
+                          }))
+                        }
+                      />
+                    ) : null}
+                    {!hasEpisodeImage && artwork ? <View style={styles.artworkScrim} pointerEvents="none" /> : null}
                     {/* The episode title used to be its own line of text below this whole card -
                         merged into the thumbnail itself per explicit request, the same overlay
                         recipe MovieCard/RecentCard's own title treatment already uses elsewhere -
@@ -157,9 +184,15 @@ function EpisodeRow({
                       style={StyleSheet.absoluteFill}
                       pointerEvents="none"
                     />
-                    <View style={styles.numberBadge}>
-                      <Text style={styles.numberText}>{ep.number}</Text>
-                    </View>
+                    {hasEpisodeImage ? (
+                      <View style={styles.numberBadge}>
+                        <Text style={styles.numberText}>{ep.number}</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.numberFallback} pointerEvents="none">
+                        <Text style={styles.numberFallbackText}>{ep.number}</Text>
+                      </View>
+                    )}
                     {watched && !isPlayingNow && (
                       <View style={styles.watchedBadge}>
                         <Check size={s(12)} color="#000" strokeWidth={3.5} />
@@ -217,7 +250,7 @@ function EpisodeRow({
 export default React.memo(EpisodeRow);
 
 const styles = StyleSheet.create({
-  wrap: { position: "absolute", left: 0, right: 0, bottom: 0, paddingBottom: s(28), paddingTop: s(28) },
+  wrap: { position: "absolute", left: 0, right: 0, bottom: s(38), paddingBottom: s(28), paddingTop: s(28) },
   hiddenWrap: { opacity: 0 },
   seasonIndicator: { alignItems: "center", marginLeft: s(LIST_PADDING), marginBottom: s(14), gap: s(2) },
   seasonIndicatorText: { color: "#fff", fontSize: fs(13), fontFamily: font.bold, marginVertical: s(1) },
@@ -236,6 +269,9 @@ const styles = StyleSheet.create({
   cardFocused: { borderColor: "#fff", backgroundColor: "rgba(255,255,255,0.1)" },
   thumbBox: { width: "100%", aspectRatio: 16 / 9, borderRadius: s(6), overflow: "hidden", backgroundColor: "#000" },
   thumb: { width: "100%", height: "100%" },
+  artworkScrim: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.48)" },
+  numberFallback: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", zIndex: 1 },
+  numberFallbackText: { color: "#fff", fontSize: fs(46), fontFamily: font.black, textShadowColor: "rgba(255,255,255,0.18)", textShadowRadius: s(8) },
   numberBadge: {
     position: "absolute",
     top: s(6),
