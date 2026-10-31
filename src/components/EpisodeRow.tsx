@@ -221,7 +221,7 @@ function EpisodeRow({
       <View style={styles.seasonPicker} pointerEvents="none">
         {/* Arrow slots keep their space while empty, so the row doesn't jump when picking starts. */}
         <View style={styles.seasonArrow}>
-          {picking && hasPreviousSeason && <ChevronUp size={s(22)} color="#fff" strokeWidth={3} />}
+          {picking && hasPreviousSeason && <ChevronUp size={s(18)} color="#fff" strokeWidth={3} />}
         </View>
         <View style={[styles.seasonButton, seasonButtonLit && styles.seasonButtonFocused, picking && styles.seasonButtonPicking]}>
           <Text style={[styles.seasonButtonText, seasonButtonLit && styles.seasonButtonTextFocused]}>
@@ -229,7 +229,7 @@ function EpisodeRow({
           </Text>
         </View>
         <View style={styles.seasonArrow}>
-          {picking && hasNextSeason && <ChevronDown size={s(22)} color="#fff" strokeWidth={3} />}
+          {picking && hasNextSeason && <ChevronDown size={s(18)} color="#fff" strokeWidth={3} />}
         </View>
       </View>
       <Animated.View style={{ transform: [{ translateY: slideAnim }], opacity: fadeAnim }}>
@@ -273,23 +273,14 @@ const thumbHeight = ((s(CARD_WIDTH) - 2 * (s(CARD_PADDING) + CARD_BORDER)) * 9) 
 const styles = StyleSheet.create({
   wrap: { position: "absolute", left: 0, right: 0, bottom: s(38), paddingBottom: s(28), paddingTop: s(28) },
   hiddenWrap: { opacity: 0 },
-  seasonPicker: { alignSelf: "flex-start", alignItems: "center", marginLeft: s(LIST_PADDING), marginBottom: s(4) },
-  seasonArrow: { height: s(26), alignItems: "center", justifyContent: "center" },
-  seasonButton: {
-    minWidth: s(150),
-    height: s(44),
-    paddingHorizontal: s(22),
-    borderRadius: s(22),
-    borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.35)",
-    backgroundColor: "rgba(20,20,24,0.72)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  seasonButtonFocused: { backgroundColor: "#fff", borderColor: "#fff" },
-  seasonButtonPicking: { transform: [{ scale: 1.1 }] },
-  seasonButtonText: { color: "#fff", fontSize: fs(16), fontFamily: font.bold, includeFontPadding: false },
-  seasonButtonTextFocused: { color: "#000" },
+  seasonPicker: { alignSelf: "flex-start", alignItems: "center", marginLeft: s(LIST_PADDING), marginBottom: s(2) },
+  seasonArrow: { height: s(16), alignItems: "center", justifyContent: "center" },
+  // No background: the lit state is the text going full white with a line under it.
+  seasonButton: { paddingBottom: s(2), borderBottomWidth: 2, borderBottomColor: "transparent" },
+  seasonButtonFocused: { borderBottomColor: "#fff" },
+  seasonButtonPicking: { transform: [{ scale: 1.08 }] },
+  seasonButtonText: { color: "rgba(255,255,255,0.72)", fontSize: fs(17), fontFamily: font.bold, includeFontPadding: false },
+  seasonButtonTextFocused: { color: "#fff" },
   list: { paddingHorizontal: s(LIST_PADDING) },
   track: { height: thumbHeight + 2 * (s(CARD_PADDING) + CARD_BORDER) },
   cardSlot: { position: "absolute", top: 0 },
