@@ -12,6 +12,7 @@ import { s, fs } from "../scale";
 import { Lang, pickText, t, genreName, countryName, upcomingLabel } from "../i18n";
 import type { SelectedPerson } from "./PersonScreen";
 import LogoImage from "../components/LogoImage";
+import EpisodeArtwork from "../components/EpisodeArtwork";
 import { useFocusClamp } from "../useFocusClamp";
 import { useProgressiveReveal } from "../useProgressiveReveal";
 import { pushBackHandler } from "../backStack";
@@ -971,14 +972,6 @@ const EpisodeCard = React.memo(function EpisodeCard({
   onPlay: (ep: Episode) => void;
   onFocusEpisode: (ep: Episode, index: number) => void;
 }) {
-  const [failedArtworkUris, setFailedArtworkUris] = useState<string[]>([]);
-  useEffect(() => setFailedArtworkUris([]), [ep.id, ep.thumbnail, backdrop, poster]);
-  const artworkCandidates = [ep.thumbnail, backdrop, poster]
-    .filter((uri): uri is string => !!uri)
-    .map((uri) => posterUrl(uri, "w342"))
-    .filter((uri, candidateIndex, all) => all.indexOf(uri) === candidateIndex);
-  const artworkUri = showImage ? artworkCandidates.find((uri) => !failedArtworkUris.includes(uri)) : undefined;
-  const hasEpisodeThumbnail = !!artworkUri && artworkUri === artworkCandidates[0];
   const handlePress = useCallback(() => onPlay(ep), [onPlay, ep]);
   const handleFocusChange = useCallback(
     (f: boolean) => {
@@ -1002,28 +995,10 @@ const EpisodeCard = React.memo(function EpisodeCard({
       {(focused: boolean) => (
         <View style={[styles.episodeCard, focused && styles.episodeCardFocused, focused && focusShadowTight]}>
           <View style={styles.episodeThumbBox}>
-            {artworkUri ? (
-              <Image
-                source={{ uri: artworkUri }}
-                style={styles.episodeThumb}
-                resizeMode="cover"
-                blurRadius={hasEpisodeThumbnail ? 0 : s(10)}
-                fadeDuration={0}
-                onError={() =>
-                  setFailedArtworkUris((current) => [...current, artworkUri])
-                }
-              />
-            ) : null}
-            {!hasEpisodeThumbnail && artworkUri ? <View style={styles.episodeArtworkScrim} pointerEvents="none" /> : null}
-            {hasEpisodeThumbnail ? (
-              <View style={styles.episodeNumberBadge}>
-                <Text style={styles.episodeNumberText}>{ep.number}</Text>
-              </View>
-            ) : (
-              <View style={styles.episodeNumberFallback}>
-                <Text style={styles.episodeNumberFallbackText}>{ep.number}</Text>
-              </View>
-            )}
+            {showImage && <EpisodeArtwork thumbnail={ep.thumbnail} backdrop={backdrop} poster={poster} />}
+            <View style={styles.episodeNumberBadge}>
+              <Text style={styles.episodeNumberText}>{ep.number}</Text>
+            </View>
             {watched && (
               <View style={styles.episodeWatchedBadge}>
                 <Check size={s(13)} color="#000" strokeWidth={3.5} />
@@ -1467,9 +1442,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   episodeNumberText: { color: "#fff", fontSize: fs(14), fontFamily: font.black },
-  episodeNumberFallback: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", zIndex: 1 },
-  episodeArtworkScrim: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.48)" },
-  episodeNumberFallbackText: { color: "#fff", fontSize: fs(46), fontFamily: font.black, textShadowColor: "rgba(255,255,255,0.18)", textShadowRadius: s(8) },
   // Filled white circle (not just an outline) so a black check reads clearly regardless of
   // whatever's behind it in the thumbnail - same treatment as the color-swatch checkmarks in
   // SettingsScreen.

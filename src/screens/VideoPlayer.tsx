@@ -1,10 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
-import { View, Text, Image, ActivityIndicator, StyleSheet, NativeEventEmitter, NativeModules, findNodeHandle, Animated, ToastAndroid } from "react-native";
+import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { View, Text, ActivityIndicator, StyleSheet, NativeEventEmitter, NativeModules, findNodeHandle, Animated, ToastAndroid } from "react-native";
 import { WebView } from "react-native-webview";
 import LinearGradient from "react-native-linear-gradient";
 import Video, { BufferingStrategyType, OnLoadData, OnProgressData, VideoRef, ViewType } from "react-native-video";
-import { Play, Pause, ShieldAlert, Subtitles, Settings, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Check } from "lucide-react-native";
-import EpisodeRow from "../components/EpisodeRow";
+import { Play, Pause, ShieldAlert, Subtitles, Settings, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Check, SkipForward } from "lucide-react-native";
+import EpisodeRow, { type EpisodeRowZone } from "../components/EpisodeRow";
 import type { Movie, Season, Episode, StreamServer } from "../api";
 import { posterUrl, youtubeVideoId, youtubeEmbedUrl } from "../api";
 import { qualityRank, qualityLabel, canDecode4K } from "../quality";
@@ -88,10 +88,47 @@ const AGE_RATING_DISPLAY_MS = 6000;
 // See onError's own comment - how many times a link that already proved it works gets retried
 // (with a short pause between attempts) before this actually falls through to the next server /
 // the unavailable screen, and how long each pause is.
+type PlayerControl = "playPause" | "subtitles" | "quality" | "nextEpisode";
+
+// The next playable episode: the next in its season, else the first playable one of a later season.
+function findNextEpisode(seasons: Season[] | undefined, season: Season, episode: Episode): { episode: Episode; season: Season } | null {
+  const list = seasons ?? [];
+  const seasonIdx = list.findIndex((sn) => sn.number === season.number);
+  const current = list[seasonIdx];
+  if (!current) return null;
+  const epIdx = current.episodes.findIndex((ep) => ep.id === episode.id);
+  const inSeason = epIdx >= 0 ? current.episodes.slice(epIdx + 1).find((ep) => ep.hasPlayableStream) : undefined;
+  if (inSeason) return { episode: inSeason, season: current };
+  for (const later of list.slice(seasonIdx + 1)) {
+    const first = later.episodes.find((ep) => ep.hasPlayableStream);
+    if (first) return { episode: first, season: later };
+  }
+  return null;
+}
+
+type CueStore = ReturnType<typeof createCueStore>;
+
+function createCueStore() {
+  let text: string | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => text,
+    set: (next: string | null) => {
+      if (next === text) return;
+      text = next;
+      listeners.forEach((listener) => listener());
+    },
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+
 const MAX_MIDSTREAM_RETRIES = 6;
 const MIDSTREAM_RETRY_DELAY_MS = 2000;
-// Native heap (MB) past which the playing <Video> is rebuilt in place - see the memory guard.
-const NATIVE_RELOAD_MB = 230;
 // How far the episode row's own dark scrim extends above its measured height (see its own
 // comment) - gives the fade-to-transparent room to finish above the season indicator instead of
 // still visibly fading right behind it.
@@ -289,6 +326,13 @@ export default function VideoPlayerScreen({
   // controls already use, extended to a fourth "zone" instead of a fourth persistent button.
   const [episodeRowSeasonNumber, setEpisodeRowSeasonNumber] = useState<number | null>(null);
   const [episodeRowIndex, setEpisodeRowIndex] = useState(0);
+  const [episodeRowZone, setEpisodeRowZoneState] = useState<EpisodeRowZone>("cards");
+  // Mirrored for the one-time onNavKey/onOkKey/back listeners below.
+  const episodeRowZoneRef = useRef<EpisodeRowZone>("cards");
+  const setEpisodeRowZone = (zone: EpisodeRowZone) => {
+    episodeRowZoneRef.current = zone;
+    setEpisodeRowZoneState(zone);
+  };
   const episodeRowSeasonNumberRef = useRef<number | null>(null);
   const episodeRowIndexRef = useRef(0);
   useEffect(() => {
@@ -326,7 +370,6 @@ export default function VideoPlayerScreen({
   const [bottomBarHeight, setBottomBarHeight] = useState(s(190));
   const playerRef = useRef<VideoRef>(null);
   const playPauseRef = useRef<View>(null);
-  const seekBarRef = useRef<View>(null);
   const subtitlesBtnRef = useRef<View>(null);
   const qualityBtnRef = useRef<View>(null);
   // Which control looks focused - driven explicitly rather than trusting Focusable's own
@@ -337,7 +380,7 @@ export default function VideoPlayerScreen({
   // correctly either way, only the visual highlight was ever missing. Setting this directly
   // wherever focus is meant to land, instead of waiting on a callback that isn't reliably
   // firing, makes the highlight track reality regardless of which path put focus there.
-  const [activeControl, setActiveControl] = useState<"playPause" | "seekBar" | "subtitles" | "quality">("playPause");
+  const [activeControl, setActiveControl] = useState<PlayerControl>("playPause");
   // Mirrors activeControl for the native OK-key listener below, which subscribes once ([]
   // deps) and would otherwise only ever see this render's initial (stale) value - same
   // stale-closure shape controlsVisibleRef/currentTimeRef exist to avoid. Needed once OK could
@@ -356,18 +399,11 @@ export default function VideoPlayerScreen({
   // treats as "the ref changed" and re-invokes with the same node on every single render, and an
   // unguarded bump on every truthy call would turn that into an infinite render loop.
   const [focusHandleBump, bumpFocusHandles] = useState(0);
-  const bumpedRef = useRef({ playPause: false, seekBar: false, subtitlesBtn: false, qualityBtn: false });
+  const bumpedRef = useRef({ playPause: false, subtitlesBtn: false, qualityBtn: false });
   const setPlayPauseRef = useRef((node: View | null) => {
     playPauseRef.current = node;
     if (node && !bumpedRef.current.playPause) {
       bumpedRef.current.playPause = true;
-      bumpFocusHandles((b) => b + 1);
-    }
-  }).current;
-  const setSeekBarRef = useRef((node: View | null) => {
-    seekBarRef.current = node;
-    if (node && !bumpedRef.current.seekBar) {
-      bumpedRef.current.seekBar = true;
       bumpFocusHandles((b) => b + 1);
     }
   }).current;
@@ -395,7 +431,6 @@ export default function VideoPlayerScreen({
   const focusHandles = React.useMemo(
     () => ({
       playPause: findNodeHandle(playPauseRef.current) ?? undefined,
-      seekBar: findNodeHandle(seekBarRef.current) ?? undefined,
       subtitlesBtn: findNodeHandle(subtitlesBtnRef.current) ?? undefined,
       qualityBtn: findNodeHandle(qualityBtnRef.current) ?? undefined,
     }),
@@ -555,8 +590,8 @@ export default function VideoPlayerScreen({
     if (controlsVisible && latestProgressRef.current) setProgress(latestProgressRef.current);
   }, [controlsVisible]);
   // Subtitle cue lookup runs on every onProgress tick (not gated behind the throttle above) -
-  // see currentCue's own comment for why cue timing specifically needed the tighter interval.
-  const [cueText, setCueText] = useState<string | null>(null);
+  // see CueOverlay's comment for why cue timing specifically needed the tighter interval.
+  const cueStore = useRef(createCueStore()).current;
   useEffect(() => {
     let cancelled = false;
     loadWatchProgressMap().then((map) => {
@@ -585,7 +620,7 @@ export default function VideoPlayerScreen({
   };
   useEffect(() => {
     return () => {
-      if (currentTimeRef.current > 0) saveWatchProgress(currentTimeRef.current, progress?.seekableDuration ?? 0);
+      if (currentTimeRef.current > 0) saveWatchProgress(currentTimeRef.current, latestProgressRef.current?.seekableDuration ?? 0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncStorageKey]);
@@ -635,6 +670,7 @@ export default function VideoPlayerScreen({
     if (!season) return;
     const idx = movie.seasons?.find((sn) => sn.number === season.number)?.episodes.findIndex((e) => e.id === episode?.id) ?? 0;
     setEpisodeRowIndex(Math.max(0, idx));
+    setEpisodeRowZone("cards");
     setEpisodeRowSeasonNumber(season.number);
   };
   // Closes it outright (the control bar reappears in its place - see bottomBar's own comment) -
@@ -715,7 +751,8 @@ export default function VideoPlayerScreen({
         return true;
       }
       if (episodeRowOpenRef.current) {
-        closeEpisodeRowRef.current();
+        if (episodeRowZoneRef.current === "seasonPicking") setEpisodeRowZone("seasonButton");
+        else closeEpisodeRowRef.current();
         return true;
       }
       handleExit();
@@ -853,7 +890,7 @@ export default function VideoPlayerScreen({
   // Hoisted out of the EpisodeRow render site's own inline IIFE (see its own comment) so the
   // season lookup and both callback props stay referentially stable across renders instead of a
   // fresh object/closure every time - required for EpisodeRow's own React.memo (see its comment)
-  // to actually skip re-rendering on VideoPlayer's ~4x/second cueText-driven re-renders.
+  // to actually skip re-rendering on VideoPlayer's periodic re-renders.
   const episodeRowSeason = React.useMemo(
     () => (movie.seasons ?? []).find((sn) => sn.number === episodeRowSeasonNumber) ?? null,
     [movie.seasons, episodeRowSeasonNumber]
@@ -911,7 +948,7 @@ export default function VideoPlayerScreen({
   // ever actually saw.
   const [ytDiag, setYtDiag] = useState<string | null>(null);
   // Recomputed on every polled tick regardless of the throttle below - see its own comment,
-  // mirrors currentCue's identical reasoning for native playback exactly.
+  // mirrors CueOverlay's identical reasoning for native playback exactly.
   const [ytCueText, setYtCueText] = useState<string | null>(null);
   const lastYtProgressStateRef = useRef(0);
   const ytPausedRef = useRef(false);
@@ -954,25 +991,8 @@ export default function VideoPlayerScreen({
   // episode row does; a film - or a series' last episode - stops with the control bar shown and
   // kept up (see armHideTimer), focus on play/pause, where pressing play starts it over.
   const handleEnded = () => {
-    const seasons = movie.seasons ?? [];
     if (episode && season) {
-      const seasonIdx = seasons.findIndex((sn) => sn.number === season.number);
-      const current = seasons[seasonIdx];
-      const epIdx = current ? current.episodes.findIndex((ep) => ep.id === episode.id) : -1;
-      let next: { episode: Episode; season: Season } | null = null;
-      if (current && epIdx >= 0) {
-        const inSeason = current.episodes.slice(epIdx + 1).find((ep) => ep.hasPlayableStream);
-        if (inSeason) next = { episode: inSeason, season: current };
-      }
-      if (!next && seasonIdx >= 0) {
-        for (const later of seasons.slice(seasonIdx + 1)) {
-          const first = later.episodes.find((ep) => ep.hasPlayableStream);
-          if (first) {
-            next = { episode: first, season: later };
-            break;
-          }
-        }
-      }
+      const next = findNextEpisode(movie.seasons, season, episode);
       if (next) {
         pendingEpisodeSelectRef.current = next.episode.id;
         wake();
@@ -988,6 +1008,28 @@ export default function VideoPlayerScreen({
     (playPauseRef.current as any)?.focus?.();
     wake();
   };
+  const nextEpisode = React.useMemo(
+    () => (episode && season ? findNextEpisode(movie.seasons, season, episode) : null),
+    [movie.seasons, season, episode]
+  );
+  const goToNextEpisode = () => {
+    if (!nextEpisode || pendingEpisodeSelectRef.current) return;
+    ToastAndroid.show(lang === "ar" ? `الحلقة التالية: ${nextEpisode.episode.number}` : `Next episode: ${nextEpisode.episode.number}`, ToastAndroid.SHORT);
+    selectEpisodeFromRowRef.current(nextEpisode.episode, nextEpisode.season);
+  };
+  const goToNextEpisodeRef = useRef(goToNextEpisode);
+  goToNextEpisodeRef.current = goToNextEpisode;
+  // The top row, left to right - up from play/pause lands on its first button, left/right walk it.
+  const topControls: PlayerControl[] = [
+    ...(qualityOptions.length > 0 ? (["quality"] as const) : []),
+    "subtitles",
+    ...(nextEpisode ? (["nextEpisode"] as const) : []),
+  ];
+  const topControlsRef = useRef(topControls);
+  topControlsRef.current = topControls;
+  useEffect(() => {
+    if (activeControl === "nextEpisode" && !nextEpisode) setActiveControl("subtitles");
+  }, [activeControl, nextEpisode]);
   // Pressing play after the end starts over instead of doing nothing at the last frame.
   const restartIfEnded = (): boolean => {
     if (!endedRef.current) return false;
@@ -1119,35 +1161,8 @@ export default function VideoPlayerScreen({
         return "";
       }
     };
-    // Memory guard. The native heap climbs ~6MB per minute of playback whatever is on screen (JS and
-    // Java heaps stay flat, image trims change nothing) until the TV kills the app at ~300MB, 20-30
-    // minutes in. Past NATIVE_RELOAD_MB the player is rebuilt in place at the same position - a
-    // second of loading - which releases everything the playback engine and its connections hold.
-    // If a rebuild didn't bring the native heap down, it isn't repeated (the trail shows that too).
-    let lastReloadAt = 0;
-    let nativeBeforeReload = 0;
-    let reloadHelps = true;
     const memTimer = setInterval(() => {
-      const label = `t=${Math.round(currentTimeRef.current / 60)}m${jsHeap()} sub=${subtitleEnabledRef.current ? 1 : 0}`;
-      recordPlaybackMemory(label).then((nativeMb) => {
-        if (!nativeMb) return;
-        if (nativeBeforeReload && Date.now() - lastReloadAt < 3 * 60 * 1000) {
-          if (nativeMb > nativeBeforeReload - 30) reloadHelps = false;
-          nativeBeforeReload = 0;
-        }
-        if (!reloadHelps || nativeMb < NATIVE_RELOAD_MB || Date.now() - lastReloadAt < 8 * 60 * 1000) return;
-        if (!hasEverPlayedRef.current || pausedRef.current || loadingRef.current) return;
-        if (subtitlePanelOpenRef.current || qualityPanelOpenRef.current || episodeRowOpenRef.current) return;
-        lastReloadAt = Date.now();
-        nativeBeforeReload = nativeMb;
-        recordPlaybackMemory(`reload@${nativeMb}MB`);
-        pendingResumeRef.current = {
-          positionSeconds: currentTimeRef.current,
-          durationSeconds: latestProgressRef.current?.seekableDuration ?? 0,
-          updatedAt: Date.now(),
-        };
-        setRetryToken((t) => t + 1);
-      });
+      recordPlaybackMemory(`t=${Math.round(currentTimeRef.current / 60)}m${jsHeap()} sub=${subtitleEnabledRef.current ? 1 : 0}`);
     }, 60000);
     return () => {
       clearTimeout(trimTimer);
@@ -1174,7 +1189,7 @@ export default function VideoPlayerScreen({
     if (server) onChangePreferredQuality(qualityLabel(server.quality, lang));
     pendingResumeRef.current = {
       positionSeconds: currentTimeRef.current,
-      durationSeconds: progress?.seekableDuration ?? 0,
+      durationSeconds: latestProgressRef.current?.seekableDuration ?? 0,
       updatedAt: Date.now(),
     };
     setServerIndex(index);
@@ -1310,71 +1325,57 @@ export default function VideoPlayerScreen({
         // The seek bar's own hold-to-seek still needs the "up" (key-release) half of a left/right
         // press even while the episode row is open - the row itself has nothing analogous to
         // release-handle, so only forward this when the row isn't the one currently active.
-        if (!episodeRowOpenRef.current && (activeControlRef.current === "seekBar" || activeControlRef.current === "playPause")) {
+        if (!episodeRowOpenRef.current && activeControlRef.current === "playPause") {
           if (direction === "left" || direction === "right") stopHoldSeek();
         }
         return;
       }
 
-      // The episode row (see EpisodeRow.tsx/openEpisodeRow) owns all four directions itself while
-      // open, entirely separately from the three main controls' own activeControl state machine
-      // below - left/right move within whichever season is currently showing, up/down replace it
-      // with the adjacent season outright (the original, simpler behavior - a separate focusable
-      // season button that had to be selected first, then adjusted, turned out to look and feel
-      // worse than just letting up/down switch it directly while browsing).
+      // The episode row owns all four directions while open: left/right walk the cards, up reaches
+      // the season button, and only after pressing it do up/down change the season.
       if (episodeRowOpenRef.current) {
         const seasons = movie.seasons ?? [];
         const seasonIdx = seasons.findIndex((sn) => sn.number === episodeRowSeasonNumberRef.current);
         const currentSeason = seasons[seasonIdx];
         if (!currentSeason) return;
         wake();
-        if (direction === "left") {
+        const zone = episodeRowZoneRef.current;
+        if (zone === "seasonPicking") {
+          const target = direction === "down" ? seasons[seasonIdx + 1] : direction === "up" ? seasons[seasonIdx - 1] : undefined;
+          if (target) {
+            setEpisodeRowIndex(0);
+            setEpisodeRowSeasonNumber(target.number);
+          }
+        } else if (zone === "seasonButton") {
+          if (direction === "down") setEpisodeRowZone("cards");
+        } else if (direction === "left") {
           setEpisodeRowIndex((i) => Math.max(0, i - 1));
         } else if (direction === "right") {
           setEpisodeRowIndex((i) => Math.min(currentSeason.episodes.length - 1, i + 1));
-        } else if (direction === "down") {
-          const next = seasons[seasonIdx + 1];
-          if (next) {
-            setEpisodeRowIndex(0);
-            setEpisodeRowSeasonNumber(next.number);
-          }
-        } else if (direction === "up") {
-          const prev = seasons[seasonIdx - 1];
-          if (prev) {
-            setEpisodeRowIndex(0);
-            setEpisodeRowSeasonNumber(prev.number);
-          }
-          // Already the first season - stays put rather than closing the row.
+        } else if (direction === "up" && seasons.length > 1) {
+          setEpisodeRowZone("seasonButton");
         }
         return;
       }
 
       const current = activeControlRef.current;
-      // On the lower player controls, left/right always seek. Settings are reached vertically
-      // from the seek bar so moving across the video never unexpectedly jumps to a top corner.
-      if ((current === "seekBar" || current === "playPause") && (direction === "left" || direction === "right")) {
+      // At the bottom, left/right move through the video. Up goes straight to the top icons, where
+      // left/right walk the icons instead, and down hands left/right back to the video.
+      if (current === "playPause" && (direction === "left" || direction === "right")) {
         startHoldSeek(direction === "right" ? 1 : -1);
         return;
       }
       wake();
-      if (direction === "up" && current === "playPause") setActiveControl("seekBar");
-      else if (direction === "up" && current === "seekBar") {
-        setActiveControl(qualityOptions.length > 0 ? "quality" : "subtitles");
+      if (current === "playPause") {
+        if (direction === "up") setActiveControl(topControlsRef.current[0]);
+        else if (direction === "down" && hasEpisodesListRef.current) openEpisodeRowRef.current();
+        return;
       }
-      else if (direction === "down" && (current === "quality" || current === "subtitles")) setActiveControl("seekBar");
-      else if (direction === "down" && current === "seekBar") setActiveControl("playPause");
-      // Spatial order left-to-right is playPause, quality, subtitles (see qualityBtnFloat's own
-      // comment on why it sits one button-width-plus-gap left of the subtitles button) - left/
-      // right walk that same order regardless of which of the three is currently active.
-      else if (direction === "left" && current === "subtitles") setActiveControl("quality");
-      else if (direction === "right" && current === "playPause") setActiveControl("quality");
-      else if (direction === "right" && current === "quality") setActiveControl("subtitles");
-      // Down from play/pause opens the row instead of being a no-op, exactly like pressing down
-      // to reveal a video's description/playlist below it - guarded by hasEpisodesListRef so a
-      // movie (no seasons) never does anything on this press.
-      else if (direction === "down" && current === "playPause" && hasEpisodesListRef.current) {
-        openEpisodeRowRef.current();
-      }
+      const top = topControlsRef.current;
+      const index = top.indexOf(current);
+      if (direction === "down") setActiveControl("playPause");
+      else if (direction === "left") setActiveControl(top[Math.max(0, index - 1)]);
+      else if (direction === "right") setActiveControl(top[Math.min(top.length - 1, index + 1)]);
     });
     // OK/select, captured the same way and for the same reason as the directions above - a
     // focused Pressable's onPress *should* fire on DPAD_CENTER/ENTER without any of this, but
@@ -1393,6 +1394,16 @@ export default function VideoPlayerScreen({
       // episodeRowIndexRef/episodeRowSeasonNumberRef are the same "always read the live value
       // from a one-time subscription" pattern the rest of this listener already relies on.
       if (episodeRowOpenRef.current) {
+        if (episodeRowZoneRef.current === "seasonButton") {
+          setEpisodeRowZone("seasonPicking");
+          wake();
+          return;
+        }
+        if (episodeRowZoneRef.current === "seasonPicking") {
+          setEpisodeRowZone("cards");
+          wake();
+          return;
+        }
         const targetSeason = (movie.seasons ?? []).find((sn) => sn.number === episodeRowSeasonNumberRef.current);
         const targetEpisode = targetSeason?.episodes[episodeRowIndexRef.current];
         if (targetSeason && targetEpisode && targetEpisode.hasPlayableStream) {
@@ -1412,6 +1423,11 @@ export default function VideoPlayerScreen({
       // Same reasoning as the subtitles branch above, for the quality button.
       if (activeControlRef.current === "quality") {
         setQualityPanelOpen(true);
+        return;
+      }
+      if (activeControlRef.current === "nextEpisode") {
+        goToNextEpisodeRef.current();
+        wake();
         return;
       }
       // Toggling from here (see the comment above) bypasses RN's normal focus-driven Pressable
@@ -1491,10 +1507,9 @@ export default function VideoPlayerScreen({
   //
   // Computed from `progress` (React state, throttled to ~1s - see progressUpdateInterval's own
   // comment) it used to mean a cue could show up to a second late even with a perfectly-set
-  // offset, reported as subtitles still reading as "not synced" - `cueText` instead is
+  // offset, reported as subtitles still reading as "not synced" - the cue store instead is
   // recomputed on every onProgress tick regardless of that throttle (see onProgress below), so a
   // cue change reaches the screen within one tick of the real playback position.
-  const currentCue = cueText;
   const duration = progress?.seekableDuration ?? 0;
   const currentTime = progress?.currentTime ?? 0;
   const barsHidden = !controlsVisible;
@@ -1662,6 +1677,19 @@ export default function VideoPlayerScreen({
                 }}
                 onPress={() => controlsVisible ? openSubtitlePanel() : wake()}
               />
+              {!!nextEpisode && (
+                <CtrlButton
+                  Icon={SkipForward}
+                  iconFill
+                  busy={!!pendingEpisodeId}
+                  forceFocused={activeControl === "nextEpisode"}
+                  onFocus={() => {
+                    setActiveControl("nextEpisode");
+                    wake();
+                  }}
+                  onPress={() => (controlsVisible ? goToNextEpisode() : wake())}
+                />
+              )}
             </View>
             <View style={styles.headerRight}>
               {movie.logoUrl || movie.titleLogo ? (
@@ -1726,7 +1754,7 @@ export default function VideoPlayerScreen({
             ytCueText (recomputed on every tick in onMessage, not throttled the way ytCurrentTime's
             own state now is - see its own comment) rather than recomputing it here from the
             throttled value, which would otherwise let a cue show up to a second late. Same visual
-            style as native playback - see currentCue's own render below for the identical block
+            style as native playback - see CueOverlay's render below for the identical block
             this mirrors. */}
         {!!ytCueText && (
           <View style={styles.subtitleWrap} pointerEvents="none">
@@ -1737,7 +1765,7 @@ export default function VideoPlayerScreen({
             controlsVisible/wake() timer the native player's own bar already uses (see wake's own
             comment), so pressing OK/left/right here reveals it and resets the same 4s countdown
             rather than needing a second, separate visibility system. Reuses the exact same
-            FocusableSeekBar/CtrlButton the native branch's own bar renders (see their own
+            SeekBar/CtrlButton the native branch's own bar renders (see their own
             components below) instead of a second, hand-built copy of the same bar/track/thumb
             markup - activeControl/startHoldSeek/the shared onNavKey+onOkKey handler already treat
             this branch's own state (ytPaused/ytCurrentTime/ytCommand) as just another target to
@@ -1748,26 +1776,7 @@ export default function VideoPlayerScreen({
           onLayout={(e) => setBottomBarHeight(e.nativeEvent.layout.height)}
           pointerEvents="box-none"
         >
-          <FocusableSeekBar
-            ref={setSeekBarRef}
-            currentTime={holdSeekPreview ?? ytCurrentTime}
-            duration={ytDuration}
-            isSeeking={holdSeekPreview != null}
-            previewUri={episode?.thumbnail ? posterUrl(episode.thumbnail, "w342") : undefined}
-            fallbackUri={posterUrl(movie.backdrop, "w780") || undefined}
-            posterFallbackUri={posterUrl(movie.poster, "w780") || undefined}
-            focusable={!subtitlePanelOpen}
-            forceFocused={activeControl === "seekBar"}
-            onFocus={() => {
-              setActiveControl("seekBar");
-              wake();
-            }}
-            onPress={() => {
-              setActiveControl("playPause");
-              wake();
-              (playPauseRef.current as any)?.focus?.();
-            }}
-          />
+          <SeekBar currentTime={holdSeekPreview ?? ytCurrentTime} duration={ytDuration} isSeeking={holdSeekPreview != null} />
           <View style={styles.controlsRow}>
             <CtrlButton
               ref={setPlayPauseRef}
@@ -1882,7 +1891,9 @@ export default function VideoPlayerScreen({
           // lookup right below can run at the tighter interval, without also dragging the rest
           // of the screen along with it on every tick.
           latestProgressRef.current = data;
-          if (now - lastProgressStateRef.current >= (controlsVisible ? 1000 : 5000)) {
+          // Nothing on screen shows the position while the bars are hidden, so the screen isn't
+          // re-rendered for it at all then - revealing them catches up from latestProgressRef.
+          if (controlsVisible && now - lastProgressStateRef.current >= 1000) {
             lastProgressStateRef.current = now;
             setProgress(data);
           }
@@ -1893,7 +1904,7 @@ export default function VideoPlayerScreen({
           const nextCue = subtitleSettings.enabled
             ? activeCueText(cues, (data.currentTime - subtitleOffsetMs / 1000) / subtitleSpeed)
             : null;
-          setCueText((prev) => (prev === nextCue ? prev : nextCue));
+          cueStore.set(nextCue);
           // Throttled to roughly once every 10s of real time, independent of how often
           // onProgress itself now fires - far more often than a resume point needs to be this
           // fresh for.
@@ -1946,7 +1957,7 @@ export default function VideoPlayerScreen({
             midstreamRetryCountRef.current += 1;
             pendingResumeRef.current = {
               positionSeconds: currentTimeRef.current,
-              durationSeconds: progress?.seekableDuration ?? 0,
+              durationSeconds: latestProgressRef.current?.seekableDuration ?? 0,
               updatedAt: Date.now(),
             };
             setLoading(true);
@@ -1996,7 +2007,7 @@ export default function VideoPlayerScreen({
         // everything) at whatever rate this fires is still only actually done once a second,
         // throttled inside onProgress itself (see lastProgressStateRef there), so raising the
         // native firing rate back up doesn't reintroduce that per-tick full-screen re-render
-        // cost. What it does buy: subtitle cue lookup (see cueText/currentCue above) now runs
+        // cost. What it does buy: subtitle cue lookup (see the cue store above) now runs
         // against a currentTime that's at most ~250ms stale instead of up to a full second -
         // reported as subtitles still reading as "not synced" even with a correct offset, since
         // a cue could sit on screen up to a second past where it should have already changed.
@@ -2018,11 +2029,7 @@ export default function VideoPlayerScreen({
         </View>
       )}
 
-      {!!currentCue && (
-        <View style={styles.subtitleWrap} pointerEvents="none">
-          <SubtitleLines text={currentCue} settings={subtitleSettings} />
-        </View>
-      )}
+      <CueOverlay store={cueStore} settings={subtitleSettings} />
 
       {showAgeRating && !!movie.ageRating && (
         <View style={styles.ageRatingWrap} pointerEvents="none">
@@ -2079,6 +2086,20 @@ export default function VideoPlayerScreen({
               }}
               onPress={() => controlsVisible ? openSubtitlePanel() : wake()}
             />
+            {!!nextEpisode && (
+              <CtrlButton
+                Icon={SkipForward}
+                iconFill
+                busy={!!pendingEpisodeId}
+                focusable={!subtitlePanelOpen && !qualityPanelOpen}
+                forceFocused={activeControl === "nextEpisode"}
+                onFocus={() => {
+                  setActiveControl("nextEpisode");
+                  wake();
+                }}
+                onPress={() => (controlsVisible ? goToNextEpisode() : wake())}
+              />
+            )}
           </View>
           <View style={styles.headerRight}>
             {movie.logoUrl || movie.titleLogo ? (
@@ -2139,29 +2160,7 @@ export default function VideoPlayerScreen({
             always present behind the seek bar/controls regardless of whether the row has ever
             been opened this session. */}
         <LinearGradient colors={["transparent", "rgba(0,0,0,0.75)"]} style={StyleSheet.absoluteFill} pointerEvents="none" />
-        <FocusableSeekBar
-          ref={setSeekBarRef}
-          currentTime={holdSeekPreview ?? currentTime}
-          duration={duration}
-          isSeeking={holdSeekPreview != null}
-          previewUri={episode?.thumbnail ? posterUrl(episode.thumbnail, "w342") : undefined}
-          fallbackUri={posterUrl(movie.backdrop, "w780") || undefined}
-          posterFallbackUri={posterUrl(movie.poster, "w780") || undefined}
-          focusable={!subtitlePanelOpen && !qualityPanelOpen}
-          forceFocused={activeControl === "seekBar"}
-          onFocus={() => {
-            setActiveControl("seekBar");
-            wake();
-          }}
-          // The seek bar has no action of its own (real seeking is the raw left/right capture
-          // above, independent of focus) - OK here always routes back to play/pause instead of
-          // doing nothing, so a press here can never leave the viewer with no visible way back.
-          onPress={() => {
-            setActiveControl("playPause");
-            wake();
-            (playPauseRef.current as any)?.focus?.();
-          }}
-        />
+        <SeekBar currentTime={holdSeekPreview ?? currentTime} duration={duration} isSeeking={holdSeekPreview != null} />
 
         <View style={styles.controlsRow}>
           <CtrlButton
@@ -2227,6 +2226,8 @@ export default function VideoPlayerScreen({
           backdrop={movie.backdrop}
           poster={movie.poster}
           activeIndex={episodeRowIndex}
+          focusZone={episodeRowZone}
+          canSwitchSeason={(movie.seasons?.length ?? 0) > 1}
           hidden={barsHidden || exiting}
           currentEpisodeId={episode?.id}
           resolvingEpisodeId={exiting ? null : resolvingEpisodeId ?? pendingEpisodeId}
@@ -2983,91 +2984,39 @@ function EpisodeHint() {
   );
 }
 
-const FocusableSeekBar = React.forwardRef<View, {
-  currentTime: number;
-  duration: number;
-  isSeeking: boolean;
-  previewUri?: string;
-  fallbackUri?: string;
-  posterFallbackUri?: string;
-  onFocus?: () => void;
-  onPress?: () => void;
-  nextFocusUp?: number;
-  nextFocusDown?: number;
-  // Overrides the highlight regardless of Focusable's own tracked focus state - see
-  // activeControl's own comment in VideoPlayerScreen for why that tracked state alone isn't
-  // reliable here.
-  forceFocused?: boolean;
-  // False while the subtitle panel is open - see the panel's own containment comment in
-  // VideoPlayerScreen.
-  focusable?: boolean;
-}>(function FocusableSeekBar({ currentTime, duration, isSeeking, previewUri, fallbackUri, posterFallbackUri, onFocus, onPress, nextFocusUp, nextFocusDown, forceFocused, focusable }, ref) {
+// Display only: left/right on the remote move through the video from the play/pause button, so
+// nothing here takes focus. While seeking, a small white card above the thumb shows the position.
+function SeekBar({ currentTime, duration, isSeeking }: { currentTime: number; duration: number; isSeeking: boolean }) {
   const playedPct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
-  const [previewFailed, setPreviewFailed] = useState(false);
-  const [failedFallbackUris, setFailedFallbackUris] = useState<string[]>([]);
-  useEffect(() => {
-    setPreviewFailed(false);
-    setFailedFallbackUris([]);
-  }, [previewUri, fallbackUri, posterFallbackUri, isSeeking]);
-  const fallbackUris = [fallbackUri, posterFallbackUri].filter((uri): uri is string => !!uri);
-  const displayFallbackUri = fallbackUris.find((uri) => !failedFallbackUris.includes(uri));
-  const displayUri = previewUri && !previewFailed ? previewUri : displayFallbackUri;
-  const showingArtworkFallback = !!displayUri && (previewFailed || displayUri !== previewUri);
-
   return (
-    <Focusable
-      ref={ref}
-      onPress={onPress}
-      onFocusChange={(focused) => focused && onFocus?.()}
-      nextFocusUp={nextFocusUp}
-      nextFocusDown={nextFocusDown}
-      focusable={focusable}
-      scaleTo={1}
-    >
-      {(trackedFocused: boolean) => {
-        const focused = trackedFocused || !!forceFocused;
-        return (
-          <View style={styles.seekRow}>
-            <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
-            <View style={styles.seekTrack}>
-              <View style={styles.seekTrackBg} pointerEvents="none" />
-              <View style={[styles.seekTrackFill, focused && styles.seekTrackFillFocused, { width: `${playedPct}%` }]} pointerEvents="none" />
-              {isSeeking ? (
-                <View style={[styles.seekPreviewWrap, { left: `${playedPct}%` }]} pointerEvents="none">
-                  {displayUri ? (
-                    <Image
-                      source={{ uri: displayUri }}
-                      style={styles.seekPreviewImage}
-                      resizeMode="cover"
-                      blurRadius={showingArtworkFallback ? s(10) : 0}
-                      fadeDuration={0}
-                      onError={() =>
-                        displayUri === previewUri
-                          ? setPreviewFailed(true)
-                          : setFailedFallbackUris((current) => [...current, displayUri])
-                      }
-                    />
-                  ) : null}
-                  {showingArtworkFallback ? <View style={styles.seekPreviewDarkScrim} /> : null}
-                  {showingArtworkFallback || !displayUri ? (
-                    <Text style={[styles.seekPreviewFallbackText, StyleSheet.absoluteFill]}>{formatTime(currentTime)}</Text>
-                  ) : (
-                    <View style={styles.seekPreviewTime}><Text style={styles.seekBubbleText}>{formatTime(currentTime)}</Text></View>
-                  )}
-                </View>
-              ) : null}
-              <View
-                style={[styles.seekThumb, (isSeeking || focused) && styles.seekThumbActive, { left: `${playedPct}%` }]}
-                pointerEvents="none"
-              />
-            </View>
-            <Text style={styles.timeText}>{formatTime(duration)}</Text>
+    <View style={styles.seekRow}>
+      <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+      <View style={styles.seekTrack}>
+        <View style={styles.seekTrackBg} pointerEvents="none" />
+        <View style={[styles.seekTrackFill, isSeeking && styles.seekTrackFillFocused, { width: `${playedPct}%` }]} pointerEvents="none" />
+        {isSeeking && (
+          <View style={[styles.seekBubble, { left: `${playedPct}%` }]} pointerEvents="none">
+            <Text style={styles.seekBubbleText}>{formatTime(currentTime)}</Text>
           </View>
-        );
-      }}
-    </Focusable>
+        )}
+        <View style={[styles.seekThumb, isSeeking && styles.seekThumbActive, { left: `${playedPct}%` }]} pointerEvents="none" />
+      </View>
+      <Text style={styles.timeText}>{formatTime(duration)}</Text>
+    </View>
   );
-});
+}
+
+// Subscribes to the live subtitle cue on its own, so a cue change redraws this text and nothing
+// else - it used to re-render the whole player screen every few seconds for the entire film.
+function CueOverlay({ store, settings }: { store: CueStore; settings: SubtitleSettings }) {
+  const text = useSyncExternalStore(store.subscribe, store.get);
+  if (!text) return null;
+  return (
+    <View style={styles.subtitleWrap} pointerEvents="none">
+      <SubtitleLines text={text} settings={settings} />
+    </View>
+  );
+}
 
 const CtrlButton = React.forwardRef<View, {
   Icon: typeof Play;
@@ -3082,6 +3031,7 @@ const CtrlButton = React.forwardRef<View, {
   nextFocusRight?: number;
   big?: boolean;
   iconFill?: boolean;
+  busy?: boolean;
   // Overrides the highlight regardless of Focusable's own tracked focus state - see
   // activeControl's own comment in VideoPlayerScreen for why that tracked state alone isn't
   // reliable here.
@@ -3090,7 +3040,7 @@ const CtrlButton = React.forwardRef<View, {
   // contain focus away from - see the panel's own containment comment in VideoPlayerScreen.
   focusable?: boolean;
 }>(function CtrlButton(
-  { Icon, onPress, onPressIn, onPressOut, onFocus, hasTVPreferredFocus, nextFocusUp, nextFocusDown, nextFocusLeft, nextFocusRight, big, iconFill, forceFocused, focusable },
+  { Icon, onPress, onPressIn, onPressOut, onFocus, hasTVPreferredFocus, nextFocusUp, nextFocusDown, nextFocusLeft, nextFocusRight, big, iconFill, busy, forceFocused, focusable },
   ref
 ) {
   return (
@@ -3117,7 +3067,11 @@ const CtrlButton = React.forwardRef<View, {
           // behind an already-white fill is redundant at best (rendered as a visible hatch
           // artifact on at least one real device).
           <View style={[styles.ctrlBtn, big && styles.ctrlBtnBig, focused && styles.ctrlBtnFocused]}>
-            <Icon size={big ? s(28) : s(22)} color={focused ? "#000" : "#fff"} fill={iconFill ? (focused ? "#000" : "#fff") : "none"} />
+            {busy ? (
+              <ActivityIndicator color={focused ? "#000" : "#fff"} />
+            ) : (
+              <Icon size={big ? s(28) : s(22)} color={focused ? "#000" : "#fff"} fill={iconFill ? (focused ? "#000" : "#fff") : "none"} />
+            )}
           </View>
         );
       }}
@@ -3265,40 +3219,15 @@ const styles = StyleSheet.create({
   seekBubble: {
     position: "absolute",
     bottom: "100%",
-    marginBottom: s(10),
-    marginLeft: -s(24),
-    width: s(48),
-    paddingVertical: s(4),
-    borderRadius: 6,
+    marginBottom: s(8),
+    marginLeft: -s(44),
+    width: s(88),
+    paddingVertical: s(5),
+    borderRadius: s(6),
     backgroundColor: "#fff",
     alignItems: "center",
   },
-  seekPreviewWrap: {
-    position: "absolute",
-    bottom: "100%",
-    marginBottom: s(12),
-    marginLeft: -s(84),
-    width: s(168),
-    height: s(96),
-    borderRadius: s(8),
-    borderWidth: 2,
-    borderColor: "#fff",
-    backgroundColor: "#111",
-    overflow: "hidden",
-  },
-  seekPreviewImage: { width: "100%", height: "100%" },
-  seekPreviewDarkScrim: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.5)" },
-  seekPreviewFallbackText: { color: "#fff", fontSize: fs(26), fontFamily: font.black, textShadowColor: "rgba(255,255,255,0.25)", textShadowRadius: s(8), textAlign: "center", textAlignVertical: "center", includeFontPadding: false },
-  seekPreviewTime: {
-    position: "absolute",
-    right: s(5),
-    bottom: s(5),
-    paddingHorizontal: s(6),
-    paddingVertical: s(3),
-    borderRadius: s(4),
-    backgroundColor: "rgba(0,0,0,0.82)",
-  },
-  seekBubbleText: { color: "#000", fontSize: fs(11), fontFamily: font.black },
+  seekBubbleText: { color: "#000", fontSize: fs(15), fontFamily: font.black },
   controlsRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", marginTop: s(4) },
   episodeHint: { alignItems: "center", marginTop: s(2) },
   // Pinned to the screen's own right edge (not centered alongside play/pause, not floating mid-

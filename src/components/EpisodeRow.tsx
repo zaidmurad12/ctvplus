@@ -1,12 +1,14 @@
 import React, { useEffect, useRef } from "react";
-import { View, Text, Image, ScrollView, ActivityIndicator, Pressable, StyleSheet, Animated, useWindowDimensions } from "react-native";
+import { View, Text, ScrollView, ActivityIndicator, Pressable, StyleSheet, Animated, useWindowDimensions } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import { Check, Play, ChevronUp, ChevronDown } from "lucide-react-native";
 import type { Episode, Season } from "../api";
-import { posterUrl } from "../api";
+import EpisodeArtwork from "./EpisodeArtwork";
 import { colors, font } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, pickText, upcomingLabel } from "../i18n";
+
+export type EpisodeRowZone = "cards" | "seasonButton" | "seasonPicking";
 
 interface Props {
   season: Season;
@@ -17,6 +19,11 @@ interface Props {
   // real Android focus. There is nothing else in this row for Android's own focus engine to find
   // at all - see the screen-level comment on why that's deliberate.
   activeIndex: number;
+  // Where the D-pad is inside the row: on the cards, on the season button, or moving between
+  // seasons with up/down after pressing it (see VideoPlayer's onNavKey).
+  focusZone: EpisodeRowZone;
+  // One season has nothing to switch to, so its label stays a plain label.
+  canSwitchSeason: boolean;
   // Fades with the rest of the player's bars (see barsHidden) while open, and unmounts outright
   // on close (select/back) - see VideoPlayerScreen's own closeEpisodeRow.
   hidden: boolean;
@@ -39,25 +46,106 @@ const LIST_PADDING = 36;
 // How far the incoming season's content starts offset (then animates to 0) when switching
 // seasons - large enough to read as a deliberate slide, not just a fade.
 const SEASON_SLIDE_DISTANCE = 36;
+// Only the cards around the highlighted one are built - a long season has hundreds, and building
+// them all is what made opening the row and switching seasons slow.
+const WINDOW_BEFORE = 6;
+const WINDOW_AFTER = 8;
+const CARD_BORDER = 2;
+const CARD_PADDING = 4;
 
-// The single always-visible-while-open row this got redesigned into (see VideoPlayer's own
-// comment on the season-switching state machine) - literally one season at a time, replaced
-// wholesale (not appended below) when the viewer moves to another one via up/down directly (a
-// separate focusable season button that had to be selected before it would respond to up/down was
-// tried and dropped - it looked and felt worse than just switching immediately). The darkening
-// behind this is drawn centrally by VideoPlayerScreen (see its own bottomScrim comment) - one
-// continuous scrim, not a separate gradient owned by this component.
-// Wrapped in React.memo below - VideoPlayer re-renders roughly 4x/second during normal playback
-// (an un-throttled cueText update, for subtitle timing accuracy - see its own comment), which
-// without a memo boundary here was fully re-mapping and re-mounting-in-place every episode card
-// in this row (Image, LinearGradient, Pressable each) on every one of those ticks whenever the
-// episode switcher happened to be open, for no reason - nothing about the episode list itself was
-// changing. Real, measurable cost matching "the app became heavy," not a micro-optimization.
+const EpisodeCard = React.memo(function EpisodeCard({
+  ep,
+  left,
+  backdrop,
+  poster,
+  isActive,
+  isPlayingNow,
+  watched,
+  resolving,
+  lang,
+  onSelect,
+}: {
+  ep: Episode;
+  left: number;
+  backdrop?: string;
+  poster?: string;
+  isActive: boolean;
+  isPlayingNow: boolean;
+  watched: boolean;
+  resolving: boolean;
+  lang: Lang;
+  onSelect: (episode: Episode) => void;
+}) {
+  return (
+    <Pressable style={[styles.cardSlot, { left }]} onPress={() => onSelect(ep)}>
+      <View style={[styles.card, (isActive || isPlayingNow) && styles.cardFocused]}>
+        <View style={styles.thumbBox}>
+          <EpisodeArtwork thumbnail={ep.thumbnail} backdrop={backdrop} poster={poster} />
+          {/* The bottom-anchored fade keeps the title readable however bright the artwork is. */}
+          <LinearGradient
+            colors={["transparent", "rgba(0,0,0,0.05)", "rgba(0,0,0,0.9)"]}
+            locations={[0, 0.45, 1]}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+          <View style={styles.numberBadge}>
+            <Text style={styles.numberText}>{ep.number}</Text>
+          </View>
+          {watched && !isPlayingNow && (
+            <View style={styles.watchedBadge}>
+              <Check size={s(12)} color="#000" strokeWidth={3.5} />
+            </View>
+          )}
+          {/* Keyed off which episode is actually resolving, not the highlighted one: a tapped card
+              isn't necessarily the D-pad-highlighted one. */}
+          {resolving ? (
+            <View style={styles.playOverlay}>
+              <ActivityIndicator color="#fff" />
+            </View>
+          ) : (
+            !isPlayingNow &&
+            isActive &&
+            ep.hasPlayableStream && (
+              <View style={styles.playOverlay}>
+                <Play size={s(22)} color="#fff" fill="#fff" />
+              </View>
+            )
+          )}
+          <View style={styles.titleOverlay} pointerEvents="none">
+            <Text numberOfLines={1} style={styles.titleOverlayText}>
+              {pickText(ep.titleAr, ep.titleEn, lang)}
+            </Text>
+            {isPlayingNow ? (
+              <View style={styles.nowPlayingBadge}>
+                <Check size={s(12)} color="#000" strokeWidth={3.5} />
+              </View>
+            ) : !ep.hasPlayableStream ? (
+              <View style={styles.comingSoonBadge}>
+                <Text style={styles.comingSoonText}>
+                  {upcomingLabel(ep.airDate, lang) ?? (lang === "ar" ? "قريبًا" : "Coming Soon")}
+                </Text>
+              </View>
+            ) : (
+              !!ep.duration && <Text style={styles.durationTextInline}>{ep.duration}</Text>
+            )}
+          </View>
+        </View>
+      </View>
+    </Pressable>
+  );
+});
+
+// One season at a time, replaced wholesale when the viewer picks another with the season button
+// above the cards. The darkening behind this is drawn centrally by VideoPlayerScreen (see its own
+// bottomScrim comment). Wrapped in React.memo below: nothing about the list changes on the
+// player's own periodic re-renders.
 function EpisodeRow({
   season,
   backdrop,
   poster,
   activeIndex,
+  focusZone,
+  canSwitchSeason,
   hidden,
   currentEpisodeId,
   resolvingEpisodeId,
@@ -67,7 +155,6 @@ function EpisodeRow({
   onHeightChange,
 }: Props) {
   const scrollRef = useRef<any>(null);
-  const [failedImages, setFailedImages] = React.useState<Record<string, string[]>>({});
   const scrollXRef = useRef(0);
   const previousSeasonIdRef = useRef(season.id);
   const { width: viewportWidth } = useWindowDimensions();
@@ -116,21 +203,30 @@ function EpisodeRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [season.number]);
 
+  const count = season.episodes.length;
+  const step = s(CARD_WIDTH) + s(CARD_GAP);
+  const windowStart = Math.max(0, activeIndex - WINDOW_BEFORE);
+  const windowEnd = Math.min(count, activeIndex + WINDOW_AFTER + 1);
+
   return (
     <View
       style={[styles.wrap, hidden && styles.hiddenWrap]}
       pointerEvents={hidden ? "none" : "box-none"}
       onLayout={(e) => onHeightChange?.(e.nativeEvent.layout.height)}
     >
-      {/* Purely informational, not itself focusable/selectable - up/down switch the season
-          directly while browsing the cards below (see VideoPlayer's onNavKey), this just tells
-          the viewer that's possible and which season is currently showing. */}
-      <View style={styles.seasonIndicator} pointerEvents="none">
-        <ChevronUp size={s(16)} color="#fff" strokeWidth={2.5} />
-        <Text style={styles.seasonIndicatorText}>
+      <View
+        style={[
+          styles.seasonButton,
+          canSwitchSeason && focusZone !== "cards" && styles.seasonButtonFocused,
+          focusZone === "seasonPicking" && styles.seasonButtonPicking,
+        ]}
+        pointerEvents="none"
+      >
+        {focusZone === "seasonPicking" && <ChevronUp size={s(16)} color="#000" strokeWidth={2.5} />}
+        <Text style={[styles.seasonButtonText, canSwitchSeason && focusZone !== "cards" && styles.seasonButtonTextFocused]}>
           {lang === "ar" ? `الموسم ${season.number}` : `Season ${season.number}`}
         </Text>
-        <ChevronDown size={s(16)} color="#fff" strokeWidth={2.5} />
+        {focusZone === "seasonPicking" && <ChevronDown size={s(16)} color="#000" strokeWidth={2.5} />}
       </View>
       <Animated.View style={{ transform: [{ translateY: slideAnim }], opacity: fadeAnim }}>
         <ScrollView
@@ -138,109 +234,28 @@ function EpisodeRow({
           horizontal
           showsHorizontalScrollIndicator={false}
           scrollEnabled={false}
-          removeClippedSubviews
           contentContainerStyle={styles.list}
         >
-          {season.episodes.map((ep, i) => {
-            const isActive = i === activeIndex;
-            const isPlayingNow = ep.id === currentEpisodeId;
-            const watched = isEpisodeWatched(season.number, ep.number);
-            const artworkCandidates = [ep.thumbnail, backdrop, poster]
-              .filter((uri): uri is string => !!uri)
-              .map((uri) => posterUrl(uri, "w342"))
-              .filter((uri, index, all) => all.indexOf(uri) === index);
-            const failedForEpisode = failedImages[ep.id] ?? [];
-            const artwork = artworkCandidates.find((uri) => !failedForEpisode.includes(uri));
-            const hasEpisodeImage = !!artwork && artwork === artworkCandidates[0];
-            return (
-              <Pressable key={ep.id} onPress={() => onSelectEpisode(ep)}>
-                <View style={[styles.card, (isActive || isPlayingNow) && styles.cardFocused]}>
-                  <View style={styles.thumbBox}>
-                    {artwork ? (
-                      <Image
-                        source={{ uri: artwork }}
-                        style={styles.thumb}
-                        resizeMode="cover"
-                        blurRadius={hasEpisodeImage ? 0 : s(10)}
-                        fadeDuration={0}
-                        onError={() =>
-                          setFailedImages((current) => ({
-                            ...current,
-                            [ep.id]: [...(current[ep.id] ?? []), artwork],
-                          }))
-                        }
-                      />
-                    ) : null}
-                    {!hasEpisodeImage && artwork ? <View style={styles.artworkScrim} pointerEvents="none" /> : null}
-                    {/* The episode title used to be its own line of text below this whole card -
-                        merged into the thumbnail itself per explicit request, the same overlay
-                        recipe MovieCard/RecentCard's own title treatment already uses elsewhere -
-                        a bottom-anchored gradient so the title stays readable over the artwork
-                        regardless of how bright it is, rather than a plain title sitting in dead
-                        space under the card. */}
-                    <LinearGradient
-                      colors={["transparent", "rgba(0,0,0,0.05)", "rgba(0,0,0,0.9)"]}
-                      locations={[0, 0.45, 1]}
-                      style={StyleSheet.absoluteFill}
-                      pointerEvents="none"
-                    />
-                    {hasEpisodeImage ? (
-                      <View style={styles.numberBadge}>
-                        <Text style={styles.numberText}>{ep.number}</Text>
-                      </View>
-                    ) : (
-                      <View style={styles.numberFallback} pointerEvents="none">
-                        <Text style={styles.numberFallbackText}>{ep.number}</Text>
-                      </View>
-                    )}
-                    {watched && !isPlayingNow && (
-                      <View style={styles.watchedBadge}>
-                        <Check size={s(12)} color="#000" strokeWidth={3.5} />
-                      </View>
-                    )}
-                    {/* resolvingEpisodeId is checked before isPlayingNow/isActive - pressing a
-                        card is what sets it (see VideoPlayer's selectEpisodeInPlayer), and a
-                        tapped card isn't necessarily the D-pad-highlighted one, so the spinner
-                        has to key off which episode is actually resolving, not which one merely
-                        looks focused right now. */}
-                    {resolvingEpisodeId === ep.id ? (
-                      <View style={styles.playOverlay}>
-                        <ActivityIndicator color="#fff" />
-                      </View>
-                    ) : (
-                      !isPlayingNow &&
-                      isActive &&
-                      ep.hasPlayableStream && (
-                        <View style={styles.playOverlay}>
-                          <Play size={s(22)} color="#fff" fill="#fff" />
-                        </View>
-                      )
-                    )}
-                    <View style={styles.titleOverlay} pointerEvents="none">
-                      <Text numberOfLines={1} style={styles.titleOverlayText}>
-                        {pickText(ep.titleAr, ep.titleEn, lang)}
-                      </Text>
-                      {isPlayingNow ? (
-                        // A check mark on the episode that's playing (was a "Now Playing" pill), per
-                        // request - the same white circle as the watched badge.
-                        <View style={styles.nowPlayingBadge}>
-                          <Check size={s(12)} color="#000" strokeWidth={3.5} />
-                        </View>
-                      ) : !ep.hasPlayableStream ? (
-                        <View style={styles.comingSoonBadge}>
-                          <Text style={styles.comingSoonText}>
-                            {upcomingLabel(ep.airDate, lang) ?? (lang === "ar" ? "قريبًا" : "Coming Soon")}
-                          </Text>
-                        </View>
-                      ) : (
-                        !!ep.duration && <Text style={styles.durationTextInline}>{ep.duration}</Text>
-                      )}
-                    </View>
-                  </View>
-                </View>
-              </Pressable>
-            );
-          })}
+          <View style={[styles.track, { width: Math.max(0, count * step - s(CARD_GAP)) }]}>
+            {season.episodes.slice(windowStart, windowEnd).map((ep, offset) => {
+              const i = windowStart + offset;
+              return (
+                <EpisodeCard
+                  key={ep.id}
+                  ep={ep}
+                  left={i * step}
+                  backdrop={backdrop}
+                  poster={poster}
+                  isActive={i === activeIndex && focusZone === "cards"}
+                  isPlayingNow={ep.id === currentEpisodeId}
+                  watched={isEpisodeWatched(season.number, ep.number)}
+                  resolving={resolvingEpisodeId === ep.id}
+                  lang={lang}
+                  onSelect={onSelectEpisode}
+                />
+              );
+            })}
+          </View>
         </ScrollView>
       </Animated.View>
     </View>
@@ -249,29 +264,43 @@ function EpisodeRow({
 
 export default React.memo(EpisodeRow);
 
+const thumbHeight = ((s(CARD_WIDTH) - 2 * (s(CARD_PADDING) + CARD_BORDER)) * 9) / 16;
+
 const styles = StyleSheet.create({
   wrap: { position: "absolute", left: 0, right: 0, bottom: s(38), paddingBottom: s(28), paddingTop: s(28) },
   hiddenWrap: { opacity: 0 },
-  seasonIndicator: { alignItems: "center", marginLeft: s(LIST_PADDING), marginBottom: s(14), gap: s(2) },
-  seasonIndicatorText: { color: "#fff", fontSize: fs(13), fontFamily: font.bold, marginVertical: s(1) },
-  list: { gap: s(CARD_GAP), paddingHorizontal: s(LIST_PADDING) },
+  seasonButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: s(6),
+    marginLeft: s(LIST_PADDING),
+    marginBottom: s(14),
+    paddingHorizontal: s(16),
+    paddingVertical: s(7),
+    borderRadius: s(20),
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  seasonButtonFocused: { backgroundColor: "#fff" },
+  seasonButtonPicking: { transform: [{ scale: 1.08 }] },
+  seasonButtonText: { color: "#fff", fontSize: fs(14), fontFamily: font.bold },
+  seasonButtonTextFocused: { color: "#000" },
+  list: { paddingHorizontal: s(LIST_PADDING) },
+  track: { height: thumbHeight + 2 * (s(CARD_PADDING) + CARD_BORDER) },
+  cardSlot: { position: "absolute", top: 0 },
   // No gap/padding for a second child anymore - the title used to be a separate line below the
   // thumbnail (this card's own padding gave it room); now everything lives on the thumbnail
   // itself (see thumbBox's own children), so this card is just a bordered frame around it.
   card: {
     width: s(CARD_WIDTH),
-    padding: s(4),
+    padding: s(CARD_PADDING),
     borderRadius: s(10),
     backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 2,
+    borderWidth: CARD_BORDER,
     borderColor: "transparent",
   },
   cardFocused: { borderColor: "#fff", backgroundColor: "rgba(255,255,255,0.1)" },
   thumbBox: { width: "100%", aspectRatio: 16 / 9, borderRadius: s(6), overflow: "hidden", backgroundColor: "#000" },
-  thumb: { width: "100%", height: "100%" },
-  artworkScrim: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.48)" },
-  numberFallback: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", zIndex: 1 },
-  numberFallbackText: { color: "#fff", fontSize: fs(46), fontFamily: font.black, textShadowColor: "rgba(255,255,255,0.18)", textShadowRadius: s(8) },
   numberBadge: {
     position: "absolute",
     top: s(6),

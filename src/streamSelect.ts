@@ -10,6 +10,7 @@ import { qualityRank } from "./quality";
 // A link that hasn't answered with its headers in 2s isn't dropped - it just goes after the ones
 // that did (see pickBestServers) - so this only bounds how long the start of playback waits.
 const PROBE_TIMEOUT_MS = 2000;
+const PICK_WAIT_MS = 900;
 
 /**
  * A cheap reachability + rough-latency check: asks for 2 bytes and gives up the moment the server
@@ -66,11 +67,15 @@ function probeServer(server: StreamServer): Promise<{ server: StreamServer; late
 export async function pickBestServers(servers: StreamServer[]): Promise<StreamServer[]> {
   if (servers.length <= 1) return servers;
 
-  const results = await Promise.all(servers.map(probeServer));
-  const reachable = results
-    .filter((r): r is { server: StreamServer; latencyMs: number } => r !== null)
-    .sort((a, b) => qualityRank(b.server.quality) - qualityRank(a.server.quality))
-    .map((r) => r.server);
+  // Waiting for every probe let one slow link hold back every start and episode switch by the full
+  // probe timeout. Links that haven't answered by then simply go after the ones that have.
+  const answered: StreamServer[] = [];
+  const allProbes = Promise.all(
+    servers.map((server) => probeServer(server).then((result) => void (result && answered.push(result.server)))),
+  );
+  await Promise.race([allProbes, new Promise<void>((resolve) => setTimeout(resolve, PICK_WAIT_MS))]);
+  if (!answered.length) await allProbes;
+  const reachable = [...answered].sort((a, b) => qualityRank(b.quality) - qualityRank(a.quality));
 
   const reachableUrls = new Set(reachable.map((s) => s.url));
   const unreachable = servers.filter((s) => !reachableUrls.has(s.url));
