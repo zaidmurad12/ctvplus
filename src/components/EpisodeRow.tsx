@@ -1,9 +1,10 @@
 import React, { useEffect, useRef } from "react";
 import { View, Text, ScrollView, ActivityIndicator, Pressable, StyleSheet, Animated, useWindowDimensions } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
-import { Check, Play, ChevronUp, ChevronDown } from "lucide-react-native";
+import { Check, Play } from "lucide-react-native";
 import type { Episode, Season } from "../api";
 import EpisodeArtwork from "./EpisodeArtwork";
+import SeasonButtonFace from "./SeasonButtonFace";
 import { colors, font } from "../theme";
 import { s, fs } from "../scale";
 import { Lang, pickText, upcomingLabel } from "../i18n";
@@ -209,8 +210,6 @@ function EpisodeRow({
   const step = s(CARD_WIDTH) + s(CARD_GAP);
   const windowStart = Math.max(0, activeIndex - WINDOW_BEFORE);
   const windowEnd = Math.min(count, activeIndex + WINDOW_AFTER + 1);
-  const picking = focusZone === "seasonPicking";
-  const seasonButtonLit = focusZone !== "cards" && (hasPreviousSeason || hasNextSeason);
 
   return (
     <View
@@ -219,18 +218,12 @@ function EpisodeRow({
       onLayout={(e) => onHeightChange?.(e.nativeEvent.layout.height)}
     >
       <View style={styles.seasonPicker} pointerEvents="none">
-        {/* Arrow slots keep their space while empty, so the row doesn't jump when picking starts. */}
-        <View style={styles.seasonArrow}>
-          {picking && hasPreviousSeason && <ChevronUp size={s(18)} color="#fff" strokeWidth={3} />}
-        </View>
-        <View style={[styles.seasonButton, seasonButtonLit && styles.seasonButtonFocused, picking && styles.seasonButtonPicking]}>
-          <Text style={[styles.seasonButtonText, seasonButtonLit && styles.seasonButtonTextFocused]}>
-            {lang === "ar" ? `الموسم ${season.number}` : `Season ${season.number}`}
-          </Text>
-        </View>
-        <View style={styles.seasonArrow}>
-          {picking && hasNextSeason && <ChevronDown size={s(18)} color="#fff" strokeWidth={3} />}
-        </View>
+        <SeasonButtonFace
+          season={season}
+          lang={lang}
+          focused={focusZone !== "cards" && (hasPreviousSeason || hasNextSeason)}
+          active={focusZone === "seasonPicking"}
+        />
       </View>
       <Animated.View style={{ transform: [{ translateY: slideAnim }], opacity: fadeAnim }}>
         <ScrollView
@@ -273,14 +266,7 @@ const thumbHeight = ((s(CARD_WIDTH) - 2 * (s(CARD_PADDING) + CARD_BORDER)) * 9) 
 const styles = StyleSheet.create({
   wrap: { position: "absolute", left: 0, right: 0, bottom: s(38), paddingBottom: s(28), paddingTop: s(28) },
   hiddenWrap: { opacity: 0 },
-  seasonPicker: { alignSelf: "flex-start", alignItems: "center", marginLeft: s(LIST_PADDING), marginBottom: s(2) },
-  seasonArrow: { height: s(16), alignItems: "center", justifyContent: "center" },
-  // No background: the lit state is the text going full white with a line under it.
-  seasonButton: { paddingBottom: s(2), borderBottomWidth: 2, borderBottomColor: "transparent" },
-  seasonButtonFocused: { borderBottomColor: "#fff" },
-  seasonButtonPicking: { transform: [{ scale: 1.08 }] },
-  seasonButtonText: { color: "rgba(255,255,255,0.72)", fontSize: fs(17), fontFamily: font.bold, includeFontPadding: false },
-  seasonButtonTextFocused: { color: "#fff" },
+  seasonPicker: { alignSelf: "flex-start", marginLeft: s(LIST_PADDING), marginBottom: s(16) },
   list: { paddingHorizontal: s(LIST_PADDING) },
   track: { height: thumbHeight + 2 * (s(CARD_PADDING) + CARD_BORDER) },
   cardSlot: { position: "absolute", top: 0 },

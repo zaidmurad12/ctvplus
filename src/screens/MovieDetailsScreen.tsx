@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Image, ScrollView, StyleSheet, Dimensions, ActivityIndicator, Animated, ToastAndroid, NativeModules, NativeEventEmitter, findNodeHandle } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
-import { Play, Bookmark, Users, Check, ChevronDown, ChevronUp, Languages } from "lucide-react-native";
+import { Play, Bookmark, Users, Check, ChevronDown, Languages } from "lucide-react-native";
 import type { Movie, Season, Episode, StreamServer, SubtitleTrack, SourceVersion, PlaybackMapping } from "../api";
 import { findSourceVersions, posterUrl, fetchCollection, fetchMovieDetail, fetchShowDetail, fetchEpisodePlayback, fetchCinemanaMoviePlayback, fetchCeeMoviePlayback, findCinemanaMatch, findCeeMatch, bestQualityLabel } from "../api";
 import { pickBestServers } from "../streamSelect";
@@ -13,6 +13,7 @@ import { Lang, pickText, t, genreName, countryName, upcomingLabel } from "../i18
 import type { SelectedPerson } from "./PersonScreen";
 import LogoImage from "../components/LogoImage";
 import EpisodeArtwork from "../components/EpisodeArtwork";
+import SeasonButtonFace from "../components/SeasonButtonFace";
 import { useFocusClamp } from "../useFocusClamp";
 import { useProgressiveReveal } from "../useProgressiveReveal";
 import { pushBackHandler } from "../backStack";
@@ -1034,17 +1035,6 @@ const EpisodeCard = React.memo(function EpisodeCard({
 // - it grows, and up/down then switch the season right away (the episode row follows); OK again,
 // left/right, or leaving it deactivates. While it isn't active, D-pad navigation is left entirely
 // to Android, so moving between the hero's buttons works as usual.
-// The season's own name when it has a real one ("Book One: Water"), otherwise "موسم 2" /
-// "Season 2" in the app's language - catalog names are often just a generic "Season 2" or
-// "الموسم 2" in one language, which read wrong once the app's language was switched.
-const GENERIC_SEASON_NAME = /^\s*(season|series|specials|الموسم|موسم)\s*\d*\s*$/i;
-function seasonLabel(season: Season, lang: Lang): string {
-  const name = pickText(season.titleAr, season.titleEn, lang)?.trim();
-  if (name && !GENERIC_SEASON_NAME.test(name) && !/^\d+$/.test(name)) return name;
-  if (season.number === 0) return lang === "ar" ? "حلقات خاصة" : "Specials";
-  return `${lang === "ar" ? "موسم" : "Season"} ${season.number}`;
-}
-
 function seasonCountLabel(n: number, lang: Lang): string {
   if (lang !== "ar") return `${n} ${n === 1 ? "Season" : "Seasons"}`;
   if (n === 1) return "موسم واحد";
@@ -1070,10 +1060,6 @@ function SeasonStepper({
   hasTVPreferredFocus?: boolean;
 }) {
   const [activated, setActivated] = useState(false);
-  const grow = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    Animated.spring(grow, { toValue: activated ? 1.15 : 1, useNativeDriver: true, speed: 20, bounciness: 6 }).start();
-  }, [activated, grow]);
   const stateRef = useRef({ seasons, active, onChange });
   stateRef.current = { seasons, active, onChange };
   useEffect(() => {
@@ -1099,17 +1085,6 @@ function SeasonStepper({
       KeyEventBridge?.setDpadNavActive(false);
     };
   }, [activated]);
-  const label = active ? seasonLabel(active, lang) : "";
-  const labelParts = /^(.*\s)(\d+)$/.exec(label);
-  const arrowColor = activated ? "#fff" : colors.textMuted;
-  // Beside the season number: Arabic "موسم 2" shows its number on the left, English "Season 2" on
-  // the right.
-  const arrows = (
-    <View style={styles.seasonStepperArrows}>
-      <ChevronUp size={s(12)} color={arrowColor} strokeWidth={2.5} />
-      <ChevronDown size={s(12)} color={arrowColor} strokeWidth={2.5} />
-    </View>
-  );
   return (
     <Focusable
       ref={buttonRef}
@@ -1121,43 +1096,7 @@ function SeasonStepper({
       scaleTo={1}
       hasTVPreferredFocus={hasTVPreferredFocus}
     >
-      {(focused: boolean) => (
-        <Animated.View
-          style={[
-            styles.detailBtn,
-            styles.seasonStepper,
-            styles.seasonStepperGap,
-            styles.detailBtnOutline,
-            focused && styles.detailBtnFocusedOutline,
-            focused && focusShadow,
-            { transform: [{ scale: grow }] },
-          ]}
-        >
-          {/* Word and number as separate pieces with a clear gap, the number bigger. Arabic reads
-              "موسم 2" right to left, so its number (and the arrows beside it) sit on the left. */}
-          {labelParts ? (
-            lang === "ar" ? (
-              <>
-                {arrows}
-                <Text style={styles.seasonNumber}>{labelParts[2]}</Text>
-                <Text style={styles.detailBtnText}>{labelParts[1].trim()}</Text>
-              </>
-            ) : (
-              <>
-                <Text style={styles.detailBtnText}>{labelParts[1].trim()}</Text>
-                <Text style={styles.seasonNumber}>{labelParts[2]}</Text>
-                {arrows}
-              </>
-            )
-          ) : (
-            <>
-              {lang === "ar" && arrows}
-              <Text style={styles.detailBtnText}>{label}</Text>
-              {lang !== "ar" && arrows}
-            </>
-          )}
-        </Animated.View>
-      )}
+      {(focused: boolean) => <SeasonButtonFace season={active} lang={lang} focused={focused} active={activated} />}
     </Focusable>
   );
 }
@@ -1328,14 +1267,6 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
   },
   detailBtnIconOnly: { paddingHorizontal: s(16) },
-  seasonStepperArrows: { alignItems: "center", marginVertical: -s(4) },
-  // A clear gap between the season button and Watch later beside it (it also grows when active).
-  // Its line box trimmed to the digits themselves: the bigger number's default line height made
-  // this button taller than the Watch-later one beside it.
-  seasonNumber: { color: "#fff", fontSize: fs(19), lineHeight: fs(17), fontFamily: font.black, includeFontPadding: false, marginVertical: -s(2) },
-  // A little wider than the other buttons, and a clear gap between the word and the number.
-  seasonStepper: { gap: s(12) },
-  seasonStepperGap: { marginEnd: s(4) },
   detailBtnFilled: { backgroundColor: "#fff" },
   detailBtnOutline: { backgroundColor: "rgba(24,24,27,0.6)", borderColor: "rgba(255,255,255,0.2)" },
   detailBtnFocusedFilled: { borderColor: "rgba(255,255,255,0.5)" },
