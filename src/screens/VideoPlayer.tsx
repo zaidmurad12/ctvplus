@@ -5,6 +5,7 @@ import LinearGradient from "react-native-linear-gradient";
 import Video, { BufferingStrategyType, OnLoadData, OnProgressData, VideoRef, ViewType } from "react-native-video";
 import { Play, Pause, ShieldAlert, Subtitles, Settings, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Check, SkipForward } from "lucide-react-native";
 import EpisodeRow, { type EpisodeRowZone } from "../components/EpisodeRow";
+import PlayerPauseInfo from "../components/PlayerPauseInfo";
 import type { Movie, Season, Episode, StreamServer } from "../api";
 import { posterUrl, youtubeVideoId, youtubeEmbedUrl } from "../api";
 import { qualityRank, qualityLabel, canDecode4K } from "../quality";
@@ -866,7 +867,7 @@ export default function VideoPlayerScreen({
       // instant real content finally showed - reported as "make the bar show while loading, to
       // hide YouTube's marks." And while explicitly paused (ytPausedRef, YouTube-sourced only) -
       // per explicit request, pausing shouldn't eventually hide the only way back to resuming.
-      if (endedRef.current || pendingEpisodeSelectRef.current || ytBufferingRef.current || loadingRef.current || (youtubeIdRef.current && ytPausedRef.current)) {
+      if (pausedRef.current || endedRef.current || pendingEpisodeSelectRef.current || ytBufferingRef.current || loadingRef.current || (youtubeIdRef.current && ytPausedRef.current)) {
         armHideTimer();
         return;
       }
@@ -1513,14 +1514,8 @@ export default function VideoPlayerScreen({
   const currentTime = progress?.currentTime ?? 0;
   const barsHidden = !controlsVisible;
 
-  // Series only - which episode this is. Movie-level facts (age rating, year, quality,
-  // rating) live in their own row on the opposite side of the header instead, so they apply
-  // whether or not there's an episode name to show alongside them.
-  const metaText = episode
-    ? lang === "ar"
-      ? `${season ? `الموسم ${season.number} • ` : ""}الحلقة ${episode.number}`
-      : `${season ? `Season ${season.number} • ` : ""}Episode ${episode.number}`
-    : null;
+  const showPauseInfo =
+    !!(youtubeId ? ytPaused : paused) && episodeRowSeasonNumber === null && !subtitlePanelOpen && !qualityPanelOpen && !exiting;
 
   // !unavailable matters: this branch used to run unconditionally whenever the URL merely
   // *looked like* a YouTube link, regardless of whether playback ever actually succeeded - the
@@ -1696,11 +1691,6 @@ export default function VideoPlayerScreen({
               ) : (
                 <Text style={styles.title} numberOfLines={1}>{title}</Text>
               )}
-              {!!metaText && (
-                <Text style={styles.metaText} numberOfLines={1}>
-                  {metaText}
-                </Text>
-              )}
             </View>
           </View>
         </View>
@@ -1755,7 +1745,8 @@ export default function VideoPlayerScreen({
             throttled value, which would otherwise let a cue show up to a second late. Same visual
             style as native playback - see CueOverlay's render below for the identical block
             this mirrors. */}
-        {!!ytCueText && (
+        {showPauseInfo && <PlayerPauseInfo movie={movie} season={season} episode={episode} lang={lang} bottomOffset={bottomBarHeight} />}
+        {!!ytCueText && !showPauseInfo && (
           <View style={styles.subtitleWrap} pointerEvents="none">
             <SubtitleLines text={ytCueText} settings={subtitleSettings} />
           </View>
@@ -2028,7 +2019,7 @@ export default function VideoPlayerScreen({
         </View>
       )}
 
-      <CueOverlay store={cueStore} settings={subtitleSettings} />
+      {!showPauseInfo && <CueOverlay store={cueStore} settings={subtitleSettings} />}
 
       {showAgeRating && !!movie.ageRating && (
         <View style={styles.ageRatingWrap} pointerEvents="none">
@@ -2106,11 +2097,6 @@ export default function VideoPlayerScreen({
             ) : (
               <Text style={styles.title} numberOfLines={1}>{title}</Text>
             )}
-            {!!metaText && (
-              <Text style={styles.metaText} numberOfLines={1}>
-                {metaText}
-              </Text>
-            )}
           </View>
         </View>
       </View>
@@ -2143,6 +2129,8 @@ export default function VideoPlayerScreen({
           />
         </Animated.View>
       )}
+
+      {showPauseInfo && <PlayerPauseInfo movie={movie} season={season} episode={episode} lang={lang} bottomOffset={bottomBarHeight} />}
 
       <Animated.View
         style={[
@@ -3175,7 +3163,6 @@ const styles = StyleSheet.create({
   playerLogo: { marginBottom: s(4) },
   // Stands in for a missing title logo (s(50) tall) - enlarged from fs(18), then 26, then 30, per request.
   title: { color: "#fff", fontSize: fs(32), fontFamily: font.extraBold },
-  metaText: { color: "#d4d4d8", fontSize: fs(13), fontFamily: font.semiBold, textAlign: "right" },
   // More items land in this one line now (age rating, year, country, language, genres,
   // quality, rating) - wraps rather than overflowing the screen edge or squeezing the title
   // on a narrower device, and stays right-aligned on every wrapped line to match headerRight.
