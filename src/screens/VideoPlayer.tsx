@@ -895,6 +895,7 @@ export default function VideoPlayerScreen({
     () => (movie.seasons ?? []).find((sn) => sn.number === episodeRowSeasonNumber) ?? null,
     [movie.seasons, episodeRowSeasonNumber]
   );
+  const episodeRowSeasonIndex = (movie.seasons ?? []).findIndex((sn) => sn.number === episodeRowSeasonNumber);
   const handleEpisodeRowWatched = React.useCallback(
     (seasonNumber: number, episodeNumber: number) => isEpisodeWatched?.(seasonNumber, episodeNumber) ?? false,
     [isEpisodeWatched]
@@ -996,7 +997,6 @@ export default function VideoPlayerScreen({
       if (next) {
         pendingEpisodeSelectRef.current = next.episode.id;
         wake();
-        ToastAndroid.show(lang === "ar" ? `الحلقة التالية: ${next.episode.number}` : `Next episode: ${next.episode.number}`, ToastAndroid.SHORT);
         onSelectEpisodeRef.current?.(next.episode, next.season);
         return;
       }
@@ -1014,7 +1014,6 @@ export default function VideoPlayerScreen({
   );
   const goToNextEpisode = () => {
     if (!nextEpisode || pendingEpisodeSelectRef.current) return;
-    ToastAndroid.show(lang === "ar" ? `الحلقة التالية: ${nextEpisode.episode.number}` : `Next episode: ${nextEpisode.episode.number}`, ToastAndroid.SHORT);
     selectEpisodeFromRowRef.current(nextEpisode.episode, nextEpisode.season);
   };
   const goToNextEpisodeRef = useRef(goToNextEpisode);
@@ -2227,7 +2226,8 @@ export default function VideoPlayerScreen({
           poster={movie.poster}
           activeIndex={episodeRowIndex}
           focusZone={episodeRowZone}
-          canSwitchSeason={(movie.seasons?.length ?? 0) > 1}
+          hasPreviousSeason={episodeRowSeasonIndex > 0}
+          hasNextSeason={episodeRowSeasonIndex < (movie.seasons?.length ?? 0) - 1}
           hidden={barsHidden || exiting}
           currentEpisodeId={episode?.id}
           resolvingEpisodeId={exiting ? null : resolvingEpisodeId ?? pendingEpisodeId}

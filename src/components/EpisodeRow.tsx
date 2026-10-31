@@ -22,8 +22,9 @@ interface Props {
   // Where the D-pad is inside the row: on the cards, on the season button, or moving between
   // seasons with up/down after pressing it (see VideoPlayer's onNavKey).
   focusZone: EpisodeRowZone;
-  // One season has nothing to switch to, so its label stays a plain label.
-  canSwitchSeason: boolean;
+  // Which way there is a season to move to. With neither, the button stays a plain label.
+  hasPreviousSeason: boolean;
+  hasNextSeason: boolean;
   // Fades with the rest of the player's bars (see barsHidden) while open, and unmounts outright
   // on close (select/back) - see VideoPlayerScreen's own closeEpisodeRow.
   hidden: boolean;
@@ -145,7 +146,8 @@ function EpisodeRow({
   poster,
   activeIndex,
   focusZone,
-  canSwitchSeason,
+  hasPreviousSeason,
+  hasNextSeason,
   hidden,
   currentEpisodeId,
   resolvingEpisodeId,
@@ -207,6 +209,8 @@ function EpisodeRow({
   const step = s(CARD_WIDTH) + s(CARD_GAP);
   const windowStart = Math.max(0, activeIndex - WINDOW_BEFORE);
   const windowEnd = Math.min(count, activeIndex + WINDOW_AFTER + 1);
+  const picking = focusZone === "seasonPicking";
+  const seasonButtonLit = focusZone !== "cards" && (hasPreviousSeason || hasNextSeason);
 
   return (
     <View
@@ -214,19 +218,19 @@ function EpisodeRow({
       pointerEvents={hidden ? "none" : "box-none"}
       onLayout={(e) => onHeightChange?.(e.nativeEvent.layout.height)}
     >
-      <View
-        style={[
-          styles.seasonButton,
-          canSwitchSeason && focusZone !== "cards" && styles.seasonButtonFocused,
-          focusZone === "seasonPicking" && styles.seasonButtonPicking,
-        ]}
-        pointerEvents="none"
-      >
-        {focusZone === "seasonPicking" && <ChevronUp size={s(16)} color="#000" strokeWidth={2.5} />}
-        <Text style={[styles.seasonButtonText, canSwitchSeason && focusZone !== "cards" && styles.seasonButtonTextFocused]}>
-          {lang === "ar" ? `الموسم ${season.number}` : `Season ${season.number}`}
-        </Text>
-        {focusZone === "seasonPicking" && <ChevronDown size={s(16)} color="#000" strokeWidth={2.5} />}
+      <View style={styles.seasonPicker} pointerEvents="none">
+        {/* Arrow slots keep their space while empty, so the row doesn't jump when picking starts. */}
+        <View style={styles.seasonArrow}>
+          {picking && hasPreviousSeason && <ChevronUp size={s(22)} color="#fff" strokeWidth={3} />}
+        </View>
+        <View style={[styles.seasonButton, seasonButtonLit && styles.seasonButtonFocused, picking && styles.seasonButtonPicking]}>
+          <Text style={[styles.seasonButtonText, seasonButtonLit && styles.seasonButtonTextFocused]}>
+            {lang === "ar" ? `الموسم ${season.number}` : `Season ${season.number}`}
+          </Text>
+        </View>
+        <View style={styles.seasonArrow}>
+          {picking && hasNextSeason && <ChevronDown size={s(22)} color="#fff" strokeWidth={3} />}
+        </View>
       </View>
       <Animated.View style={{ transform: [{ translateY: slideAnim }], opacity: fadeAnim }}>
         <ScrollView
@@ -269,21 +273,22 @@ const thumbHeight = ((s(CARD_WIDTH) - 2 * (s(CARD_PADDING) + CARD_BORDER)) * 9) 
 const styles = StyleSheet.create({
   wrap: { position: "absolute", left: 0, right: 0, bottom: s(38), paddingBottom: s(28), paddingTop: s(28) },
   hiddenWrap: { opacity: 0 },
+  seasonPicker: { alignSelf: "flex-start", alignItems: "center", marginLeft: s(LIST_PADDING), marginBottom: s(4) },
+  seasonArrow: { height: s(26), alignItems: "center", justifyContent: "center" },
   seasonButton: {
-    flexDirection: "row",
+    minWidth: s(150),
+    height: s(44),
+    paddingHorizontal: s(22),
+    borderRadius: s(22),
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.35)",
+    backgroundColor: "rgba(20,20,24,0.72)",
     alignItems: "center",
-    alignSelf: "flex-start",
-    gap: s(6),
-    marginLeft: s(LIST_PADDING),
-    marginBottom: s(14),
-    paddingHorizontal: s(16),
-    paddingVertical: s(7),
-    borderRadius: s(20),
-    backgroundColor: "rgba(255,255,255,0.12)",
+    justifyContent: "center",
   },
-  seasonButtonFocused: { backgroundColor: "#fff" },
-  seasonButtonPicking: { transform: [{ scale: 1.08 }] },
-  seasonButtonText: { color: "#fff", fontSize: fs(14), fontFamily: font.bold },
+  seasonButtonFocused: { backgroundColor: "#fff", borderColor: "#fff" },
+  seasonButtonPicking: { transform: [{ scale: 1.1 }] },
+  seasonButtonText: { color: "#fff", fontSize: fs(16), fontFamily: font.bold, includeFontPadding: false },
   seasonButtonTextFocused: { color: "#000" },
   list: { paddingHorizontal: s(LIST_PADDING) },
   track: { height: thumbHeight + 2 * (s(CARD_PADDING) + CARD_BORDER) },
