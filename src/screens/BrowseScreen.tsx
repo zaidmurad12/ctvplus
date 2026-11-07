@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { ChevronUp, ChevronDown } from "lucide-react-native";
 import type { Movie } from "../api";
-import { fetchMoviesPage } from "../api";
+import { fetchMoviesPage, savedMoviesPage } from "../api";
 import MovieCard from "../components/MovieCard";
 import { GRID_START, NUM_COLUMNS, CARD_WIDTH_FILL } from "../gridLayout";
 import Focusable from "../components/Focusable";
@@ -302,10 +302,28 @@ export default function BrowseScreen({ title, type, lang = "ar", emptyLabel, onS
       const isFirstFetch = pageRef.current === 0;
       const limit = isFirstFetch ? FIRST_PAGE_LIMIT : PAGE_LIMIT;
       const page = isFirstFetch ? 1 : pageRef.current + 1;
+      // The first page as last received is shown at once while the server (which sleeps when idle)
+      // answers; the real page then replaces it.
+      let showingSaved = false;
+      if (isFirstFetch) {
+        const saved = await savedMoviesPage(type, limit, SORT_KEY_TO_BACKEND[sortBy], language ?? undefined, genre ?? undefined, onlyAvailable);
+        if (saved && epoch === fetchEpochRef.current) {
+          setItems(saved.items);
+          setLoading(false);
+          showingSaved = true;
+        }
+      }
       const data = await fetchMoviesPage(type, page, limit, SORT_KEY_TO_BACKEND[sortBy], language ?? undefined, genre ?? undefined, onlyAvailable);
       // A newer filter/sort/type change reset everything for a different request while this one
       // was still in flight - this response no longer belongs to what's on screen, discard it.
       if (epoch !== fetchEpochRef.current) return;
+      if (showingSaved) {
+        const seen = new Set<string>();
+        setItems(data.items.filter((m) => !seen.has(m.id) && seen.add(m.id)));
+        pageRef.current = FIRST_PAGE_LIMIT / PAGE_LIMIT;
+        hasMoreRef.current = data.hasMore;
+        return;
+      }
       // Skips anything an earlier page already delivered - offset paging over a sort with ties
       // (same release date/rating) could hand the same title back on a later page, reported as
       // "lots of duplicated titles." The backend now breaks ties by id too; this keeps the grid

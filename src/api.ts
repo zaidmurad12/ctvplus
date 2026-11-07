@@ -30,12 +30,21 @@ interface ApiEnvelope<T> {
   error?: { code: string; message: string };
 }
 
+// The free server sleeps when nobody uses it and takes a while to wake. Called the moment the app
+// starts (index.js), before anything else loads, so the server and its database are already
+// waking while the app itself is still starting. Its answer is not needed.
+export function wakeServer(): void {
+  fetch(`${NEW_API_BASE}/health`).catch(() => {});
+}
+
 async function apiGet<T>(path: string): Promise<ApiEnvelope<T>> {
   const res = await fetch(`${NEW_API_BASE}${path}`);
   const body = (await res.json()) as ApiEnvelope<T>;
   if (!res.ok || !body.success) throw new Error(body.error?.message || `API error ${res.status}`);
   return body;
 }
+
+const apiGetFromServer = apiGet;
 
 // --- New-backend DTO shapes (see D:\CTV-Platform\apps\backend\src\catalog\dto.ts) ------------
 
@@ -1551,8 +1560,27 @@ function sectionsToCategories(sections: HomeSectionDto[], builtIn: Record<string
 
 // The new backend has no single "home" aggregate endpoint yet - this assembles the same shape
 // (hero + a few rails) from plain sorted movie/show lists instead.
-export async function fetchMovies(): Promise<MoviesResponse> {
-  await Promise.race([availableReady, new Promise<void>((resolve) => setTimeout(resolve, 3000))]);
+// `source: "cache"` builds Home from the answers saved by the last successful load instead of the
+// server (fails when there are none, or the available-only setting has changed since); the
+// "network" load saves its answers for that.
+export async function fetchMovies(source: "network" | "cache" = "network"): Promise<MoviesResponse> {
+  const received: Record<string, unknown> = {};
+  let apiGet: <T>(path: string) => Promise<ApiEnvelope<T>>;
+  if (source === "cache") {
+    const cache = await loadJson<Record<string, unknown> | null>(storageKeys.homeCache, null);
+    if (!cache) throw new Error("no saved home");
+    apiGet = async <T>(path: string) => {
+      if (!cache[path]) throw new Error(`not saved: ${path}`);
+      return cache[path] as ApiEnvelope<T>;
+    };
+  } else {
+    await Promise.race([availableReady, new Promise<void>((resolve) => setTimeout(resolve, 3000))]);
+    apiGet = async <T>(path: string) => {
+      const body = await apiGetFromServer<T>(path);
+      received[path] = body;
+      return body;
+    };
+  }
   const [newestMoviesRes, newestShowsRes, popular, topRated, shows, featured, homeSections, bannerMovies, bannerShows] = await Promise.all([
     // "newest" sorts by when the title was added to the catalog, not its actual release date -
     // this rail is labeled "الأحدث" (newest releases) to the viewer, so it needs releaseDate
@@ -1617,6 +1645,7 @@ export async function fetchMovies(): Promise<MoviesResponse> {
     { id: "top-rated", titleAr: "الأعلى تقييمًا", titleEn: "Top Rated", items: builtIn.TOP_RATED, loadAll: builtInLoaders.TOP_RATED },
     { id: "series", titleAr: "المسلسلات", titleEn: "TV Shows", items: builtIn.SERIES, loadAll: builtInLoaders.SERIES },
   ];
+  if (source === "network") saveJson(storageKeys.homeCache, received);
   return {
     hero: heroMovies[0],
     heroMovies,
@@ -1650,6 +1679,45 @@ export async function fetchMoviesPage(
   language?: string,
   genre?: string,
   availableOnly = false
+): Promise<MoviesPage> {
+  const result = await fetchMoviesPageFromServer(type, page, limit, sort, language, genre, availableOnly);
+  // Only the first page of an unfiltered list is kept - what the Movies/Series screens open on.
+  if (page === 1 && !language && !genre) {
+    const key = browseCacheKey(type, limit, sort, availableOnly);
+    loadJson<Record<string, MoviesPage>>(storageKeys.browseCache, {}).then((saved) =>
+      saveJson(storageKeys.browseCache, { ...saved, [key]: result })
+    );
+  }
+  return result;
+}
+
+function browseCacheKey(type: string, limit: number, sort: string, availableOnly: boolean): string {
+  return `${type}|${limit}|${sort}|${availableOnly ? 1 : 0}`;
+}
+
+// The first page as last received (see fetchMoviesPage), shown while the server answers; null when
+// there is none or a filter is set.
+export async function savedMoviesPage(
+  type: "movie" | "series",
+  limit: number,
+  sort: "newest" | "releaseDate" | "rating" | "popularity",
+  language: string | undefined,
+  genre: string | undefined,
+  availableOnly: boolean
+): Promise<MoviesPage | null> {
+  if (language || genre) return null;
+  const saved = await loadJson<Record<string, MoviesPage>>(storageKeys.browseCache, {});
+  return saved[browseCacheKey(type, limit, sort, availableOnly)] ?? null;
+}
+
+async function fetchMoviesPageFromServer(
+  type: "movie" | "series",
+  page: number,
+  limit: number,
+  sort: "newest" | "releaseDate" | "rating" | "popularity",
+  language: string | undefined,
+  genre: string | undefined,
+  availableOnly: boolean
 ): Promise<MoviesPage> {
   const languageParam = language ? `&language=${encodeURIComponent(language)}` : "";
   const genreParam = (genre ? `&genre=${encodeURIComponent(genre)}` : "") + (availableOnly ? "&available=true" : "");

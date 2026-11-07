@@ -84,6 +84,12 @@ const MAX_WATCHED_EPISODES = 2000;
 // actually paints.
 const MIN_RESOLVE_MS = 200;
 
+// Which titles Home shows, in order - a saved Home that matches the server's is kept as it is, so
+// nothing on screen is rebuilt (or loses focus) for no visible change.
+function catalogSignature(d: MoviesResponse): string {
+  return [d.heroMovies.map((m) => m.id).join(","), ...d.categories.map((c) => c.id + ":" + (c.items ?? []).map((m) => m.id).join(","))].join("|");
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>("splash");
   const [section, setSection] = useState<Section>("home");
@@ -326,6 +332,7 @@ export default function App() {
   const [dataReady, setDataReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
+    let gotServerData = false;
     const ceiling = setTimeout(() => {
       if (!cancelled) setDataReady(true);
     }, 12000);
@@ -334,11 +341,22 @@ export default function App() {
       .then((v) => {
         setAvailableOnly(!!v);
         fetchedWithAvailable.current = !!v;
+        // Home as saved by the last launch, drawn at once; the server's answer (it sleeps when idle
+        // and can take a while to wake) replaces it only if the titles actually changed.
+        fetchMovies("cache")
+          .then((saved) => {
+            if (cancelled || gotServerData) return;
+            setData(saved);
+            setDataReady(true);
+            clearTimeout(ceiling);
+          })
+          .catch(() => {});
         return fetchMovies();
       })
       .then((d) => {
+        gotServerData = true;
         if (cancelled) return;
-        setData(d);
+        setData((prev) => (prev && catalogSignature(prev) === catalogSignature(d) ? prev : d));
         setDataReady(true);
         clearTimeout(ceiling);
       })

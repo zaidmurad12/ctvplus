@@ -7,6 +7,7 @@ import { AppRegistry, I18nManager } from 'react-native';
 import App from './App';
 import { ErrorBoundary } from './src/ErrorBoundary';
 import { installCrashReporting } from './src/crashReporter';
+import { wakeServer } from './src/api';
 import { name as appName } from './app.json';
 
 // The whole app is laid out LTR-structurally on purpose (see the layout-direction comments
@@ -24,6 +25,8 @@ I18nManager.allowRTL(false);
 I18nManager.forceRTL(false);
 
 installCrashReporting();
+// Wake the free server (and its database) right away, while the app is still starting.
+wakeServer();
 
 function Root() {
   return (

@@ -28,6 +28,10 @@ const KEYS = {
   latestSyncAt: "cinemana.latestSyncAt",
   // Source entry numbers the server has already handled, so each sync sends only what is new.
   latestSyncedNb: "cinemana.latestSyncedNb",
+  // The server's answers behind Home, and the first page of the Movies/Series lists, as last
+  // received - drawn at once on the next launch while the free server wakes up (see api.ts).
+  homeCache: "cinemana.homeCache",
+  browseCache: "cinemana.browseCache",
 } as const;
 
 async function loadJson<T>(key: string, fallback: T): Promise<T> {
