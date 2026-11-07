@@ -26,6 +26,8 @@ const KEYS = {
   savedMatches: "cinemana.savedMatches",
   // When this TV last sent the sources' newly added titles to the server (see sourceSync.ts).
   latestSyncAt: "cinemana.latestSyncAt",
+  // Source entry numbers the server has already handled, so each sync sends only what is new.
+  latestSyncedNb: "cinemana.latestSyncedNb",
 } as const;
 
 async function loadJson<T>(key: string, fallback: T): Promise<T> {

@@ -126,7 +126,9 @@ export default function App() {
   // Home's banner and rows with unavailable titles taken out when the setting is on (a row left
   // empty is dropped; its "View more" list is filtered by CategoryScreen itself).
   const homeHero = useMemo(() => {
-    const hero = data ? (data.heroMovies.length > 0 ? data.heroMovies : [data.hero]) : [];
+    const hero = data
+      ? (data.heroMovies.length > 0 ? data.heroMovies : (data.hero ? [data.hero] : []))
+      : [];
     if (!onlyAvailable) return hero;
     // The banner needs a few titles to rotate through: topped up from the rows' own (already
     // available) titles when filtering leaves fewer than 5 - one or none left it standing still.
@@ -359,9 +361,9 @@ export default function App() {
   // until someone force-killed and reopened the app. Refetching on a periodic timer covers a
   // long-lived foreground session; refetching when the app comes back to the foreground covers
   // the more common case of the viewer backgrounding it (home button) and returning later.
-  // The sources' newly added titles, sent to the server once a day from this TV (see sourceSync.ts) -
+  // The sources' newly added titles, sent to the server from this TV every 3 hours (see sourceSync.ts) -
   // two minutes after launch so it never competes with startup, then rechecked hourly (it only
-  // actually runs once a day).
+  // actually runs every 3 hours).
   useEffect(() => {
     const run = () => syncLatestFromSources().catch(() => {});
     const first = setTimeout(run, 120_000);

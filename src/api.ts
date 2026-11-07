@@ -20,7 +20,7 @@ import { searchCee, makeCeeId, fetchCeeEpisodes, fetchCeeInfo, fetchCeeVideos, t
 import { qualityRank, qualityLabel } from "./quality";
 import { loadJson, saveJson, storageKeys } from "./storage";
 
-const NEW_API_BASE = "https://ctv-platform-backend-afcem6ospa-ww.a.run.app/api/v1";
+const NEW_API_BASE = "https://ctv-platform-api.onrender.com/api/v1";
 export const API_BASE = NEW_API_BASE;
 
 interface ApiEnvelope<T> {
@@ -1489,7 +1489,7 @@ interface HomeSectionDto {
 }
 
 export interface MoviesResponse {
-  hero: Movie;
+  hero?: Movie;
   heroMovies: Movie[];
   categories: Category[];
 }
