@@ -32,6 +32,8 @@ const KEYS = {
   // received - drawn at once on the next launch while the free server wakes up (see api.ts).
   homeCache: "cinemana.homeCache",
   browseCache: "cinemana.browseCache",
+  // Series id -> "season:episode" of the episode last played, so its details page opens on it.
+  lastEpisodes: "cinemana.lastEpisodes",
 } as const;
 
 async function loadJson<T>(key: string, fallback: T): Promise<T> {

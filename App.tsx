@@ -70,6 +70,7 @@ interface HistoryEntry {
 }
 
 const MAX_HISTORY = 50;
+const MAX_LAST_EPISODES = 300;
 // watchedEpisodes had no cap at all - it only ever grew, one entry per unique episode watched for
 // the lifetime of the install, persisted to AsyncStorage in full on every change (see the
 // saveJson effect below) and re-read into memory in full on every cold boot. For a long-time
@@ -204,6 +205,19 @@ export default function App() {
   // episode looked identical to one fully finished. This is what MovieDetailsScreen's episode
   // cards check to show a watched checkmark on the specific episode(s) actually played.
   const [watchedEpisodes, setWatchedEpisodes] = useState<string[]>([]);
+  // Series id -> "season:episode" last played (oldest first, capped) - the details page puts the
+  // episode row on it (see MovieDetailsScreen's lastEpisode).
+  const [lastEpisodes, setLastEpisodes] = useState<Record<string, string>>({});
+  const lastEpisodesLoaded = useRef(false);
+  useEffect(() => {
+    loadJson<Record<string, string>>(storageKeys.lastEpisodes, {}).then((saved) => {
+      lastEpisodesLoaded.current = true;
+      setLastEpisodes((prev) => ({ ...saved, ...prev }));
+    });
+  }, []);
+  useEffect(() => {
+    if (lastEpisodesLoaded.current) saveJson(storageKeys.lastEpisodes, lastEpisodes);
+  }, [lastEpisodes]);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const homeRef = useRef<HomeScreenHandle>(null);
   const prevSectionRef = useRef<Section>(section);
@@ -695,6 +709,16 @@ export default function App() {
       setWatchedEpisodes((prev) =>
         prev.includes(key) ? prev : [...prev, key].slice(-MAX_WATCHED_EPISODES),
       );
+      const seriesId = source.movie.id;
+      const position = `${source.season.number}:${source.episode.number}`;
+      setLastEpisodes((prev) => {
+        const next = { ...prev };
+        delete next[seriesId];
+        next[seriesId] = position;
+        const ids = Object.keys(next);
+        for (const id of ids.slice(0, Math.max(0, ids.length - MAX_LAST_EPISODES))) delete next[id];
+        return next;
+      });
     }
     // Warms RN's own image cache for handleExitPlayer's own exitBackdrop, with as long as the
     // whole watch itself to actually finish before it's needed - reported as "still shows a black
@@ -1025,6 +1049,7 @@ export default function App() {
                   onSelectMovie={setSelectedMovie}
                   onBack={closeMovieDetails}
                   isEpisodeWatched={isEpisodeWatched}
+                  lastEpisode={lastEpisodes[selectedMovie.id]}
                   // Also while an artist page is open on top of it - its trailer used to keep
                   // playing (with sound) underneath the artist page.
                   playerActive={!!playing || !!selectedPerson}

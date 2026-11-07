@@ -33,12 +33,15 @@ interface Props {
   onSelectMovie: (movie: Movie) => void;
   onBack: () => void;
   isEpisodeWatched: (movieId: string, seasonNumber: number, episodeNumber: number) => boolean;
+  // "season:episode" of the episode last played for this series: the page opens on that season,
+  // and down from the buttons lands on that episode.
+  lastEpisode?: string;
   // True while the video player is on screen - this screen stays mounted underneath it (see
   // App.tsx's render tree); its own animations pause meanwhile.
   playerActive: boolean;
 }
 
-export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, lang, onToggleFavorite, onPlay, onSelectPerson, onSelectMovie, onBack, isEpisodeWatched, playerActive: covered }: Props) {
+export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, lang, onToggleFavorite, onPlay, onSelectPerson, onSelectMovie, onBack, isEpisodeWatched, lastEpisode, playerActive: covered }: Props) {
   // Home/Browse/Search only ever hand this screen the new backend's *summary* shape (no
   // titleAr/genres/cast/director yet - only its dedicated detail endpoint has those, see
   // fetchMovieDetail in api.ts). Shadowing the prop with local state of the same name means
@@ -175,12 +178,18 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   const openPart = (part: Movie) => onSelectMovie(part);
 
   const isSeries = movie.type === "series" && (movie.seasons?.length ?? 0) > 0;
-  const [activeSeason, setActiveSeason] = useState<Season | undefined>(movie.seasons?.[0]);
+  const [lastSeasonNumber, lastEpisodeNumber] = (lastEpisode ?? "").split(":").map(Number);
+  const initialSeason = (seasons?: Season[]) => seasons?.find((sn) => sn.number === lastSeasonNumber) ?? seasons?.[0];
+  const [activeSeason, setActiveSeason] = useState<Season | undefined>(initialSeason(movie.seasons));
   // The initial `movie` prop is only ever a summary (no seasons yet) - seasons only arrive once
   // fetchShowDetail resolves above, well after this state's own initializer already ran once.
   useEffect(() => {
-    if (!activeSeason && movie.seasons?.length) setActiveSeason(movie.seasons[0]);
+    if (!activeSeason && movie.seasons?.length) setActiveSeason(initialSeason(movie.seasons));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movie.seasons, activeSeason]);
+  // The last-played episode's card, once mounted - where down from the buttons above goes.
+  const [resumeEpisodeHandle, setResumeEpisodeHandle] = useState<number | null>(null);
+  const resumeEpisodeNumber = activeSeason && activeSeason.number === lastSeasonNumber ? lastEpisodeNumber : undefined;
   const [resolvingEpisodeId, setResolvingEpisodeId] = useState<string | null>(null);
   const [allParts, setParts] = useState<Movie[]>([]);
   const parts = useAvailableOnly(allParts);
@@ -685,6 +694,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
             {isSeries && (
               <SeasonStepper
                 buttonRef={setSeasonButtonNode}
+                nextFocusDown={resumeEpisodeHandle ?? undefined}
                 seasons={movie.seasons!}
                 active={activeSeason}
                 onChange={setActiveSeason}
@@ -700,6 +710,7 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
               active={isFavorite}
               iconOnly
               onPress={onToggleFavorite}
+              nextFocusDown={isSeries ? resumeEpisodeHandle ?? undefined : undefined}
               // Whenever Watch itself doesn't render (a series, or now also a movie with no
               // playback source anywhere - see hasPlaybackSource above), this is the only button
               // in the row, so it has to be the one that picks up initial TV focus instead -
@@ -803,6 +814,8 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
                   isEpisodeWatched={isEpisodeWatched}
                   infoOpacity={episodeInfoOpacity}
                   seasonButtonHandle={seasonButtonHandle}
+                  resumeEpisodeNumber={resumeEpisodeNumber}
+                  onResumeHandle={setResumeEpisodeHandle}
                 />
               )
             )}
@@ -836,6 +849,8 @@ const EpisodeRail = React.memo(function EpisodeRail({
   isEpisodeWatched,
   infoOpacity,
   seasonButtonHandle,
+  resumeEpisodeNumber,
+  onResumeHandle,
 }: {
   season: Season;
   movieId: string;
@@ -852,22 +867,42 @@ const EpisodeRail = React.memo(function EpisodeRail({
   infoOpacity: Animated.Value;
   // The season button's native handle - up from any episode card goes there.
   seasonButtonHandle: number | null;
+  // The episode last played, when it is in this season: its card is reported up (see onResumeHandle)
+  // so down from the buttons above lands on it.
+  resumeEpisodeNumber?: number;
+  onResumeHandle: (handle: number | null) => void;
 }) {
-  const [focusedEpisodeId, setFocusedEpisodeId] = useState<string | null>(season.episodes[0]?.id ?? null);
+  const resumeIndex = resumeEpisodeNumber == null ? -1 : season.episodes.findIndex((e) => e.number === resumeEpisodeNumber);
+  const startEpisodeId = (resumeIndex >= 0 ? season.episodes[resumeIndex] : season.episodes[0])?.id ?? null;
+  const [focusedEpisodeId, setFocusedEpisodeId] = useState<string | null>(startEpisodeId);
   useEffect(() => {
-    setFocusedEpisodeId(season.episodes[0]?.id ?? null);
+    setFocusedEpisodeId(startEpisodeId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [season.id, season.episodes]);
+  useEffect(() => {
+    if (resumeIndex < 0) onResumeHandle(null);
+  }, [resumeIndex, onResumeHandle]);
+  const resumeSetRef = useCallback(
+    (node: View | null) => {
+      clamp.setRef(resumeIndex)(node);
+      onResumeHandle(node ? findNodeHandle(node) ?? null : null);
+    },
+    [clamp, resumeIndex, onResumeHandle]
+  );
   const count = season.episodes.length;
   const countRef = useRef(count);
   countRef.current = count;
   // A season can have hundreds of episodes (long Turkish series) - mounting every card at once is what
   // made switching seasons slow. Only the first batch mounts; more are added as focus nears the end of
   // what is mounted (well ahead of it, so the next card always already exists for the focus search).
-  const [renderCount, setRenderCount] = useState(Math.min(count, EPISODE_BATCH));
+  // At least up to the last-played episode (and a few past it), so its card exists to land on.
+  const firstBatch = Math.min(count, Math.max(EPISODE_BATCH, resumeIndex + EPISODE_LOOKAHEAD + 1));
+  const [renderCount, setRenderCount] = useState(firstBatch);
   const renderCountRef = useRef(renderCount);
   renderCountRef.current = renderCount;
   useEffect(() => {
-    setRenderCount(Math.min(season.episodes.length, EPISODE_BATCH));
+    setRenderCount(firstBatch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [season.id, season.episodes.length]);
 
   const handleFocus = useCallback(
@@ -905,7 +940,7 @@ const EpisodeRail = React.memo(function EpisodeRail({
             resolving={resolvingEpisodeId === ep.id}
             backdrop={backdrop}
             poster={poster}
-            setRef={clamp.setRef(i)}
+            setRef={i === resumeIndex ? resumeSetRef : clamp.setRef(i)}
             nextFocusLeft={i === 0 ? clamp.clampLeft() : undefined}
             nextFocusRight={i === count - 1 ? clamp.clampRight() : undefined}
             nextFocusUp={seasonButtonHandle ?? undefined}
@@ -1050,7 +1085,9 @@ function SeasonStepper({
   lang,
   onFocusChange,
   hasTVPreferredFocus,
+  nextFocusDown,
 }: {
+  nextFocusDown?: number;
   buttonRef?: (node: View | null) => void;
   seasons: Season[];
   active?: Season;
@@ -1088,6 +1125,7 @@ function SeasonStepper({
   return (
     <Focusable
       ref={buttonRef}
+      nextFocusDown={nextFocusDown}
       onPress={() => setActivated((on) => !on)}
       onFocusChange={(f) => {
         if (!f) setActivated(false);
@@ -1111,7 +1149,9 @@ function DetailButton({
   hasTVPreferredFocus,
   onFocusChange,
   iconOnly,
+  nextFocusDown,
 }: {
+  nextFocusDown?: number;
   label: string;
   Icon: typeof Play;
   // Just the icon, no text (Watch later, per request) - a compact square-ish pill.
@@ -1128,6 +1168,7 @@ function DetailButton({
       onPress={onPress}
       onFocusChange={onFocusChange}
       hasTVPreferredFocus={hasTVPreferredFocus}
+      nextFocusDown={nextFocusDown}
       scaleTo={1.05}
     >
       {(focused: boolean) => (
