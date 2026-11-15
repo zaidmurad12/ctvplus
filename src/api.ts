@@ -56,6 +56,8 @@ interface ArtworkDto {
 
 interface MovieSummaryDto {
   id: string;
+  // When the admin moved this title with "move to newest" - the newest row counts it as released then.
+  promotedAt?: string | null;
   title: string;
   titleAr?: string | null;
   hasSourceMatch?: boolean | null;
@@ -152,6 +154,8 @@ interface SearchResultItemDto {
 
 interface ShowSummaryDto {
   id: string;
+  // When the admin moved this title with "move to newest" - the newest row counts it as released then.
+  promotedAt?: string | null;
   title: string;
   titleAr?: string | null;
   hasSourceMatch?: boolean | null;
@@ -1461,6 +1465,15 @@ function withAvailable(path: string): string {
   return path + (path.includes("?") ? "&" : "?") + "available=true";
 }
 
+// Where a title sits in the newest row: its release date, or the moment the admin moved it with
+// "move to newest" when that is later - so a moved title leads the row and steps back as newer
+// titles come out (the server orders its lists the same way).
+function newestDate(dto: { releaseDate?: string | null; promotedAt?: string | null }): string | null | undefined {
+  if (!dto.promotedAt) return dto.releaseDate;
+  if (!dto.releaseDate) return dto.promotedAt;
+  return new Date(dto.promotedAt).getTime() > new Date(dto.releaseDate).getTime() ? dto.promotedAt : dto.releaseDate;
+}
+
 // The full list behind each built-in row, for the "View more" screen - the same ordering the row itself uses,
 // just deeper (the home strip only fetches 20).
 const builtInLoaders: Record<string, () => Promise<Movie[]>> = {
@@ -1471,8 +1484,8 @@ const builtInLoaders: Record<string, () => Promise<Movie[]>> = {
     ]);
     const now = Date.now();
     return [
-      ...movies.data.map((m) => ({ date: m.releaseDate, item: mapSummary(m) })),
-      ...shows.data.map((sh) => ({ date: sh.releaseDate, item: mapShowSummary(sh) })),
+      ...movies.data.map((m) => ({ date: newestDate(m), item: mapSummary(m) })),
+      ...shows.data.map((sh) => ({ date: newestDate(sh), item: mapShowSummary(sh) })),
     ]
       .filter((x) => !x.date || new Date(x.date).getTime() <= now)
       .sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime())
@@ -1609,8 +1622,8 @@ export async function fetchMovies(source: "network" | "cache" = "network"): Prom
   // than concatenating the two already-sorted-individually lists end to end, which would always
   // put every movie ahead of every show (or vice versa) instead of true release-date order.
   const newestCombined = [
-    ...newestMoviesRes.data.map((m) => ({ date: m.releaseDate, item: mapSummary(m) })),
-    ...newestShowsRes.data.map((s) => ({ date: s.releaseDate, item: mapShowSummary(s) })),
+    ...newestMoviesRes.data.map((m) => ({ date: newestDate(m), item: mapSummary(m) })),
+    ...newestShowsRes.data.map((s) => ({ date: newestDate(s), item: mapShowSummary(s) })),
   ]
     .sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime())
     .slice(0, 20)
