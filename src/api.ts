@@ -1634,8 +1634,9 @@ export async function fetchMovies(source: "network" | "cache" = "network"): Prom
   // the mapper matching its own shape (a show summary has no `runtime`, a movie has no
   // `numberOfSeasons`, etc.) rather than assuming they're all movies.
   const newestAvailable = [
-    ...bannerMovies.data.map((m) => ({ date: m.releaseDate, item: mapSummary(m) })),
-    ...bannerShows.data.map((sh) => ({ date: sh.releaseDate, item: mapShowSummary(sh) })),
+    // A title the admin moved with "move to newest" leads the banner too (see newestDate).
+    ...bannerMovies.data.map((m) => ({ date: newestDate(m), item: mapSummary(m) })),
+    ...bannerShows.data.map((sh) => ({ date: newestDate(sh), item: mapShowSummary(sh) })),
   ]
     .sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime())
     .slice(0, 10)
