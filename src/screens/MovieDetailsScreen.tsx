@@ -181,12 +181,16 @@ export default function MovieDetailsScreen({ movie: initialMovie, isFavorite, la
   const [lastSeasonNumber, lastEpisodeNumber] = (lastEpisode ?? "").split(":").map(Number);
   const initialSeason = (seasons?: Season[]) => seasons?.find((sn) => sn.number === lastSeasonNumber) ?? seasons?.[0];
   const [activeSeason, setActiveSeason] = useState<Season | undefined>(initialSeason(movie.seasons));
-  // The initial `movie` prop is only ever a summary (no seasons yet) - seasons only arrive once
-  // fetchShowDetail resolves above, well after this state's own initializer already ran once.
+  // The initial `movie` prop is usually a summary (no seasons yet) - seasons only arrive once
+  // fetchShowDetail resolves above. It can also be an old copy: a series saved in the Library keeps
+  // the seasons it had the day it was saved, and the selected season used to stay that old object
+  // after the fresh seasons arrived, so its episode row never showed the newer episodes. Whenever
+  // the seasons change, the selected one is swapped for its fresh copy.
   useEffect(() => {
-    if (!activeSeason && movie.seasons?.length) setActiveSeason(initialSeason(movie.seasons));
+    if (!movie.seasons?.length) return;
+    setActiveSeason((current) => (current && movie.seasons!.find((sn) => sn.number === current.number)) ?? initialSeason(movie.seasons));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [movie.seasons, activeSeason]);
+  }, [movie.seasons]);
   // The last-played episode's card, once mounted - where down from the buttons above goes.
   const [resumeEpisodeHandle, setResumeEpisodeHandle] = useState<number | null>(null);
   const resumeEpisodeNumber = activeSeason && activeSeason.number === lastSeasonNumber ? lastEpisodeNumber : undefined;
